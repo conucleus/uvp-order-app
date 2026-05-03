@@ -1,0 +1,277 @@
+.evidence-capture-list,
+.evidence-preflight,
+.evidence-selected-list,
+.evidence-fingerprint-list,
+.evidence-blockers,
+.evidence-proof-handoff {
+  display: grid;
+  gap: 10px;
+}
+
+.evidence-capture-list {
+  margin-top: 12px;
+}
+
+.evidence-card {
+  display: grid;
+  gap: 12px;
+  padding: 12px;
+  border: 1px solid var(--app-line);
+  border-radius: var(--app-radius);
+  background: var(--app-surface-soft);
+}
+
+.evidence-card-header,
+.evidence-actions,
+.evidence-status-line,
+.evidence-preflight-actions,
+.evidence-proof-handoff-title,
+.evidence-file-control {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.evidence-card-header {
+  justify-content: space-between;
+}
+
+.evidence-card-header h3,
+.evidence-preflight h3,
+.evidence-proof-handoff h3 {
+  margin: 0;
+  font-size: 16px;
+}
+
+.evidence-badge {
+  display: inline-flex;
+  align-items: center;
+  min-height: 26px;
+  padding: 0 8px;
+  border-radius: 999px;
+  border: 1px solid var(--app-line);
+  color: var(--app-muted);
+  background: var(--app-surface);
+  font-size: 12px;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+.evidence-badge-required {
+  color: var(--app-blue);
+  background: var(--app-blue-soft);
+  border-color: #b8c9ff;
+}
+
+.evidence-badge-demo {
+  color: var(--app-amber);
+  background: var(--app-amber-soft);
+  border-color: #f1c76a;
+}
+
+.evidence-status-uploaded {
+  color: var(--app-green);
+}
+
+.evidence-status-uploading {
+  color: var(--app-blue);
+}
+
+.evidence-status-failed,
+.evidence-status-quarantined {
+  color: var(--app-red);
+}
+
+.evidence-card p,
+.evidence-preflight p,
+.evidence-proof-handoff p {
+  margin: 0;
+  color: var(--app-muted);
+  line-height: 1.55;
+}
+
+.evidence-file-control {
+  flex-wrap: wrap;
+}
+
+.evidence-file-control input[type="file"] {
+  width: min(100%, 420px);
+  padding: 8px;
+  border: 1px solid var(--app-line);
+  border-radius: var(--app-radius);
+  background: var(--app-surface);
+}
+
+.evidence-actions {
+  flex-wrap: wrap;
+}
+
+.evidence-action-button,
+.evidence-primary-button,
+.evidence-secondary-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 38px;
+  padding: 0 12px;
+  border-radius: var(--app-radius);
+  border: 1px solid var(--app-line);
+  font-weight: 800;
+}
+
+.evidence-primary-button {
+  color: #ffffff;
+  background: var(--app-blue);
+  border-color: var(--app-blue);
+}
+
+.evidence-secondary-button,
+.evidence-action-button {
+  color: var(--app-ink);
+  background: var(--app-surface);
+}
+
+.evidence-primary-button:disabled,
+.evidence-secondary-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.evidence-action-button svg,
+.evidence-primary-button svg,
+.evidence-secondary-button svg,
+.evidence-status-line svg,
+.evidence-proof-handoff-title svg {
+  width: 16px;
+  height: 16px;
+  flex: 0 0 auto;
+}
+
+.evidence-fingerprint-list {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  margin: 0;
+}
+
+.evidence-fingerprint-list div,
+.evidence-selected-list li,
+.evidence-preflight-row,
+.evidence-signature-box,
+.evidence-blockers li {
+  padding: 10px;
+  border: 1px solid var(--app-line);
+  border-radius: var(--app-radius);
+  background: var(--app-surface);
+}
+
+.evidence-fingerprint-list dt,
+.evidence-preflight-row span,
+.evidence-signature-box label {
+  color: var(--app-muted);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.evidence-fingerprint-list dd,
+.evidence-preflight-row strong {
+  margin: 4px 0 0;
+  overflow-wrap: anywhere;
+}
+
+.evidence-fingerprint-list code,
+.evidence-selected-list code,
+.evidence-preflight-row code,
+.evidence-signature-box textarea {
+  font-family: var(--font-mono);
+  font-size: 12px;
+}
+
+.evidence-preflight {
+  margin-top: 12px;
+  padding: 12px;
+  border: 1px solid var(--app-line);
+  border-radius: var(--app-radius);
+  background: var(--app-surface-soft);
+}
+
+.evidence-preflight-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.evidence-preflight-row {
+  display: grid;
+  gap: 4px;
+}
+
+.evidence-wallet-input,
+.evidence-signature-box textarea {
+  width: 100%;
+  min-height: 38px;
+  padding: 8px 10px;
+  border: 1px solid var(--app-line);
+  border-radius: var(--app-radius);
+  background: var(--app-surface);
+  color: var(--app-ink);
+}
+
+.evidence-selected-list,
+.evidence-blockers {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.evidence-selected-list li {
+  display: grid;
+  gap: 4px;
+}
+
+.evidence-blockers li {
+  color: var(--app-red);
+  background: var(--app-red-soft);
+}
+
+.evidence-preflight-actions {
+  flex-wrap: wrap;
+}
+
+.evidence-signature-box {
+  display: grid;
+  gap: 8px;
+}
+
+.evidence-signature-box textarea {
+  min-height: 86px;
+  resize: vertical;
+}
+
+.evidence-proof-handoff {
+  margin-top: 12px;
+  padding: 12px;
+  border: 1px solid #a8dec9;
+  border-radius: var(--app-radius);
+  background: var(--app-green-soft);
+}
+
+.evidence-proof-handoff-title {
+  color: var(--app-green);
+  font-weight: 900;
+}
+
+.evidence-proof-handoff-pending {
+  border-color: #f1c76a;
+  background: var(--app-amber-soft);
+}
+
+.evidence-proof-handoff-pending .evidence-proof-handoff-title {
+  color: var(--app-amber);
+}
+
+@media (max-width: 760px) {
+  .evidence-fingerprint-list,
+  .evidence-preflight-grid {
+    grid-template-columns: 1fr;
+  }
+}

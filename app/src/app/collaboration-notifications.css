@@ -1,0 +1,359 @@
+.notification-center {
+  display: grid;
+  gap: 12px;
+  margin-top: 12px;
+  padding: 14px;
+  border: 1px solid var(--app-line);
+  border-radius: var(--app-radius);
+  background: var(--app-surface);
+  box-shadow: var(--app-shadow);
+}
+
+.notification-header,
+.notification-title-line,
+.notification-actions,
+.notification-meta,
+.sla-card-heading,
+.participant-title-line,
+.participant-badges,
+.timeline-title-line {
+  display: flex;
+  align-items: center;
+}
+
+.notification-header {
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.notification-header h2 {
+  margin: 0;
+  font-size: 18px;
+}
+
+.notification-source,
+.mini-badge,
+.notification-title-line span,
+.timeline-title-line span {
+  display: inline-flex;
+  align-items: center;
+  min-height: 24px;
+  padding: 0 8px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+.notification-source {
+  color: var(--app-muted);
+  border: 1px solid var(--app-line);
+  background: var(--app-surface-soft);
+}
+
+.notification-service-warning {
+  margin: 0;
+  padding: 10px;
+  border-radius: var(--app-radius);
+  color: var(--app-amber);
+  background: var(--app-amber-soft);
+}
+
+.notification-empty {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 54px;
+  color: var(--app-muted);
+}
+
+.notification-list {
+  display: grid;
+  gap: 10px;
+}
+
+.notification-card {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid var(--app-line);
+  border-radius: var(--app-radius);
+  background: var(--app-surface-soft);
+}
+
+.notification-card.is-read {
+  opacity: 0.72;
+}
+
+.notification-icon {
+  display: grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  border-radius: var(--app-radius);
+  background: var(--app-blue-soft);
+  color: var(--app-blue);
+}
+
+.notification-icon svg,
+.sla-card-heading svg {
+  width: 18px;
+  height: 18px;
+}
+
+.notification-critical .notification-icon {
+  color: var(--app-red);
+  background: var(--app-red-soft);
+}
+
+.notification-warning .notification-icon {
+  color: var(--app-amber);
+  background: var(--app-amber-soft);
+}
+
+.notification-success .notification-icon {
+  color: var(--app-green);
+  background: var(--app-green-soft);
+}
+
+.notification-copy {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+}
+
+.notification-title-line,
+.timeline-title-line {
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.notification-title-line span {
+  color: var(--app-blue);
+  background: var(--app-blue-soft);
+}
+
+.notification-copy p {
+  margin: 0;
+  color: var(--app-muted);
+  line-height: 1.45;
+}
+
+.notification-meta {
+  gap: 8px;
+  flex-wrap: wrap;
+  color: var(--app-muted);
+  font-size: 12px;
+}
+
+.notification-actions {
+  gap: 8px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.sla-panel {
+  margin-top: 16px;
+}
+
+.sla-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 10px;
+}
+
+.sla-card {
+  display: grid;
+  gap: 12px;
+  padding: 12px;
+  border: 1px solid var(--app-line);
+  border-radius: var(--app-radius);
+  background: var(--app-surface-soft);
+}
+
+.sla-card-heading {
+  gap: 10px;
+}
+
+.sla-card-heading > svg {
+  color: var(--app-blue);
+}
+
+.sla-card-heading div {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.sla-card-heading strong {
+  overflow-wrap: anywhere;
+}
+
+.sla-card-heading span {
+  color: var(--app-muted);
+  font-size: 12px;
+}
+
+.sla-danger {
+  border-color: #f3b6af;
+  background: var(--app-red-soft);
+}
+
+.sla-danger .sla-card-heading > svg {
+  color: var(--app-red);
+}
+
+.sla-warn {
+  border-color: #f1c76a;
+  background: var(--app-amber-soft);
+}
+
+.sla-warn .sla-card-heading > svg {
+  color: var(--app-amber);
+}
+
+.sla-ok {
+  border-color: #a8dec9;
+  background: var(--app-green-soft);
+}
+
+.sla-ok .sla-card-heading > svg {
+  color: var(--app-green);
+}
+
+.sla-facts {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  margin: 0;
+}
+
+.sla-facts div {
+  display: grid;
+  gap: 4px;
+}
+
+.sla-facts dt {
+  color: var(--app-muted);
+  font-size: 12px;
+}
+
+.sla-facts dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.participant-title-line {
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.participant-title-line span {
+  color: var(--app-muted);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.participant-responsibility {
+  display: grid;
+  gap: 3px;
+  padding: 8px;
+  border-radius: var(--app-radius);
+  background: rgba(255, 255, 255, 0.58);
+}
+
+.participant-responsibility small {
+  color: var(--app-muted);
+}
+
+.participant-responsibility b {
+  overflow-wrap: anywhere;
+}
+
+.participant-badges {
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.mini-action {
+  color: var(--app-blue);
+  background: var(--app-blue-soft);
+}
+
+.mini-ok {
+  color: var(--app-green);
+  background: var(--app-green-soft);
+}
+
+.mini-danger {
+  color: var(--app-red);
+  background: var(--app-red-soft);
+}
+
+.mini-neutral {
+  color: var(--app-muted);
+  background: var(--app-surface);
+}
+
+.timeline-list {
+  display: grid;
+  gap: 8px;
+}
+
+.timeline-row {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 10px;
+  padding: 10px;
+  border: 1px solid var(--app-line);
+  border-radius: var(--app-radius);
+  background: var(--app-surface-soft);
+}
+
+.timeline-marker {
+  width: 10px;
+  height: 10px;
+  margin-top: 5px;
+  border-radius: 999px;
+  background: var(--app-blue);
+}
+
+.timeline-ok .timeline-marker {
+  background: var(--app-green);
+}
+
+.timeline-warn .timeline-marker {
+  background: var(--app-amber);
+}
+
+.timeline-danger .timeline-marker {
+  background: var(--app-red);
+}
+
+.timeline-title-line span {
+  color: var(--app-muted);
+  background: var(--app-surface);
+}
+
+.timeline-row small {
+  display: block;
+  margin-top: 4px;
+  color: var(--app-muted);
+  overflow-wrap: anywhere;
+}
+
+@media (max-width: 640px) {
+  .sla-facts {
+    grid-template-columns: 1fr;
+  }
+
+  .notification-card {
+    grid-template-columns: auto minmax(0, 1fr);
+  }
+
+  .notification-actions {
+    grid-column: 1 / -1;
+    justify-content: flex-start;
+  }
+}

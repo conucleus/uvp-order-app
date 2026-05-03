@@ -1,0 +1,14 @@
+{
+  "name": "uvp-order-app",
+  "version": "0.1.0",
+  "private": true,
+  "license": "Apache-2.0",
+  "packageManager": "pnpm@9.15.0",
+  "scripts": {
+    "dev": "pnpm --filter @uvp-eth/order-app dev",
+    "check": "pnpm --filter @uvp-eth/order-app run typecheck",
+    "typecheck": "pnpm --filter @uvp-eth/order-app run typecheck",
+    "test": "pnpm --filter @uvp-eth/order-app run test",
+    "build": "pnpm --filter @uvp-eth/order-app run build"
+  }
+}
