@@ -5,6 +5,7 @@ import {
 } from "@uvp-eth/executor-kit/participant";
 
 export type { Eip1193Provider, ProductSubmitTypedData };
+export type WalletTarget = "evm" | "solana";
 
 export type GenericTypedData = Readonly<{
   readonly domain: Readonly<Record<string, unknown>>;
@@ -28,6 +29,28 @@ export class InjectedWalletError extends Error {
   ) {
     super(message);
   }
+}
+
+export class UnsupportedWalletTargetError extends Error {
+  override readonly name = "UnsupportedWalletTargetError";
+
+  constructor(readonly target: WalletTarget) {
+    super(`${target} wallet connector is reserved but not implemented`);
+  }
+}
+
+export interface WalletConnector {
+  readonly target: WalletTarget;
+  signProductSubmit(input: {
+    readonly typedData: ProductSubmitTypedData;
+    readonly walletAddress: string;
+    readonly provider?: Eip1193Provider;
+  }): Promise<`0x${string}`>;
+  signTypedData(input: {
+    readonly typedData: GenericTypedData;
+    readonly walletAddress: string;
+    readonly provider?: Eip1193Provider;
+  }): Promise<`0x${string}`>;
 }
 
 export function getInjectedWalletProvider(): Eip1193Provider | undefined {
@@ -88,6 +111,21 @@ export async function signTypedDataWithInjectedWallet(input: {
       "wallet_signature_failed",
       error instanceof Error ? error.message : "钱包签名失败。"
     );
+  }
+}
+
+export const evmInjectedWalletConnector: WalletConnector = {
+  target: "evm",
+  signProductSubmit: signProductSubmitWithInjectedWallet,
+  signTypedData: signTypedDataWithInjectedWallet
+};
+
+export function getWalletConnector(target: WalletTarget = "evm"): WalletConnector {
+  switch (target) {
+    case "evm":
+      return evmInjectedWalletConnector;
+    case "solana":
+      throw new UnsupportedWalletTargetError("solana");
   }
 }
 
