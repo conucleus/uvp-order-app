@@ -31,7 +31,7 @@ export async function loadOrderAppNotifications(
   }
 
   try {
-    const response = await fetcher(joinUrl(data.source.baseUrl, participantPath("/product/me/notifications", session)), {
+    const response = await fetcher(joinUrl(data.source.baseUrl, participantPath("/product/me/activity-feed", session)), {
       method: "GET",
       headers: {
         "content-type": "application/json"
@@ -71,7 +71,7 @@ export async function markOrderAppNotificationRead(
 
   try {
     const response = await fetcher(
-      joinUrl(data.source.baseUrl, `/product/me/notifications/${encodeURIComponent(notification.notificationId)}/read`),
+      joinUrl(data.source.baseUrl, `/product/me/activity-feed/${encodeURIComponent(notification.notificationId)}/read`),
       {
         method: "POST",
         headers: {
@@ -323,6 +323,7 @@ function notificationKind(value: unknown): OrderAppNotificationKind {
     case "task_ready":
     case "task_near_deadline":
     case "task_overdue":
+    case "signal_submitted":
     case "submission_confirmed":
     case "submission_failed":
     case "task_revoked":
@@ -355,6 +356,8 @@ function labelForKind(kind: OrderAppNotificationKind): string {
       return "即将到期";
     case "task_overdue":
       return "任务已逾期";
+    case "signal_submitted":
+      return "链上信号已提交";
     case "submission_confirmed":
       return "提交已确认";
     case "submission_failed":

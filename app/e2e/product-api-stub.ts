@@ -494,13 +494,13 @@ export async function installProductApiStub(page: Page, options: StubOptions = {
         expiresAt: "2026-04-29T13:00:00.000Z",
         typedData: {
           domain: {
-            name: "UVPStateMachine",
-            version: "0.2",
+            name: "UVPStagePatchModule",
+            version: "0.1",
             chainId: 31337,
             verifyingContract: "0x8888888888888888888888888888888888888888"
           },
           types: {
-            UVPStateMachineStageExecutorPatch: [
+            UVPStagePatchModuleStageExecutorPatch: [
               { name: "orderId", type: "bytes32" },
               { name: "targetStageId", type: "string" },
               { name: "mode", type: "string" },
@@ -510,7 +510,7 @@ export async function installProductApiStub(page: Page, options: StubOptions = {
               { name: "approvalSignalId", type: "bytes32" }
             ]
           },
-          primaryType: "UVPStateMachineStageExecutorPatch",
+          primaryType: "UVPStagePatchModuleStageExecutorPatch",
           message: {
             orderId: task.orderId,
             targetStageId: body.targetStageId,
@@ -609,20 +609,20 @@ export async function installProductApiStub(page: Page, options: StubOptions = {
         expiresAt: "2026-04-29T13:00:00.000Z",
         typedData: {
           domain: {
-            name: "UVPStateMachine",
-            version: "0.2",
+            name: "UVPStagePatchModule",
+            version: "0.1",
             chainId: 31337,
             verifyingContract: "0x8888888888888888888888888888888888888888"
           },
           types: {
-            UVPStateMachineStageResourcePatch: [
+            UVPStagePatchModuleStageResourcePatch: [
               { name: "orderId", type: "bytes32" },
               { name: "targetStageId", type: "string" },
               { name: "resourceKey", type: "string" },
               { name: "selector", type: "address" }
             ]
           },
-          primaryType: "UVPStateMachineStageResourcePatch",
+          primaryType: "UVPStagePatchModuleStageResourcePatch",
           message: {
             orderId: task.orderId,
             targetStageId: body.targetStageId,

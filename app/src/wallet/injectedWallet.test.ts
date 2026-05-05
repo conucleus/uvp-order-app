@@ -3,6 +3,8 @@ import { describe, it } from "node:test";
 import { buildProductSubmitTypedData } from "@uvp-eth/executor-kit/participant";
 import {
   InjectedWalletError,
+  UnsupportedWalletTargetError,
+  getWalletConnector,
   signProductSubmitWithInjectedWallet,
   type Eip1193Provider
 } from "./injectedWallet.js";
@@ -21,6 +23,14 @@ const typedData = buildProductSubmitTypedData({
 });
 
 describe("injected wallet signing", () => {
+  it("exposes an EVM connector and reserves Solana", () => {
+    assert.equal(getWalletConnector().target, "evm");
+    assert.throws(
+      () => getWalletConnector("solana"),
+      (error) => error instanceof UnsupportedWalletTargetError && error.target === "solana"
+    );
+  });
+
   it("requests a typed-data signature from the provided wallet", async () => {
     const signature = `0x${"aa".repeat(65)}` as const;
     const requests: unknown[] = [];

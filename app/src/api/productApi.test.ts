@@ -173,15 +173,15 @@ describe("order app Product API boundary", () => {
           previousExecutor: "0x0000000000000000000000000000000000000003",
           patchHash: "0x2222222222222222222222222222222222222222222222222222222222222222",
           typedData: {
-            domain: { name: "UVPStateMachine", version: "0.2", chainId: 31337 },
+            domain: { name: "UVPStagePatchModule", version: "0.1", chainId: 31337 },
             types: {
-              UVPStateMachineStageExecutorPatch: [
+              UVPStagePatchModuleStageExecutorPatch: [
                 { name: "selector", type: "address" },
                 { name: "mode", type: "string" },
                 { name: "previousExecutor", type: "address" }
               ]
             },
-            primaryType: "UVPStateMachineStageExecutorPatch",
+            primaryType: "UVPStagePatchModuleStageExecutorPatch",
             message: {
               selector: "0x9d8A62f656a8d1615C1294FD71E9cfB3e4855A4F",
               mode: "handoff",
@@ -214,9 +214,9 @@ describe("order app Product API boundary", () => {
           policyHash: "0x4444444444444444444444444444444444444444444444444444444444444444",
           patchHash: "0x5555555555555555555555555555555555555555555555555555555555555555",
           typedData: {
-            domain: { name: "UVPStateMachine", version: "0.2", chainId: 31337 },
-            types: { UVPStateMachineStageResourcePatch: [{ name: "selector", type: "address" }] },
-            primaryType: "UVPStateMachineStageResourcePatch",
+            domain: { name: "UVPStagePatchModule", version: "0.1", chainId: 31337 },
+            types: { UVPStagePatchModuleStageResourcePatch: [{ name: "selector", type: "address" }] },
+            primaryType: "UVPStagePatchModuleStageResourcePatch",
             message: { selector: "0x9d8A62f656a8d1615C1294FD71E9cfB3e4855A4F" }
           }
         });
