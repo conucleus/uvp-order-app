@@ -2,6 +2,7 @@ export type OrderAppNotificationKind =
   | "task_ready"
   | "task_near_deadline"
   | "task_overdue"
+  | "signal_submitted"
   | "submission_confirmed"
   | "submission_failed"
   | "task_revoked"
