@@ -10,8 +10,8 @@ import {
 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import type { ChainProofRowDTO, ProductOrderDTO, ProductTaskDTO } from "@uvp-eth/product-dto";
-import type { CapturedEvidence, TaskSubmissionProof } from "../evidence/types";
-import { proofSummaryRowsForTask, signalContainerForTask } from "../tasks/signalContainer";
+import type { CapturedEvidence, TaskSubmissionProof } from "../task-model";
+import { proofSummaryRowsForTask, signalContainerForTask } from "../task-model";
 import "./proof.css";
 
 interface ProofPanelProps {

@@ -9,6 +9,7 @@ import type {
   StageExecutorActionKind,
   ProductTaskDTO
 } from "@uvp-eth/product-dto";
+import { cleanString } from "./taskUtils";
 
 export type ParticipantAddOnKind = StageExecutorActionKind;
 
@@ -403,8 +404,6 @@ export function resourceRequirementDisplays(task: ProductTaskDTO): readonly Effe
     });
 }
 
-export const effectiveFileResourceDisplays = resourceRequirementDisplays;
-
 export function resourceHandleSummary(value: FileResourceHandleDTO | null | undefined): string {
   if (typeof value === "string") {
     if (isDisallowedProductionReference(value)) {
@@ -541,9 +540,4 @@ function isDisallowedProductionReference(value: string): boolean {
     trimmed.includes("txcloud") ||
     trimmed.includes("plain_text") ||
     trimmed.includes("tencentcloud");
-}
-
-function cleanString(value: unknown): string | undefined {
-  const trimmed = typeof value === "string" ? value.trim() : "";
-  return trimmed.length > 0 ? trimmed : undefined;
 }

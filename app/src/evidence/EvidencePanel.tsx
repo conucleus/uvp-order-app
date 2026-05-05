@@ -15,21 +15,25 @@ import type { ProductOrderDTO, ProductTaskDTO } from "@uvp-eth/product-dto";
 import type {
   EvidenceProofDTO,
   PreparedTaskSubmitDTO,
-  ProductApiClient,
   ProductApiSource,
   ProductSubmissionDTO
 } from "../api/productApi";
+import type { OrderAppActions } from "../actions/orderAppActions";
 import { bytesToBase64, sha256Hex, stableStringify } from "./hashing";
-import type { CapturedEvidence, EvidenceRequirement, TaskSubmissionProof } from "./types";
+import type { CapturedEvidence, EvidenceRequirement, TaskSubmissionProof } from "../task-model";
 import { shortWallet } from "../auth/participant";
-import { resourceRequirementDisplays } from "../tasks/addOnTypes";
-import { signalContainerForTask, supplierTrustBlocker } from "../tasks/signalContainer";
-import { taskPrimaryActionLabel, taskRequiredInputsFromCapability } from "../tasks/taskPresentation";
-import { getInjectedWalletProvider, signProductSubmitWithInjectedWallet } from "../wallet/injectedWallet";
+import {
+  resourceRequirementDisplays,
+  sameAddress,
+  signalContainerForTask,
+  supplierTrustBlocker,
+  taskPrimaryActionLabel,
+  taskRequiredInputsFromCapability
+} from "../task-model";
 import "./evidence.css";
 
 interface EvidencePanelProps {
-  readonly api: ProductApiClient;
+  readonly actions: OrderAppActions;
   readonly source?: ProductApiSource;
   readonly order?: ProductOrderDTO;
   readonly task?: ProductTaskDTO;
@@ -61,7 +65,7 @@ const maxFileSizeBytes = 10 * 1024 * 1024;
 const demoBlockNumber = "18,734,899";
 
 export function EvidencePanel({
-  api,
+  actions,
   source,
   order,
   task,
@@ -87,7 +91,7 @@ export function EvidencePanel({
   const uploadedEvidence = capturedEvidence.filter((item) => item.status === "uploaded");
   const actionLabel = task ? taskPrimaryActionLabel(task, "确认任务完成") : "确认任务完成";
   const authorizedWallet = task?.assigneeWallet ?? task?.participantWallet ?? participantWallet;
-  const hasInjectedWallet = source?.kind === "demo" || Boolean(getInjectedWalletProvider());
+  const hasInjectedWallet = source?.kind === "demo" || actions.hasInjectedWallet();
   const blockers = task
     ? preflightBlockers({
         capturedEvidence,
@@ -155,7 +159,7 @@ export function EvidencePanel({
       const bytes = new Uint8Array(await file.arrayBuffer());
       const nextCapture = source?.kind === "demo"
         ? await demoEvidenceCapture({ bytes, file, requirement, task })
-        : await uploadEvidenceCapture({ api, bytes, file, requirement, task });
+        : await uploadEvidenceCapture({ actions, bytes, file, requirement, task });
       setCaptures((current) => ({ ...current, [requirement.slotId]: nextCapture }));
     } catch (error) {
       setCaptures((current) => ({
@@ -177,7 +181,7 @@ export function EvidencePanel({
     try {
       const prepared = source?.kind === "demo"
         ? await prepareDemoSubmit({ task, evidence: uploadedEvidence, signingWallet })
-        : await prepareApiSubmit({ api, task, evidence: uploadedEvidence, signingWallet });
+        : await prepareApiSubmit({ actions, task, evidence: uploadedEvidence, signingWallet });
       setPrepareState({ status: "prepared", prepared });
     } catch (error) {
       setPrepareState({
@@ -213,16 +217,16 @@ export function EvidencePanel({
       if (!prepared.raw) {
         throw new Error("参与者服务未返回可签名内容。");
       }
-      const signature = await signProductSubmitWithInjectedWallet({
+      const signature = await actions.signProductSubmit({
         typedData: prepared.raw.typedData,
         walletAddress: signingWallet.trim()
       });
-      const submission = await api.submitTask(task.taskId, {
+      const submission = await actions.submitTask(task.taskId, {
         prepareId: prepared.prepareId,
         signature,
         walletAddress: signingWallet.trim()
       });
-      const evidenceWithProof = await refreshEvidenceProofs(api, uploadedEvidence);
+      const evidenceWithProof = await refreshEvidenceProofs(actions, uploadedEvidence);
       setCaptures((current) => mergeProofCaptures(current, evidenceWithProof));
       const proof = submissionProofFromApi({
         submission,
@@ -583,13 +587,13 @@ function failedCapture(requirement: EvidenceRequirement, file: File, error: stri
 }
 
 async function uploadEvidenceCapture(input: {
-  readonly api: ProductApiClient;
+  readonly actions: OrderAppActions;
   readonly bytes: Uint8Array;
   readonly file: File;
   readonly requirement: EvidenceRequirement;
   readonly task: ProductTaskDTO;
 }): Promise<CapturedEvidence> {
-  const response = await input.api.uploadEvidence({
+  const response = await input.actions.uploadEvidence({
     orderId: input.task.orderId,
     taskId: input.task.taskId,
     stageIdentifier: input.task.stageId,
@@ -703,12 +707,12 @@ async function prepareDemoSubmit(input: {
 }
 
 async function prepareApiSubmit(input: {
-  readonly api: ProductApiClient;
+  readonly actions: OrderAppActions;
   readonly task: ProductTaskDTO;
   readonly evidence: readonly CapturedEvidence[];
   readonly signingWallet: string;
 }): Promise<PreparedSubmitView> {
-  const prepared = await input.api.prepareTaskSubmit(input.task.taskId, {
+  const prepared = await input.actions.prepareTaskSubmit(input.task.taskId, {
     evidenceIds: input.evidence.map((item) => item.evidenceId).filter((id): id is string => Boolean(id)),
     walletAddress: input.signingWallet.trim(),
     intent: "confirm_stage"
@@ -790,7 +794,7 @@ function submissionProofFromApi(input: {
 }
 
 async function refreshEvidenceProofs(
-  api: ProductApiClient,
+  actions: OrderAppActions,
   evidence: readonly CapturedEvidence[]
 ): Promise<readonly CapturedEvidence[]> {
   return await Promise.all(evidence.map(async (item) => {
@@ -798,7 +802,7 @@ async function refreshEvidenceProofs(
       return item;
     }
     try {
-      const proof = await api.getEvidenceProof(item.evidenceId);
+      const proof = await actions.getEvidenceProof(item.evidenceId);
       return evidenceFromProof(item, proof);
     } catch {
       return item;
@@ -947,10 +951,6 @@ function formatBytes(size: number | undefined): string {
     return `${(size / 1024).toFixed(1)} KB`;
   }
   return `${(size / (1024 * 1024)).toFixed(1)} MB`;
-}
-
-function sameAddress(left: string, right: string): boolean {
-  return left.trim().toLowerCase() === right.trim().toLowerCase();
 }
 
 function submissionHandoff(proof: TaskSubmissionProof): {

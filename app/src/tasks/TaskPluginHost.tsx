@@ -10,7 +10,7 @@ import {
   UserRound,
   WalletCards
 } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import type {
   ChainProofRowDTO,
   ParticipantAddOnManifestComponentDTO,
@@ -23,15 +23,12 @@ import type { ProductSubmitTypedData } from "@uvp-eth/executor-kit/participant";
 import type {
   PreparedStageExecutorPatchDTO,
   PreparedStageResourcePatchDTO,
-  ProductApiClient,
   ProductApiSource,
   StageExecutorPatchSubmissionDTO,
   StageResourcePatchSubmissionDTO
 } from "../api/productApi";
-import { EvidencePanel } from "../evidence/EvidencePanel";
-import type { TaskSubmissionProof } from "../evidence/types";
-import { ProofPanel } from "../proof/ProofPanel";
-import { getInjectedWalletProvider, signProductSubmitWithInjectedWallet, signTypedDataWithInjectedWallet } from "../wallet/injectedWallet";
+import type { OrderAppActions } from "../actions/orderAppActions";
+import type { TaskSubmissionProof } from "../task-model";
 import {
   addOnManifestForTask,
   executorPatchModeGuidance,
@@ -67,6 +64,7 @@ import {
   supplierTrustBlocker,
   type TaskSignalContainerSummary
 } from "./signalContainer";
+import { cleanString, sameAddress } from "./taskUtils";
 import { taskExecutorDisplay } from "./taskPresentation";
 import { taskDisplay } from "./taskStatus";
 import "./taskRuntime.css";
@@ -100,12 +98,12 @@ export interface SubmitPreparedInput {
 }
 
 export interface TaskPluginHostProps {
-  readonly api: ProductApiClient;
+  readonly actions: OrderAppActions;
   readonly task: ProductTaskDTO;
   readonly order?: ProductOrderDTO;
   readonly participantWallet?: string;
   readonly source?: ProductApiSource;
-  readonly submissionProof?: TaskSubmissionProof;
+  readonly standardEvidencePanel?: ReactNode;
   readonly onPrepareSubmit: (taskId: string, input: PrepareSubmitInput) => Promise<PreparedTaskSubmit>;
   readonly onProofReady: (proof: TaskSubmissionProof) => void;
   readonly onSubmitted?: () => void;
@@ -163,12 +161,12 @@ type ManifestPreparedState =
     };
 
 export function TaskPluginHost({
-  api,
+  actions,
   task,
   order,
   participantWallet,
   source,
-  submissionProof,
+  standardEvidencePanel,
   onPrepareSubmit,
   onProofReady,
   onSubmitted,
@@ -198,10 +196,6 @@ export function TaskPluginHost({
     task,
     walletAddress: participantWallet
   }), [participantWallet, state, task]);
-  const evidenceTask = useMemo(
-    () => source?.kind === "demo" ? { ...task, canSubmit: undefined } : task,
-    [source?.kind, task]
-  );
   const validation = plugin.validate(runtimeState);
   const display = taskDisplay(task);
   const patchTargets = useMemo(() => selectableTargetsForTask(task), [task]);
@@ -258,7 +252,7 @@ export function TaskPluginHost({
     setPhase("submitting");
     setError(undefined);
     try {
-      const signature = await signProductSubmitWithInjectedWallet({
+      const signature = await actions.signProductSubmit({
         typedData: prepared.typedData,
         walletAddress: participantWallet ?? ""
       });
@@ -332,7 +326,7 @@ export function TaskPluginHost({
 
       {addOnManifest ? (
         <ManifestAddOnPanel
-          api={api}
+          actions={actions}
           manifest={addOnManifest}
           order={order}
           participantWallet={participantWallet}
@@ -352,7 +346,7 @@ export function TaskPluginHost({
 
       {usesExecutorPatchFlow ? (
         <ExecutorPatchPanel
-          api={api}
+          actions={actions}
           actionLabel={pluginPresentation.primaryActionLabel}
           order={order}
           participantWallet={participantWallet}
@@ -366,7 +360,7 @@ export function TaskPluginHost({
 
       {usesResourcePatchFlow ? (
         <ResourcePatchPanel
-          api={api}
+          actions={actions}
           actionLabel={pluginPresentation.primaryActionLabel}
           order={order}
           participantWallet={participantWallet}
@@ -378,16 +372,7 @@ export function TaskPluginHost({
         />
       ) : null}
 
-      {!usesPatchFlow && !usesManifestFlow ? (
-        <EvidencePanel
-          api={api}
-          order={order}
-          participantWallet={participantWallet}
-          source={source}
-          task={evidenceTask}
-          onProofReady={onProofReady}
-        />
-      ) : null}
+      {!usesPatchFlow && !usesManifestFlow ? standardEvidencePanel : null}
 
       <section className="workspace-block" aria-labelledby="responsibility-title">
         <div className="section-heading compact">
@@ -466,8 +451,6 @@ export function TaskPluginHost({
           ) : null}
         </section>
       ) : null}
-
-      <ProofPanel order={order} task={task} submissionProof={submissionProof} />
     </>
   );
 }
@@ -511,7 +494,7 @@ function TaskContainerSummary({ summary }: { readonly summary: TaskSignalContain
 }
 
 function ManifestAddOnPanel({
-  api,
+  actions,
   manifest,
   order,
   participantWallet,
@@ -522,7 +505,7 @@ function ManifestAddOnPanel({
   onSubmitted,
   onSubmitPrepared
 }: {
-  readonly api: ProductApiClient;
+  readonly actions: OrderAppActions;
   readonly manifest: ParticipantAddOnManifestDTO;
   readonly order?: ProductOrderDTO;
   readonly participantWallet?: string;
@@ -581,7 +564,7 @@ function ManifestAddOnPanel({
       manifest,
       source,
       state,
-      hasInjectedWallet: Boolean(getInjectedWalletProvider())
+      hasInjectedWallet: actions.hasInjectedWallet()
     });
     if (blockers.length > 0) {
       setError(blockers.join("；"));
@@ -596,10 +579,10 @@ function ManifestAddOnPanel({
         const nextPrepared = await onPrepareSubmit(task.taskId, prepare.input);
         setPrepared({ actionKind: "submit_signal", actionId, actionLabel: action.label, input: prepare.input, prepared: nextPrepared });
       } else if (prepare.actionKind === "stage_executor_patch") {
-        const nextPrepared = await api.prepareStageExecutorPatch(task.taskId, prepare.input);
+        const nextPrepared = await actions.prepareStageExecutorPatch(task.taskId, prepare.input);
         setPrepared({ actionKind: "stage_executor_patch", actionId, actionLabel: action.label, input: prepare.input, prepared: nextPrepared });
       } else {
-        const nextPrepared = await api.prepareStageResourcePatch(task.taskId, prepare.input);
+        const nextPrepared = await actions.prepareStageResourcePatch(task.taskId, prepare.input);
         setPrepared({ actionKind: "stage_resource_patch", actionId, actionLabel: action.label, input: prepare.input, prepared: nextPrepared });
       }
       setPhase("prepared");
@@ -617,7 +600,7 @@ function ManifestAddOnPanel({
     setError(undefined);
     try {
       if (prepared.actionKind === "submit_signal") {
-        const signature = await signProductSubmitWithInjectedWallet({
+        const signature = await actions.signProductSubmit({
           typedData: prepared.prepared.typedData,
           walletAddress: prepared.input.walletAddress
         });
@@ -635,11 +618,11 @@ function ManifestAddOnPanel({
           result
         }));
       } else if (prepared.actionKind === "stage_executor_patch") {
-        const signature = await signTypedDataWithInjectedWallet({
+        const signature = await actions.signTypedData({
           typedData: prepared.prepared.typedData,
           walletAddress: prepared.input.selectorWallet
         });
-        const result = await api.submitStageExecutorPatch(task.taskId, {
+        const result = await actions.submitStageExecutorPatch(task.taskId, {
           prepareId: prepared.prepared.prepareId,
           selectorWallet: prepared.input.selectorWallet,
           typedData: prepared.prepared.typedData,
@@ -657,11 +640,11 @@ function ManifestAddOnPanel({
           result
         }));
       } else {
-        const signature = await signTypedDataWithInjectedWallet({
+        const signature = await actions.signTypedData({
           typedData: prepared.prepared.typedData,
           walletAddress: prepared.input.selectorWallet
         });
-        const result = await api.submitStageResourcePatch(task.taskId, {
+        const result = await actions.submitStageResourcePatch(task.taskId, {
           prepareId: prepared.prepared.prepareId,
           selectorWallet: prepared.input.selectorWallet,
           typedData: prepared.prepared.typedData,
@@ -730,7 +713,7 @@ function ManifestAddOnPanel({
           manifest,
           source,
           state,
-          hasInjectedWallet: Boolean(getInjectedWalletProvider())
+          hasInjectedWallet: actions.hasInjectedWallet()
         });
         const isPrepared = prepared?.actionId === action.actionId;
         return (
@@ -1015,7 +998,7 @@ function manifestInputPlaceholder(kind: ParticipantAddOnManifestComponentDTO["co
 }
 
 function ExecutorPatchPanel({
-  api,
+  actions,
   actionLabel,
   order,
   participantWallet,
@@ -1025,7 +1008,7 @@ function ExecutorPatchPanel({
   onProofReady,
   onSubmitted
 }: {
-  readonly api: ProductApiClient;
+  readonly actions: OrderAppActions;
   readonly actionLabel: string;
   readonly order?: ProductOrderDTO;
   readonly participantWallet?: string;
@@ -1051,7 +1034,7 @@ function ExecutorPatchPanel({
     source,
     task,
     participantWallet,
-    hasInjectedWallet: Boolean(getInjectedWalletProvider())
+    hasInjectedWallet: actions.hasInjectedWallet()
   });
   const canPrepare = blockers.length === 0 && phase !== "preparing" && phase !== "submitting" && !prepared;
 
@@ -1114,7 +1097,7 @@ function ExecutorPatchPanel({
     setPhase("preparing");
     setError(undefined);
     try {
-      const nextPrepared = await api.prepareStageExecutorPatch(task.taskId, {
+      const nextPrepared = await actions.prepareStageExecutorPatch(task.taskId, {
         selectorWallet: draft.selectorWallet.trim(),
         targetStageId: draft.targetStageId,
         mode: draft.mode,
@@ -1142,11 +1125,11 @@ function ExecutorPatchPanel({
     setPhase("submitting");
     setError(undefined);
     try {
-      const signature = await signTypedDataWithInjectedWallet({
+      const signature = await actions.signTypedData({
         typedData: prepared.typedData,
         walletAddress: draft.selectorWallet.trim()
       });
-      const result = await api.submitStageExecutorPatch(task.taskId, {
+      const result = await actions.submitStageExecutorPatch(task.taskId, {
         prepareId: prepared.prepareId,
         selectorWallet: draft.selectorWallet.trim(),
         typedData: prepared.typedData,
@@ -1439,7 +1422,7 @@ function ExecutorPatchPanel({
 }
 
 function ResourcePatchPanel({
-  api,
+  actions,
   actionLabel,
   order,
   participantWallet,
@@ -1449,7 +1432,7 @@ function ResourcePatchPanel({
   onProofReady,
   onSubmitted
 }: {
-  readonly api: ProductApiClient;
+  readonly actions: OrderAppActions;
   readonly actionLabel: string;
   readonly order?: ProductOrderDTO;
   readonly participantWallet?: string;
@@ -1472,7 +1455,7 @@ function ResourcePatchPanel({
     source,
     task,
     participantWallet,
-    hasInjectedWallet: Boolean(getInjectedWalletProvider())
+    hasInjectedWallet: actions.hasInjectedWallet()
   });
   const canPrepare = blockers.length === 0 && phase !== "preparing" && phase !== "submitting" && !prepared;
 
@@ -1526,7 +1509,7 @@ function ResourcePatchPanel({
     setPhase("preparing");
     setError(undefined);
     try {
-      const nextPrepared = await api.prepareStageResourcePatch(task.taskId, {
+      const nextPrepared = await actions.prepareStageResourcePatch(task.taskId, {
         selectorWallet: draft.selectorWallet.trim(),
         targetStageId: draft.targetStageId,
         resourceKey: draft.resourceKey.trim(),
@@ -1549,11 +1532,11 @@ function ResourcePatchPanel({
     setPhase("submitting");
     setError(undefined);
     try {
-      const signature = await signTypedDataWithInjectedWallet({
+      const signature = await actions.signTypedData({
         typedData: prepared.typedData,
         walletAddress: draft.selectorWallet.trim()
       });
-      const result = await api.submitStageResourcePatch(task.taskId, {
+      const result = await actions.submitStageResourcePatch(task.taskId, {
         prepareId: prepared.prepareId,
         selectorWallet: draft.selectorWallet.trim(),
         typedData: prepared.typedData,
@@ -2093,13 +2076,4 @@ function isContentAddressedReference(value: string): boolean {
 
 function normalizeVisibility(value: unknown): "public" | "protected" | "private" | undefined {
   return value === "public" || value === "protected" || value === "private" ? value : undefined;
-}
-
-function cleanString(value: unknown): string | undefined {
-  const trimmed = typeof value === "string" ? value.trim() : "";
-  return trimmed.length > 0 ? trimmed : undefined;
-}
-
-function sameAddress(left: string, right: string): boolean {
-  return left.trim().toLowerCase() === right.trim().toLowerCase();
 }

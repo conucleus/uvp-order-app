@@ -1,6 +1,7 @@
 import { AlertCircle, CheckCircle2, ShieldCheck, Wallet, XCircle } from "lucide-react";
 import { useEffect, useState } from "react";
-import type { ProductApiClient, ProductInvitePreviewDTO } from "../api/productApi";
+import type { ProductInvitePreviewDTO } from "../api/productApi";
+import type { OrderAppActions } from "../actions/orderAppActions";
 import type { ParticipantSession } from "../auth/participant";
 import { shortWallet } from "../auth/participant";
 
@@ -13,13 +14,13 @@ type InviteLoadState =
 
 interface InviteOnboardingProps {
   readonly inviteId: string;
-  readonly api: ProductApiClient;
+  readonly actions: OrderAppActions;
   readonly session: ParticipantSession;
   readonly onAccepted: () => void;
   readonly onDismiss: () => void;
 }
 
-export function InviteOnboarding({ inviteId, api, session, onAccepted, onDismiss }: InviteOnboardingProps) {
+export function InviteOnboarding({ inviteId, actions, session, onAccepted, onDismiss }: InviteOnboardingProps) {
   const [walletAddress, setWalletAddress] = useState(session.walletAddress ?? "");
   const [displayName, setDisplayName] = useState("");
   const [contact, setContact] = useState("");
@@ -28,7 +29,7 @@ export function InviteOnboarding({ inviteId, api, session, onAccepted, onDismiss
   useEffect(() => {
     let cancelled = false;
     setLoadState({ status: "loading" });
-    void api.previewInvite(inviteId, walletAddress ? { walletAddress } : {})
+    void actions.previewInvite(inviteId, walletAddress ? { walletAddress } : {})
       .then((invite) => {
         if (cancelled) {
           return;
@@ -48,7 +49,7 @@ export function InviteOnboarding({ inviteId, api, session, onAccepted, onDismiss
     return () => {
       cancelled = true;
     };
-  }, [api, inviteId, walletAddress]);
+  }, [actions, inviteId, walletAddress]);
 
   const invite = loadState.status === "ready" || loadState.status === "accepted" ? loadState.invite : undefined;
   const canAccept = Boolean(invite?.acceptance?.canAccept && walletAddress.trim() && displayName.trim() && contact.trim());
@@ -58,7 +59,7 @@ export function InviteOnboarding({ inviteId, api, session, onAccepted, onDismiss
       return;
     }
     setLoadState({ status: "loading" });
-    void api.acceptInvite(inviteId, {
+    void actions.acceptInvite(inviteId, {
       displayName: displayName.trim(),
       walletAddress: walletAddress.trim(),
       contact: contact.trim()
@@ -77,7 +78,7 @@ export function InviteOnboarding({ inviteId, api, session, onAccepted, onDismiss
 
   function handleReject() {
     setLoadState({ status: "loading" });
-    void api.rejectInvite(inviteId, {
+    void actions.rejectInvite(inviteId, {
       displayName: displayName.trim() || undefined,
       contact: contact.trim() || undefined
     })
