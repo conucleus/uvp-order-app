@@ -12,17 +12,14 @@ import { useEffect, useMemo, useState } from "react";
 import type { ReactElement } from "react";
 import type { ProductOrderDTO, ProductTaskDTO } from "@uvp-eth/product-dto";
 import { createProductApiClient, type ProductApiSource, type ProductHomeData } from "./api/productApi";
+import { createOrderAppActions } from "./actions/orderAppActions";
 import { participantQueryFromSession, readParticipantSession, shortWallet } from "./auth/participant";
-import type { TaskSubmissionProof } from "./evidence/types";
 import { NotificationCenter, useOrderAppNotifications } from "./notifications/NotificationCenter";
 import type { OrderAppNotificationDTO } from "./notifications/types";
-import { OrderRoom } from "./order-room/OrderRoom";
 import { InviteOnboarding } from "./onboarding/InviteOnboarding";
-import { ProofPanel } from "./proof/ProofPanel";
 import { readOrderAppRoute, routeHash, type OrderAppRoute, type OrderAppSection } from "./routes/appRoutes";
-import { TaskInbox } from "./tasks/TaskInbox";
-import { TaskPluginHost, type PreparedTaskSubmit, type ProductSubmission, type SubmitPreparedInput } from "./tasks/TaskPluginHost";
-import type { PrepareSubmitInput } from "./tasks/pluginRuntime";
+import type { TaskSubmissionProof } from "./task-model";
+import { TaskWorkspace } from "./workspace/TaskWorkspace";
 import "./app/collaboration-notifications.css";
 
 type LoadState =
@@ -30,10 +27,10 @@ type LoadState =
   | { readonly status: "ready"; readonly data: ProductHomeData }
   | { readonly status: "error"; readonly message: string };
 
-const api = createProductApiClient();
-const session = readParticipantSession();
-
 export default function App() {
+  const api = useMemo(() => createProductApiClient(), []);
+  const actions = useMemo(() => createOrderAppActions(api), [api]);
+  const [session] = useState(() => readParticipantSession());
   const [loadState, setLoadState] = useState<LoadState>({ status: "loading" });
   const [route, setRoute] = useState<OrderAppRoute>(() => readOrderAppRoute());
   const [submissionProofs, setSubmissionProofs] = useState<Readonly<Record<string, TaskSubmissionProof>>>({});
@@ -67,7 +64,7 @@ export default function App() {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [api, session]);
 
   const data = loadState.status === "ready" ? loadState.data : undefined;
   const selectedTask = useMemo(() => selectTask(data?.tasks ?? [], route.taskId), [data?.tasks, route.taskId]);
@@ -144,7 +141,7 @@ export default function App() {
       {route.inviteId ? (
         <InviteOnboarding
           inviteId={route.inviteId}
-          api={api}
+          actions={actions}
           session={session}
           onAccepted={handleRefresh}
           onDismiss={() => navigate({ section: "tasks" })}
@@ -221,7 +218,8 @@ export default function App() {
             {loadState.status === "loading" ? (
               <LoadingState />
             ) : (
-              <WorkspaceSection
+              <TaskWorkspace
+                actions={actions}
                 data={data}
                 route={route}
                 selectedOrder={selectedOrder}
@@ -233,8 +231,8 @@ export default function App() {
                   const task = data?.tasks.find((item) => item.taskId === taskId);
                   navigate({ section: "tasks", taskId, orderId: task?.orderId ?? selectedOrder?.orderId });
                 }}
-                onPrepareTaskSubmit={(taskId, input) => api.prepareTaskSubmit(taskId, input)}
-                onSubmitTask={(taskId, input) => api.submitTask(taskId, input)}
+                onPrepareTaskSubmit={(taskId, input) => actions.prepareTaskSubmit(taskId, input)}
+                onSubmitTask={(taskId, input) => actions.submitTask(taskId, input)}
                 onProofReady={(proof) => setSubmissionProofs((current) => ({
                   ...current,
                   [proof.taskId]: proof
@@ -246,75 +244,6 @@ export default function App() {
         </>
       )}
     </main>
-  );
-}
-
-function WorkspaceSection({
-  data,
-  route,
-  selectedOrder,
-  selectedTask,
-  participantWallet,
-  source,
-  submissionProof,
-  onSelectTask,
-  onPrepareTaskSubmit,
-  onSubmitTask,
-  onProofReady,
-  onSubmitted
-}: {
-  readonly data: ProductHomeData | undefined;
-  readonly route: OrderAppRoute;
-  readonly selectedOrder?: ProductOrderDTO;
-  readonly selectedTask?: ProductTaskDTO;
-  readonly participantWallet?: string;
-  readonly source?: ProductApiSource;
-  readonly submissionProof?: TaskSubmissionProof;
-  readonly onSelectTask: (taskId: string) => void;
-  readonly onPrepareTaskSubmit: (taskId: string, input: PrepareSubmitInput) => Promise<PreparedTaskSubmit>;
-  readonly onSubmitTask: (taskId: string, input: SubmitPreparedInput) => Promise<ProductSubmission>;
-  readonly onProofReady: (proof: TaskSubmissionProof) => void;
-  readonly onSubmitted?: () => void;
-}) {
-  if (route.section === "orders") {
-    return <OrderRoom order={selectedOrder} task={selectedTask} tasks={data?.tasks ?? []} />;
-  }
-  if (route.section === "proof") {
-    return <ProofPanel order={selectedOrder} task={selectedTask} submissionProof={submissionProof} />;
-  }
-  return (
-    <div className="task-workspace">
-      <TaskInbox
-        tasks={data?.tasks ?? []}
-        participantWallet={participantWallet}
-        selectedTaskId={selectedTask?.taskId}
-        onSelectTask={onSelectTask}
-      />
-      <aside className="task-detail" aria-label="待办详情">
-        {selectedTask ? (
-          <>
-            <TaskPluginHost
-              api={api}
-              task={selectedTask}
-              order={selectedOrder}
-              participantWallet={participantWallet}
-              source={source}
-              submissionProof={submissionProof}
-              onPrepareSubmit={onPrepareTaskSubmit}
-              onProofReady={onProofReady}
-              onSubmitted={onSubmitted}
-              onSubmitPrepared={onSubmitTask}
-            />
-          </>
-        ) : (
-          <section className="empty-state">
-            <ClipboardList aria-hidden="true" />
-            <h2>选择一个待办</h2>
-            <p>待办详情会显示职责、凭证要求和可核对证明。</p>
-          </section>
-        )}
-      </aside>
-    </div>
   );
 }
 

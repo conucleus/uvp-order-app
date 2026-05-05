@@ -10,6 +10,7 @@ import type {
   PrepareStageResourcePatchInput,
   ProductStageExecutorPatchMode
 } from "../api/productApi";
+import { shortWallet } from "../auth/participant";
 import {
   addOnManifestForTask,
   selectableTargetsForTask,
@@ -17,6 +18,7 @@ import {
 } from "./addOnTypes";
 import type { PrepareSubmitInput } from "./pluginRuntime";
 import { supplierTrustBlocker } from "./signalContainer";
+import { parseEvidenceIds, sameAddress } from "./taskUtils";
 
 export interface AddOnManifestRuntimeState {
   readonly task: ProductTaskDTO;
@@ -285,13 +287,6 @@ function valueForInput(state: AddOnManifestRuntimeState, inputId: string): strin
   return state.values[inputId] ?? "";
 }
 
-function parseEvidenceIds(value: string): readonly string[] {
-  return value
-    .split(/[\s,，;；]+/u)
-    .map((item) => item.trim())
-    .filter(Boolean);
-}
-
 function normalizeExecutorPatchMode(value: string): ProductStageExecutorPatchMode | undefined {
   if (value === "assign" || value === "replace" || value === "handoff" || value === "replacement") {
     return value;
@@ -301,18 +296,6 @@ function normalizeExecutorPatchMode(value: string): ProductStageExecutorPatchMod
 
 function looksLikeHash(value: string): boolean {
   return /^0x[0-9a-fA-F]{64}$/u.test(value.trim());
-}
-
-function sameAddress(left: string, right: string): boolean {
-  return left.trim().toLowerCase() === right.trim().toLowerCase();
-}
-
-function shortWallet(value: string): string {
-  const trimmed = value.trim();
-  if (trimmed.length <= 12) {
-    return trimmed;
-  }
-  return `${trimmed.slice(0, 6)}...${trimmed.slice(-4)}`;
 }
 
 function isContentAddressedReference(value: string): boolean {

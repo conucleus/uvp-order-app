@@ -25,6 +25,7 @@ import {
   taskRequiredInputsFromCapability
 } from "./taskPresentation";
 import { supplierTrustBlocker } from "./signalContainer";
+import { parseEvidenceIds } from "./taskUtils";
 
 export type TaskSubmitIntent = "confirm_stage" | "reject_stage" | "raise_dispute" | "resolve_dispute";
 
@@ -563,11 +564,4 @@ function mergeRequiredInputs(
     merged.push(input);
   }
   return merged;
-}
-
-function parseEvidenceIds(value: string): readonly string[] {
-  return value
-    .split(/[\s,，;；]+/u)
-    .map((item) => item.trim())
-    .filter(Boolean);
 }

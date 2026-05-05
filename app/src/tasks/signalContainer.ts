@@ -1,6 +1,7 @@
 import type { ChainAttestationStatus, ChainProofRowDTO, ProductTaskDTO } from "@uvp-eth/product-dto";
 import { executorOverlayForTask, resourceRequirementDisplays } from "./addOnTypes";
 import { taskRequiredInputsFromCapability } from "./taskPresentation";
+import { cleanString } from "./taskUtils";
 
 export type SupplierTrustTone = "ok" | "danger" | "neutral";
 
@@ -211,9 +212,4 @@ function uniqueLabels(labels: readonly string[]): readonly string[] {
     result.push(cleaned);
   }
   return result;
-}
-
-function cleanString(value: unknown): string | undefined {
-  const trimmed = typeof value === "string" ? value.trim() : "";
-  return trimmed.length > 0 ? trimmed : undefined;
 }
