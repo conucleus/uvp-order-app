@@ -99,3 +99,138 @@
 .order-proof-drawer .muted-copy {
   margin: 0 12px 12px;
 }
+
+/* Order room refresh: stage path, participants, timeline, and receipt drawer. */
+.order-room {
+  border-color: var(--app-line);
+}
+
+.order-room-summary {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 0;
+  overflow: hidden;
+  border: 1px solid var(--app-line);
+  border-radius: 8px;
+  background: #ffffff;
+}
+
+.order-room-summary > div {
+  min-height: 78px;
+  border: 0;
+  border-right: 1px solid var(--app-line);
+  border-radius: 0;
+  background: #ffffff;
+}
+
+.order-room-summary > div:last-child {
+  border-right: 0;
+}
+
+.current-task-grid {
+  grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+}
+
+.current-task-card {
+  min-height: 112px;
+  padding: 14px;
+  border-radius: 8px;
+  background: #ffffff;
+}
+
+.sla-panel {
+  padding: 14px;
+  border: 1px solid var(--app-line);
+  border-radius: 8px;
+  background: var(--app-surface-soft);
+}
+
+.sla-grid {
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+}
+
+.sla-card {
+  min-height: 176px;
+  border-radius: 8px;
+  background: #ffffff;
+}
+
+.sla-facts {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.participants,
+.recent-events {
+  padding: 14px;
+  border: 1px solid var(--app-line);
+  border-radius: 8px;
+  background: var(--app-surface-soft);
+}
+
+.participant {
+  border-radius: 8px;
+  background: #ffffff;
+}
+
+.participant-responsibility {
+  border: 1px solid var(--app-line);
+  background: var(--app-surface-soft);
+}
+
+.timeline-row {
+  min-height: 62px;
+  border-radius: 8px;
+  background: #ffffff;
+}
+
+.timeline-marker {
+  box-shadow: 0 0 0 4px var(--app-blue-soft);
+}
+
+.timeline-ok .timeline-marker {
+  box-shadow: 0 0 0 4px var(--app-green-soft);
+}
+
+.timeline-warn .timeline-marker {
+  box-shadow: 0 0 0 4px var(--app-amber-soft);
+}
+
+.timeline-danger .timeline-marker {
+  box-shadow: 0 0 0 4px var(--app-red-soft);
+}
+
+.order-proof-drawer {
+  overflow: hidden;
+  border-color: #bfdbfe;
+  background: #ffffff;
+}
+
+.order-proof-drawer summary {
+  min-height: 52px;
+  color: var(--app-blue);
+}
+
+@media (max-width: 980px) {
+  .order-room-summary {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .order-room-summary > div:nth-child(2n) {
+    border-right: 0;
+  }
+}
+
+@media (max-width: 640px) {
+  .order-room-summary,
+  .sla-facts {
+    grid-template-columns: 1fr;
+  }
+
+  .order-room-summary > div {
+    border-right: 0;
+    border-bottom: 1px solid var(--app-line);
+  }
+
+  .order-room-summary > div:last-child {
+    border-bottom: 0;
+  }
+}

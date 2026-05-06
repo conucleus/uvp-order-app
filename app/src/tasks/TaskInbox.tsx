@@ -1,4 +1,4 @@
-import { AlertTriangle, CheckCircle2, Clock3, FileCheck2, PackageCheck } from "lucide-react";
+import { AlertTriangle, CheckCircle2, Clock3, FileCheck2, PackageCheck, ShieldCheck, WalletCards } from "lucide-react";
 import type { ReactNode } from "react";
 import type { ProductTaskDTO } from "@uvp-eth/product-dto";
 import { shortWallet } from "../auth/participant";
@@ -37,6 +37,10 @@ export function TaskInbox({ tasks, participantWallet, selectedTaskId, onSelectTa
 
   return (
     <section className="task-list" aria-label="我的待办">
+      <div className="task-list-toolbar" aria-hidden="true">
+        <span>按订单分组</span>
+        <span>最新优先</span>
+      </div>
       {groups.map((group) => (
         <div className="task-group" key={group.orderId}>
           <div className="task-group-heading">
@@ -57,41 +61,58 @@ export function TaskInbox({ tasks, participantWallet, selectedTaskId, onSelectTa
                 onClick={() => onSelectTask(task.taskId)}
                 type="button"
               >
-                <span className={`status-dot status-${display.state}`} aria-hidden="true" />
                 <span className="task-card-main">
-                  <span className="task-card-title">{task.title}</span>
-                  <span className="task-card-subtitle">{executorDisplay.performanceSlotLabel}</span>
-                  <span className="task-card-persona">附加能力：{taskAddOnLabel(taskAddOnKind(task))}</span>
-                  {executorDisplay.personaLabel ? (
-                    <span className="task-card-persona">身份标签：{executorDisplay.personaLabel}</span>
-                  ) : null}
-                  {executorDisplay.assigneeRoleLabel !== executorDisplay.performanceSlotLabel ? (
-                    <span className="task-card-assignee">任务角色：{executorDisplay.assigneeRoleLabel}</span>
-                  ) : null}
-                  <span className="task-card-authority">{executorDisplay.authorizationLabel}</span>
-                  <span className="task-card-authority">
-                    执行方钱包：{signalContainer.executingWallet ? shortWallet(signalContainer.executingWallet) : signalContainer.executingWalletLabel}
+                  <span className="task-card-headline">
+                    <span className={`status-dot status-${display.state}`} aria-hidden="true" />
+                    <span className="task-card-title">{task.title}</span>
+                    <span className={`task-status task-status-${display.state}`}>
+                      {statusIcon(display.state)}
+                      {display.label}
+                    </span>
                   </span>
-                  <span className="task-card-persona">必填项：{signalContainer.requiredSummary}</span>
-                  {signalContainer.supplierTrustLabel ? (
-                    <span className={`signal-chip signal-chip-${signalContainer.supplierTrustTone}`}>
-                      供应商背书：{signalContainer.supplierTrustLabel}
+                  <span className="task-card-subtitle">
+                    {task.orderId} · {executorDisplay.performanceSlotLabel}
+                  </span>
+                  <span className="task-card-facts">
+                    <span>
+                      <Clock3 aria-hidden="true" />
+                      截止 {task.deadline}
+                    </span>
+                    <span>
+                      <WalletCards aria-hidden="true" />
+                      授权 {signalContainer.executingWallet ? shortWallet(signalContainer.executingWallet) : signalContainer.executingWalletLabel}
+                    </span>
+                    <span>
+                      <FileCheck2 aria-hidden="true" />
+                      必填 {signalContainer.requiredSummary}
+                    </span>
+                    <span>
+                      <ShieldCheck aria-hidden="true" />
+                      {executorDisplay.authorizationLabel}
+                    </span>
+                  </span>
+                  <span className="task-card-tags">
+                    <span className="task-card-persona">附加能力：{taskAddOnLabel(taskAddOnKind(task))}</span>
+                    {executorDisplay.personaLabel ? (
+                      <span className="task-card-persona">身份标签：{executorDisplay.personaLabel}</span>
+                    ) : null}
+                    {executorDisplay.assigneeRoleLabel !== executorDisplay.performanceSlotLabel ? (
+                      <span className="task-card-assignee">任务角色：{executorDisplay.assigneeRoleLabel}</span>
+                    ) : null}
+                    {signalContainer.supplierTrustLabel ? (
+                      <span className={`signal-chip signal-chip-${signalContainer.supplierTrustTone}`}>
+                        供应商背书：{signalContainer.supplierTrustLabel}
+                      </span>
+                    ) : null}
+                  </span>
+                  {signalContainer.proofFingerprint ? (
+                    <span className="task-card-proof">
+                      凭证指纹：{signalContainer.proofFingerprint}
                     </span>
                   ) : null}
-                  {signalContainer.proofFingerprint ? (
-                    <span className="task-card-proof">凭证指纹：{signalContainer.proofFingerprint}</span>
-                  ) : null}
-                  <span className="task-card-meta">
-                    <Clock3 aria-hidden="true" />
-                    {task.deadline}
-                  </span>
                   {task.blockedReason ? (
                     <span className="task-card-blocked">{task.blockedReason}</span>
                   ) : null}
-                </span>
-                <span className={`task-status task-status-${display.state}`}>
-                  {statusIcon(display.state)}
-                  {display.label}
                 </span>
               </button>
             );

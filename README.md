@@ -65,23 +65,11 @@ Current signal-console surfaces:
   without exposing business document plaintext;
 - full mode requires a real Product API and must not fabricate orders.
 
-Planned PRDs:
+Consolidated PRD:
 
-- `docs/product/prd-63-uvp-order-app-boundary-and-extraction.md`: app boundary,
-  extraction path, and source-of-truth rules.
-- `docs/product/prd-64-order-app-participant-onboarding.md`: invite, wallet,
-  role binding, and account recovery.
-- `docs/product/prd-65-order-app-task-inbox-and-plugin-runtime.md`: participant
-  inbox, order room, and task plugin runtime.
-- `docs/product/prd-66-order-app-evidence-and-proof-experience.md`: evidence
-  capture, submission, redaction, and proof UX.
-- `docs/product/prd-67-order-app-collaboration-notifications-sla.md`:
-  collaboration, reminders, notifications, and deadline handling.
-- `docs/product/prd-68-order-app-production-readiness-gate.md`: production
-  quality bar, E2E, deployment, accessibility, and observability.
-- `docs/product/prd-98-order-app-signal-console.md`: human/operator signal
-  console positioning, signal-container display, and negative states.
+- `docs/product/prd-117-signal-producer-live-closure.md`: Order App,
+  executor-kit, notifications, participant onboarding, task runtime, evidence,
+  proof, collaboration, and live signal-producer closure.
 
-PRD63 implements the initial runnable boundary. Later PRDs should add invite
-onboarding, task plugin runtime, evidence capture, notifications, and production
-readiness without moving Store Console ownership back into this package.
+PRD117 owns the remaining Order App live-closure work without moving Store
+Console ownership back into this package.
