@@ -357,3 +357,34 @@
     justify-content: flex-start;
   }
 }
+
+/* Notification and deadline cards aligned with the refreshed workbench style. */
+.notification-center {
+  border-radius: 8px;
+  box-shadow: var(--app-shadow);
+}
+
+.notification-card {
+  border-radius: 8px;
+  background: #ffffff;
+}
+
+.notification-icon {
+  border-radius: 8px;
+}
+
+.notification-source,
+.mini-badge,
+.notification-title-line span,
+.timeline-title-line span {
+  border-radius: 7px;
+}
+
+.notification-service-warning {
+  border: 1px solid #fed7aa;
+}
+
+.sla-card-heading > svg {
+  width: 20px;
+  height: 20px;
+}

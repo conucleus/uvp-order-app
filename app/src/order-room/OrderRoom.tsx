@@ -163,7 +163,7 @@ export function OrderRoom({ order, task, tasks = [] }: OrderRoomProps) {
       <section className="sla-panel" aria-labelledby="sla-title">
         <div className="section-heading compact">
           <CalendarClock aria-hidden="true" />
-          <h3 id="sla-title">Deadline / SLA</h3>
+          <h3 id="sla-title">期限 / 服务要求</h3>
         </div>
         {slaRows.length > 0 ? (
           <div className="sla-grid">
@@ -206,7 +206,7 @@ export function OrderRoom({ order, task, tasks = [] }: OrderRoomProps) {
             ))}
           </div>
         ) : (
-          <p className="muted-copy">当前订单没有与你的钱包匹配的 SLA 待办。</p>
+          <p className="muted-copy">当前订单没有与你的钱包匹配的期限待办。</p>
         )}
       </section>
 
@@ -291,7 +291,7 @@ export function OrderRoom({ order, task, tasks = [] }: OrderRoomProps) {
       <details className="order-proof-drawer" aria-label="证明抽屉">
         <summary>
           <Fingerprint aria-hidden="true" />
-          <span>证明</span>
+          <span>文件与证明回执</span>
         </summary>
         {order.proofRows.length > 0 ? (
           <dl className="proof-grid">
