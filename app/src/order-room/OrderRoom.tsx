@@ -22,9 +22,9 @@ import { taskDisplay } from "../tasks/taskStatus";
 import "./orderRoom.css";
 
 interface OrderRoomProps {
-  readonly order?: ProductOrderDTO;
-  readonly task?: ProductTaskDTO;
-  readonly tasks?: readonly ProductTaskDTO[];
+  readonly order?: ProductOrderDTO | undefined;
+  readonly task?: ProductTaskDTO | undefined;
+  readonly tasks?: readonly ProductTaskDTO[] | undefined;
 }
 
 const stageLabel: Readonly<Record<StageStatus, string>> = {

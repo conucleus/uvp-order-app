@@ -2,9 +2,9 @@ export type OrderAppSection = "tasks" | "orders" | "proof";
 
 export interface OrderAppRoute {
   readonly section: OrderAppSection;
-  readonly taskId?: string;
-  readonly orderId?: string;
-  readonly inviteId?: string;
+  readonly taskId?: string | undefined;
+  readonly orderId?: string | undefined;
+  readonly inviteId?: string | undefined;
 }
 
 const sections = new Set<OrderAppSection>(["tasks", "orders", "proof"]);

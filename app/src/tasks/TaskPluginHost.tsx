@@ -100,13 +100,13 @@ export interface SubmitPreparedInput {
 export interface TaskPluginHostProps {
   readonly actions: OrderAppActions;
   readonly task: ProductTaskDTO;
-  readonly order?: ProductOrderDTO;
-  readonly participantWallet?: string;
-  readonly source?: ProductApiSource;
-  readonly standardEvidencePanel?: ReactNode;
+  readonly order?: ProductOrderDTO | undefined;
+  readonly participantWallet?: string | undefined;
+  readonly source?: ProductApiSource | undefined;
+  readonly standardEvidencePanel?: ReactNode | undefined;
   readonly onPrepareSubmit: (taskId: string, input: PrepareSubmitInput) => Promise<PreparedTaskSubmit>;
   readonly onProofReady: (proof: TaskSubmissionProof) => void;
-  readonly onSubmitted?: () => void;
+  readonly onSubmitted?: (() => void) | undefined;
   readonly onSubmitPrepared: (taskId: string, input: SubmitPreparedInput) => Promise<ProductSubmission>;
 }
 
@@ -507,13 +507,13 @@ function ManifestAddOnPanel({
 }: {
   readonly actions: OrderAppActions;
   readonly manifest: ParticipantAddOnManifestDTO;
-  readonly order?: ProductOrderDTO;
-  readonly participantWallet?: string;
-  readonly source?: ProductApiSource;
+  readonly order?: ProductOrderDTO | undefined;
+  readonly participantWallet?: string | undefined;
+  readonly source?: ProductApiSource | undefined;
   readonly task: ProductTaskDTO;
   readonly onPrepareSubmit: (taskId: string, input: PrepareSubmitInput) => Promise<PreparedTaskSubmit>;
   readonly onProofReady: (proof: TaskSubmissionProof) => void;
-  readonly onSubmitted?: () => void;
+  readonly onSubmitted?: (() => void) | undefined;
   readonly onSubmitPrepared: (taskId: string, input: SubmitPreparedInput) => Promise<ProductSubmission>;
 }) {
   const [state, setState] = useState<AddOnManifestRuntimeState>(() => createInitialAddOnManifestState(task, participantWallet));
@@ -929,7 +929,7 @@ function ManifestSelectField({
 function manifestActionBlockers(input: {
   readonly action: ParticipantAddOnManifestDTO["actions"][number];
   readonly manifest: ParticipantAddOnManifestDTO;
-  readonly source?: ProductApiSource;
+  readonly source?: ProductApiSource | undefined;
   readonly state: AddOnManifestRuntimeState;
   readonly hasInjectedWallet: boolean;
 }): readonly string[] {
@@ -960,7 +960,7 @@ function manifestPreparedHash(prepared: ManifestPreparedState): string {
 
 function manifestSubmissionProof(input: {
   readonly task: ProductTaskDTO;
-  readonly order?: ProductOrderDTO;
+  readonly order?: ProductOrderDTO | undefined;
   readonly actionLabel: string;
   readonly signerWallet: string;
   readonly payloadHash: string;
@@ -1010,13 +1010,13 @@ function ExecutorPatchPanel({
 }: {
   readonly actions: OrderAppActions;
   readonly actionLabel: string;
-  readonly order?: ProductOrderDTO;
-  readonly participantWallet?: string;
-  readonly source?: ProductApiSource;
+  readonly order?: ProductOrderDTO | undefined;
+  readonly participantWallet?: string | undefined;
+  readonly source?: ProductApiSource | undefined;
   readonly task: ProductTaskDTO;
   readonly targets: readonly SelectableTargetStageDTO[];
   readonly onProofReady: (proof: TaskSubmissionProof) => void;
-  readonly onSubmitted?: () => void;
+  readonly onSubmitted?: (() => void) | undefined;
 }) {
   const [draft, setDraft] = useState<ExecutorPatchDraftState>(() => initialExecutorPatchDraft(task, targets, participantWallet));
   const [phase, setPhase] = useState<PatchPhase>("idle");
@@ -1434,13 +1434,13 @@ function ResourcePatchPanel({
 }: {
   readonly actions: OrderAppActions;
   readonly actionLabel: string;
-  readonly order?: ProductOrderDTO;
-  readonly participantWallet?: string;
-  readonly source?: ProductApiSource;
+  readonly order?: ProductOrderDTO | undefined;
+  readonly participantWallet?: string | undefined;
+  readonly source?: ProductApiSource | undefined;
   readonly task: ProductTaskDTO;
   readonly targets: readonly SelectableTargetStageDTO[];
   readonly onProofReady: (proof: TaskSubmissionProof) => void;
-  readonly onSubmitted?: () => void;
+  readonly onSubmitted?: (() => void) | undefined;
 }) {
   const [draft, setDraft] = useState<ResourcePatchDraftState>(() => initialResourcePatchDraft(task, targets, participantWallet));
   const [phase, setPhase] = useState<PatchPhase>("idle");
@@ -1816,10 +1816,10 @@ function initialResourcePatchDraft(
 interface TargetResourceOption {
   readonly resourceKey: string;
   readonly label: string;
-  readonly manifestURI?: string;
-  readonly manifestHash?: string;
-  readonly policyHash?: string;
-  readonly visibility?: "public" | "protected" | "private";
+  readonly manifestURI?: string | undefined;
+  readonly manifestHash?: string | undefined;
+  readonly policyHash?: string | undefined;
+  readonly visibility?: "public" | "protected" | "private" | undefined;
 }
 
 function targetResourceOptions(task: ProductTaskDTO, target: SelectableTargetStageDTO | undefined): readonly TargetResourceOption[] {
@@ -1919,11 +1919,11 @@ function executorPatchReadyCopy(mode: ProductExecutorPatchMode): string {
 
 function executorPatchBlockers(input: {
   readonly draft: ExecutorPatchDraftState;
-  readonly selectedMode?: ExecutorPatchModeOptionDTO;
-  readonly selectedTarget?: SelectableTargetStageDTO;
-  readonly source?: ProductApiSource;
+  readonly selectedMode?: ExecutorPatchModeOptionDTO | undefined;
+  readonly selectedTarget?: SelectableTargetStageDTO | undefined;
+  readonly source?: ProductApiSource | undefined;
   readonly task: ProductTaskDTO;
-  readonly participantWallet?: string;
+  readonly participantWallet?: string | undefined;
   readonly hasInjectedWallet: boolean;
 }): readonly string[] {
   const blockers: string[] = [];
@@ -1986,10 +1986,10 @@ function executorPatchBlockers(input: {
 
 function resourcePatchBlockers(input: {
   readonly draft: ResourcePatchDraftState;
-  readonly selectedTarget?: SelectableTargetStageDTO;
-  readonly source?: ProductApiSource;
+  readonly selectedTarget?: SelectableTargetStageDTO | undefined;
+  readonly source?: ProductApiSource | undefined;
   readonly task: ProductTaskDTO;
-  readonly participantWallet?: string;
+  readonly participantWallet?: string | undefined;
   readonly hasInjectedWallet: boolean;
 }): readonly string[] {
   const blockers: string[] = [];

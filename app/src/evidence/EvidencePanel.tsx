@@ -34,10 +34,10 @@ import "./evidence.css";
 
 interface EvidencePanelProps {
   readonly actions: OrderAppActions;
-  readonly source?: ProductApiSource;
-  readonly order?: ProductOrderDTO;
-  readonly task?: ProductTaskDTO;
-  readonly participantWallet?: string;
+  readonly source?: ProductApiSource | undefined;
+  readonly order?: ProductOrderDTO | undefined;
+  readonly task?: ProductTaskDTO | undefined;
+  readonly participantWallet?: string | undefined;
   readonly onProofReady: (proof: TaskSubmissionProof) => void;
 }
 
@@ -47,7 +47,7 @@ type PrepareState =
   | { readonly status: "prepared"; readonly prepared: PreparedSubmitView }
   | { readonly status: "submitting"; readonly prepared: PreparedSubmitView }
   | { readonly status: "confirmed"; readonly proof: TaskSubmissionProof }
-  | { readonly status: "failed"; readonly message: string; readonly prepared?: PreparedSubmitView };
+  | { readonly status: "failed"; readonly message: string; readonly prepared?: PreparedSubmitView | undefined };
 
 interface PreparedSubmitView {
   readonly prepareId: string;
@@ -55,7 +55,7 @@ interface PreparedSubmitView {
   readonly expiresAt: string;
   readonly evidenceIds: readonly string[];
   readonly source: "api" | "demo";
-  readonly raw?: PreparedTaskSubmitDTO;
+  readonly raw?: PreparedTaskSubmitDTO | undefined;
 }
 
 const acceptedExtensions = [".pdf", ".png", ".jpg", ".jpeg", ".txt", ".json"];
@@ -399,7 +399,7 @@ function EvidenceCaptureCard({
   onFileSelected
 }: {
   readonly capture: CapturedEvidence;
-  readonly source?: ProductApiSource;
+  readonly source?: ProductApiSource | undefined;
   readonly onClear: () => void;
   readonly onFileSelected: (file: File | undefined) => void;
 }) {
@@ -481,7 +481,7 @@ function PreparedSummary({
   canSubmitSignature,
   onSubmitSignature
 }: {
-  readonly prepared?: PreparedSubmitView;
+  readonly prepared?: PreparedSubmitView | undefined;
   readonly submitting: boolean;
   readonly canSubmitSignature: boolean;
   readonly onSubmitSignature: () => void;
@@ -730,7 +730,7 @@ async function prepareApiSubmit(input: {
 async function demoSubmissionProof(input: {
   readonly prepared: PreparedSubmitView;
   readonly task: ProductTaskDTO;
-  readonly order?: ProductOrderDTO;
+  readonly order?: ProductOrderDTO | undefined;
   readonly actionLabel: string;
   readonly signingWallet: string;
   readonly evidence: readonly CapturedEvidence[];
@@ -770,7 +770,7 @@ async function demoSubmissionProof(input: {
 function submissionProofFromApi(input: {
   readonly submission: ProductSubmissionDTO;
   readonly task: ProductTaskDTO;
-  readonly order?: ProductOrderDTO;
+  readonly order?: ProductOrderDTO | undefined;
   readonly actionLabel: string;
   readonly signingWallet: string;
   readonly prepared: PreparedSubmitView;
@@ -839,8 +839,8 @@ function mergeProofCaptures(
 function preflightBlockers(input: {
   readonly capturedEvidence: readonly CapturedEvidence[];
   readonly signingWallet: string;
-  readonly authorizedWallet?: string;
-  readonly source?: ProductApiSource;
+  readonly authorizedWallet?: string | undefined;
+  readonly source?: ProductApiSource | undefined;
   readonly task: ProductTaskDTO;
   readonly hasInjectedWallet: boolean;
 }): readonly string[] {

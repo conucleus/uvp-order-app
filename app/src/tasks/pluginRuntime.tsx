@@ -37,7 +37,7 @@ export interface PrepareSubmitInput {
 
 export interface TaskPluginState {
   readonly task: ProductTaskDTO;
-  readonly walletAddress?: string;
+  readonly walletAddress?: string | undefined;
   readonly values: Readonly<Record<string, string>>;
   readonly confirmations: Readonly<Record<string, boolean>>;
 }
@@ -69,7 +69,7 @@ export interface TaskPlugin {
 
 export interface TaskPluginPresentation {
   readonly kind: ParticipantAddOnKind;
-  readonly source?: CapabilityPluginSource;
+  readonly source?: CapabilityPluginSource | undefined;
   readonly title: string;
   readonly summary: string;
   readonly primaryActionLabel: string;

@@ -125,8 +125,37 @@ export interface ExecutorOverlayProjectionDTO {
   readonly proofRows?: readonly ChainProofRowDTO[];
 }
 
-export interface ExecutorPatchModeOptionDTO extends Omit<ProductExecutorPatchRequirementDTO, "stageSignalCount"> {
+export interface ExecutorPatchModeOptionDTO extends Omit<
+  ProductExecutorPatchRequirementDTO,
+  | "stageSignalCount"
+  | "targetStageId"
+  | "previousExecutor"
+  | "previousExecutorWallet"
+  | "previousExecutorLabel"
+  | "approvalSourceId"
+  | "approvalSignalId"
+  | "approvalSignalLabel"
+  | "approvalSignal"
+  | "priorAuthorityLabel"
+  | "futureAuthorityLabel"
+  | "guidanceLabel"
+  | "disabledReason"
+  | "proofRows"
+> {
   readonly mode: ProductExecutorPatchMode;
+  readonly targetStageId?: string | undefined;
+  readonly previousExecutor?: string | undefined;
+  readonly previousExecutorWallet?: string | undefined;
+  readonly previousExecutorLabel?: string | undefined;
+  readonly approvalSourceId?: string | undefined;
+  readonly approvalSignalId?: string | undefined;
+  readonly approvalSignalLabel?: string | undefined;
+  readonly approvalSignal?: ProductExecutorPatchApprovalSignalDTO | undefined;
+  readonly priorAuthorityLabel?: string | undefined;
+  readonly futureAuthorityLabel?: string | undefined;
+  readonly guidanceLabel?: string | undefined;
+  readonly disabledReason?: string | undefined;
+  readonly proofRows?: readonly ChainProofRowDTO[] | undefined;
 }
 
 export interface ResourceOverlayProjectionDTO {
@@ -159,20 +188,20 @@ export type ProductTaskWithAddOns = Omit<
   | "capabilityPlugin"
   | "addOnManifest"
 > & {
-  readonly addOnKind?: ParticipantAddOnKind;
-  readonly selectableTargets?: readonly SelectableTargetStageDTO[];
-  readonly selectedStages?: readonly string[];
-  readonly executorPatchModes?: readonly ExecutorPatchModeOptionDTO[];
-  readonly executorOverlay?: ExecutorOverlayProjectionDTO;
-  readonly resourceOverlays?: readonly ResourceOverlayProjectionDTO[];
-  readonly resourceRequirements?: FileResourcesBundleDTO;
-  readonly effectiveResourceRequirements?: FileResourcesBundleDTO;
-  readonly effectiveFileResources?: FileResourcesBundleDTO;
-  readonly capabilityPlugin?: ProductTaskDTO["capabilityPlugin"] & {
-    readonly addOnKind?: ParticipantAddOnKind;
-    readonly selectedStages?: readonly string[];
-  };
-  readonly addOnManifest?: ProductTaskDTO["addOnManifest"];
+  readonly addOnKind?: ParticipantAddOnKind | undefined;
+  readonly selectableTargets?: readonly SelectableTargetStageDTO[] | undefined;
+  readonly selectedStages?: readonly string[] | undefined;
+  readonly executorPatchModes?: readonly ExecutorPatchModeOptionDTO[] | undefined;
+  readonly executorOverlay?: ExecutorOverlayProjectionDTO | undefined;
+  readonly resourceOverlays?: readonly ResourceOverlayProjectionDTO[] | undefined;
+  readonly resourceRequirements?: FileResourcesBundleDTO | undefined;
+  readonly effectiveResourceRequirements?: FileResourcesBundleDTO | undefined;
+  readonly effectiveFileResources?: FileResourcesBundleDTO | undefined;
+  readonly capabilityPlugin?: (ProductTaskDTO["capabilityPlugin"] & {
+    readonly addOnKind?: ParticipantAddOnKind | undefined;
+    readonly selectedStages?: readonly string[] | undefined;
+  }) | undefined;
+  readonly addOnManifest?: ProductTaskDTO["addOnManifest"] | undefined;
 };
 
 export interface EffectiveFileResourceDisplay {
@@ -180,8 +209,8 @@ export interface EffectiveFileResourceDisplay {
   readonly label: string;
   readonly documentType: string;
   readonly required: boolean;
-  readonly description?: string;
-  readonly sourceLabel?: string;
+  readonly description?: string | undefined;
+  readonly sourceLabel?: string | undefined;
   readonly handleSummary: string;
   readonly visibility: ProductResourceVisibility | "unknown";
   readonly accessLabel: string;

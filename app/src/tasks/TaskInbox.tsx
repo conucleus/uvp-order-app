@@ -16,8 +16,8 @@ import "./taskRuntime.css";
 
 interface TaskInboxProps {
   readonly tasks: readonly ProductTaskDTO[];
-  readonly participantWallet?: string;
-  readonly selectedTaskId?: string;
+  readonly participantWallet?: string | undefined;
+  readonly selectedTaskId?: string | undefined;
   readonly onSelectTask: (taskId: string) => void;
 }
 
