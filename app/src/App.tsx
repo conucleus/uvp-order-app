@@ -276,7 +276,7 @@ function SectionButton({
   );
 }
 
-function SourceBadge({ source, loading }: { readonly source?: ProductApiSource; readonly loading: boolean }) {
+function SourceBadge({ source, loading }: { readonly source?: ProductApiSource | undefined; readonly loading: boolean }) {
   if (loading) {
     return <span className="source-badge source-loading">加载中</span>;
   }

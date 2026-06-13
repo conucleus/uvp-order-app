@@ -64,15 +64,15 @@ export interface ProductApiClient {
 }
 
 export interface ParticipantQueryInput {
-  readonly walletAddress?: string;
+  readonly walletAddress?: string | undefined;
 }
 
 export interface ProductApiClientOptions {
-  readonly baseUrl?: string;
-  readonly demoMode?: boolean;
-  readonly evidenceRouteMode?: EvidenceRouteMode;
-  readonly fetcher?: Fetcher;
-  readonly runtimeEnv?: string;
+  readonly baseUrl?: string | undefined;
+  readonly demoMode?: boolean | undefined;
+  readonly evidenceRouteMode?: EvidenceRouteMode | undefined;
+  readonly fetcher?: Fetcher | undefined;
+  readonly runtimeEnv?: string | undefined;
 }
 
 export type EvidenceRouteMode = "prd63" | "chain-services-compat";
@@ -84,8 +84,8 @@ export interface AcceptInviteInput {
 }
 
 export interface RejectInviteInput {
-  readonly displayName?: string;
-  readonly contact?: string;
+  readonly displayName?: string | undefined;
+  readonly contact?: string | undefined;
 }
 
 export interface ProductInviteAcceptanceDTO {
@@ -155,21 +155,21 @@ export interface PrepareStageExecutorPatchInput {
   readonly executorWallet: string;
   readonly executorMetadataHash: Hex | string;
   readonly metadataURI: string;
-  readonly mode?: ProductStageExecutorPatchMode;
-  readonly previousExecutorWallet?: string;
-  readonly approval?: unknown;
-  readonly executorReference?: string;
+  readonly mode?: ProductStageExecutorPatchMode | undefined;
+  readonly previousExecutorWallet?: string | undefined;
+  readonly approval?: unknown | undefined;
+  readonly executorReference?: string | undefined;
 }
 
 export interface SubmitStageExecutorPatchInput {
-  readonly prepareId?: string;
+  readonly prepareId?: string | undefined;
   readonly selectorWallet: string;
-  readonly typedData?: Eip712TypedDataDTO;
+  readonly typedData?: Eip712TypedDataDTO | undefined;
   readonly signature: string;
-  readonly patch?: PreparedStageExecutorPatchDTO;
-  readonly mode?: ProductStageExecutorPatchMode;
-  readonly previousExecutorWallet?: string;
-  readonly previousExecutorSignature?: string;
+  readonly patch?: PreparedStageExecutorPatchDTO | undefined;
+  readonly mode?: ProductStageExecutorPatchMode | undefined;
+  readonly previousExecutorWallet?: string | undefined;
+  readonly previousExecutorSignature?: string | undefined;
 }
 
 export interface PrepareStageResourcePatchInput {
@@ -182,11 +182,11 @@ export interface PrepareStageResourcePatchInput {
 }
 
 export interface SubmitStageResourcePatchInput {
-  readonly prepareId?: string;
+  readonly prepareId?: string | undefined;
   readonly selectorWallet: string;
-  readonly typedData?: Eip712TypedDataDTO;
+  readonly typedData?: Eip712TypedDataDTO | undefined;
   readonly signature: string;
-  readonly patch?: PreparedStageResourcePatchDTO;
+  readonly patch?: PreparedStageResourcePatchDTO | undefined;
 }
 
 export interface PreparedTaskSubmitDTO {
@@ -418,7 +418,7 @@ export function evidenceRoutes(mode: EvidenceRouteMode): { readonly upload: stri
 class BrowserProductApiClient implements ProductApiClient {
   constructor(
     private readonly config: {
-      readonly baseUrl?: string;
+      readonly baseUrl?: string | undefined;
       readonly demoMode: boolean;
       readonly evidenceRouteMode: EvidenceRouteMode;
       readonly fetcher: Fetcher;
@@ -677,11 +677,11 @@ function normalizeBaseUrl(baseUrl: string | undefined): string | undefined {
 }
 
 function runtimeEnv(): {
-  readonly chainServicesUrl?: string;
-  readonly productApiBaseUrl?: string;
-  readonly demoMode?: string;
-  readonly evidenceRouteMode?: string;
-  readonly runtimeEnv?: string;
+  readonly chainServicesUrl?: string | undefined;
+  readonly productApiBaseUrl?: string | undefined;
+  readonly demoMode?: string | undefined;
+  readonly evidenceRouteMode?: string | undefined;
+  readonly runtimeEnv?: string | undefined;
 } {
   const env = import.meta.env as Readonly<Record<string, string | undefined>> | undefined;
   return {

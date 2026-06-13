@@ -14,11 +14,11 @@ interface TaskWorkspaceProps {
   readonly actions: OrderAppActions;
   readonly data: ProductHomeData | undefined;
   readonly route: OrderAppRoute;
-  readonly selectedOrder?: ProductOrderDTO;
-  readonly selectedTask?: ProductTaskDTO;
-  readonly participantWallet?: string;
-  readonly source?: ProductApiSource;
-  readonly submissionProof?: TaskSubmissionProof;
+  readonly selectedOrder?: ProductOrderDTO | undefined;
+  readonly selectedTask?: ProductTaskDTO | undefined;
+  readonly participantWallet?: string | undefined;
+  readonly source?: ProductApiSource | undefined;
+  readonly submissionProof?: TaskSubmissionProof | undefined;
   readonly onSelectTask: (taskId: string) => void;
   readonly onPrepareTaskSubmit: (taskId: string, input: PrepareSubmitInput) => Promise<PreparedTaskSubmit>;
   readonly onSubmitTask: (taskId: string, input: SubmitPreparedInput) => Promise<ProductSubmission>;
@@ -69,7 +69,7 @@ export function TaskWorkspace({
                 order={selectedOrder}
                 participantWallet={participantWallet}
                 source={source}
-                task={source?.kind === "demo" ? { ...selectedTask, canSubmit: undefined } : selectedTask}
+                task={source?.kind === "demo" ? demoEvidenceTask(selectedTask) : selectedTask}
                 onProofReady={onProofReady}
               />
             )}
@@ -89,4 +89,9 @@ export function TaskWorkspace({
       </aside>
     </div>
   );
+}
+
+function demoEvidenceTask(task: ProductTaskDTO): ProductTaskDTO {
+  const { canSubmit: _canSubmit, ...rest } = task;
+  return rest;
 }

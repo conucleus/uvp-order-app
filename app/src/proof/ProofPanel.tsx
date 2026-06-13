@@ -15,9 +15,9 @@ import { proofSummaryRowsForTask, signalContainerForTask } from "../task-model";
 import "./proof.css";
 
 interface ProofPanelProps {
-  readonly order?: ProductOrderDTO;
-  readonly task?: ProductTaskDTO;
-  readonly submissionProof?: TaskSubmissionProof;
+  readonly order?: ProductOrderDTO | undefined;
+  readonly task?: ProductTaskDTO | undefined;
+  readonly submissionProof?: TaskSubmissionProof | undefined;
 }
 
 type ProofMatchStatus = "matched" | "unbound" | "missing" | "mismatched";
@@ -222,9 +222,9 @@ function ProofStatusPill({ status }: { readonly status: ProofMatchStatus }) {
 }
 
 function proofRowsForDrawer(input: {
-  readonly order?: ProductOrderDTO;
-  readonly task?: ProductTaskDTO;
-  readonly submissionProof?: TaskSubmissionProof;
+  readonly order?: ProductOrderDTO | undefined;
+  readonly task?: ProductTaskDTO | undefined;
+  readonly submissionProof?: TaskSubmissionProof | undefined;
   readonly fallbackRows: readonly ChainProofRowDTO[];
 }): readonly ChainProofRowDTO[] {
   if (!input.submissionProof) {

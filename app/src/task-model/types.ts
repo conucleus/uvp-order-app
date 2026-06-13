@@ -26,20 +26,20 @@ export interface EvidenceRequirement {
 export interface CapturedEvidence {
   readonly requirement: EvidenceRequirement;
   readonly status: EvidenceCaptureStatus;
-  readonly source?: EvidenceCaptureSource;
-  readonly evidenceId?: string;
-  readonly fileName?: string;
-  readonly mimeType?: string;
-  readonly size?: number;
-  readonly businessLabel?: string;
-  readonly contentHash?: `0x${string}`;
-  readonly metadataHash?: `0x${string}`;
-  readonly payloadHash?: `0x${string}`;
-  readonly payloadRef?: string;
-  readonly storageURI?: string;
-  readonly createdAt?: string;
-  readonly verificationStatus?: EvidenceVerificationStatus;
-  readonly error?: string;
+  readonly source?: EvidenceCaptureSource | undefined;
+  readonly evidenceId?: string | undefined;
+  readonly fileName?: string | undefined;
+  readonly mimeType?: string | undefined;
+  readonly size?: number | undefined;
+  readonly businessLabel?: string | undefined;
+  readonly contentHash?: `0x${string}` | undefined;
+  readonly metadataHash?: `0x${string}` | undefined;
+  readonly payloadHash?: `0x${string}` | undefined;
+  readonly payloadRef?: string | undefined;
+  readonly storageURI?: string | undefined;
+  readonly createdAt?: string | undefined;
+  readonly verificationStatus?: EvidenceVerificationStatus | undefined;
+  readonly error?: string | undefined;
 }
 
 export interface TaskSubmissionProof {
@@ -49,20 +49,20 @@ export interface TaskSubmissionProof {
   readonly taskTitle: string;
   readonly actionLabel: string;
   readonly status: TaskSubmissionStatus;
-  readonly txHash?: `0x${string}`;
-  readonly blockNumber?: string;
+  readonly txHash?: `0x${string}` | undefined;
+  readonly blockNumber?: string | undefined;
   readonly signerWallet: string;
-  readonly payloadHash?: `0x${string}`;
-  readonly stateMachineAddress?: string;
+  readonly payloadHash?: `0x${string}` | undefined;
+  readonly stateMachineAddress?: string | undefined;
   readonly evidence: readonly CapturedEvidence[];
   readonly proofRows: readonly ChainProofRowDTO[];
 }
 
 export interface EvidencePanelContext {
   readonly task: ProductTaskDTO;
-  readonly order?: ProductOrderDTO;
-  readonly participantWallet?: string;
+  readonly order?: ProductOrderDTO | undefined;
+  readonly participantWallet?: string | undefined;
   readonly source?: {
     readonly kind: "real" | "demo" | "missing";
-  };
+  } | undefined;
 }

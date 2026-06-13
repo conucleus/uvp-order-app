@@ -10,7 +10,7 @@ export interface StagingTaskWalletDiagnostic {
   /** Tasks filtered out because wallet didn't match. */
   readonly filteredOutCount: number;
   /** Connected wallet (undefined if none). */
-  readonly connectedWallet?: string;
+  readonly connectedWallet?: string | undefined;
   /** Short hex hint for the connected wallet. */
   readonly connectedWalletHint: string;
   /** Unique assignee/participant wallets found in filtered‑out tasks. */

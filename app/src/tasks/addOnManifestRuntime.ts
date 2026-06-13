@@ -22,7 +22,7 @@ import { parseEvidenceIds, sameAddress } from "./taskUtils";
 
 export interface AddOnManifestRuntimeState {
   readonly task: ProductTaskDTO;
-  readonly walletAddress?: string;
+  readonly walletAddress?: string | undefined;
   readonly values: Readonly<Record<string, string>>;
   readonly confirmations: Readonly<Record<string, boolean>>;
 }
