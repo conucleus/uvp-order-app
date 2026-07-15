@@ -10,14 +10,14 @@ describe("Order App full-mode gate", () => {
   it("accepts explicit full mode with real Product API URL and flow summary", () => {
     const result = validateOrderAppFullModeGate({
       UVP_ORDER_APP_E2E_PROFILE: "full",
-      VITE_PRODUCT_API_BASE_URL: "http://127.0.0.1:4100/",
-      UVP_ORDER_APP_FULL_FLOW_SUMMARY: "/tmp/phase2-customs-full-flow-summary.json",
+      VITE_UVP_CHAIN_SERVICES_URL: "http://127.0.0.1:4100/",
+      UVP_ORDER_APP_FULL_FLOW_SUMMARY: "/tmp/full-flow-summary.json",
       VITE_UVP_RUNTIME_ENV: "testnet"
     });
 
     assert.equal(result.ok, true);
     assert.equal(result.ok && result.gate.productApiBaseUrl, "http://127.0.0.1:4100");
-    assert.equal(result.ok && result.gate.flowSummaryPath, "/tmp/phase2-customs-full-flow-summary.json");
+    assert.equal(result.ok && result.gate.flowSummaryPath, "/tmp/full-flow-summary.json");
   });
 
   it("fails closed without Product API URL and flow summary", () => {
@@ -26,14 +26,14 @@ describe("Order App full-mode gate", () => {
     });
 
     assert.equal(result.ok, false);
-    assert.match(result.ok ? "" : result.errors.join("\n"), /VITE_PRODUCT_API_BASE_URL/u);
+    assert.match(result.ok ? "" : result.errors.join("\n"), /VITE_UVP_CHAIN_SERVICES_URL/u);
     assert.match(result.ok ? "" : result.errors.join("\n"), /FLOW_SUMMARY/u);
   });
 
   it("rejects demo and API-stub inputs in full mode", () => {
     const result = validateOrderAppFullModeGate({
       UVP_ORDER_APP_E2E_PROFILE: "full",
-      VITE_PRODUCT_API_BASE_URL: "http://product-api.test",
+      VITE_UVP_CHAIN_SERVICES_URL: "http://product-api.test",
       UVP_ORDER_APP_FULL_FLOW_SUMMARY: "/tmp/summary.json",
       VITE_UVP_ORDER_APP_DEMO: "1",
       UVP_ORDER_APP_E2E_INSTALL_API_STUB: "1"
@@ -49,7 +49,7 @@ describe("Order App full-mode gate", () => {
     assert.throws(
       () => assertOrderAppFullModeGate({
         UVP_ORDER_APP_E2E_PROFILE: "api-stub",
-        VITE_PRODUCT_API_BASE_URL: "http://127.0.0.1:4100",
+        VITE_UVP_CHAIN_SERVICES_URL: "http://127.0.0.1:4100",
         UVP_ORDER_APP_FULL_FLOW_SUMMARY: "/tmp/summary.json"
       }),
       /UVP_ORDER_APP_E2E_PROFILE must be full/u

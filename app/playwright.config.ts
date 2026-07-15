@@ -10,11 +10,7 @@ const port = process.env.UVP_ORDER_APP_E2E_PORT ?? "4183";
 const baseURL = process.env.PLAYWRIGHT_BASE_URL ?? `http://${host}:${port}`;
 const profile = (process.env.UVP_ORDER_APP_E2E_PROFILE ?? "demo").trim().toLowerCase();
 const includeMobile = process.env.UVP_ORDER_APP_E2E_MOBILE === "1";
-const runtimeProfile = (
-  process.env.VITE_UVP_RUNTIME_ENV ??
-  process.env.VITE_UVP_CHAIN_SERVICES_ENV ??
-  process.env.VITE_CHAIN_SERVICES_ENV
-)?.trim().toLowerCase();
+const runtimeProfile = process.env.VITE_UVP_RUNTIME_ENV?.trim().toLowerCase();
 const fullModeGate = profile === "full" ? assertOrderAppFullModeGate(process.env) : undefined;
 
 if (
@@ -32,7 +28,7 @@ function webServerCommand(): string {
     return `pnpm dev --host ${host} --port ${port} --strictPort`;
   }
   if (profile === "api-stub") {
-    return `VITE_PRODUCT_API_BASE_URL=http://product-api.test pnpm dev --host ${host} --port ${port} --strictPort`;
+    return `VITE_UVP_CHAIN_SERVICES_URL=http://product-api.test pnpm dev --host ${host} --port ${port} --strictPort`;
   }
   if (profile === "full") {
     return `pnpm dev --host ${host} --port ${port} --strictPort`;

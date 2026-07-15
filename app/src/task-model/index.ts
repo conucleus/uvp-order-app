@@ -12,10 +12,6 @@ export {
   compactLabels,
   proofSummaryRowsForTask,
   signalContainerForTask,
-  supplierTrustBlocker,
-  supplierTrustLabel,
-  supplierTrustTone,
-  type SupplierTrustTone,
   type TaskSignalContainerSummary
 } from "../tasks/signalContainer";
 export {

@@ -13,13 +13,9 @@ export interface OrderAppFullModeEnv {
   readonly UVP_ORDER_APP_E2E_USE_API_STUB?: string;
   readonly UVP_ORDER_APP_API_STUB?: string;
   readonly UVP_ORDER_APP_FULL_FLOW_SUMMARY?: string;
-  readonly UVP_ORDER_APP_BROWSER_E2E_FLOW_SUMMARY?: string;
-  readonly VITE_PRODUCT_API_BASE_URL?: string;
   readonly VITE_UVP_CHAIN_SERVICES_URL?: string;
   readonly VITE_UVP_ORDER_APP_DEMO?: string;
   readonly VITE_UVP_RUNTIME_ENV?: string;
-  readonly VITE_UVP_CHAIN_SERVICES_ENV?: string;
-  readonly VITE_CHAIN_SERVICES_ENV?: string;
 }
 
 export interface OrderAppFullModeGate {
@@ -49,25 +45,20 @@ export type OrderAppFullModeGateResult =
 
 export function validateOrderAppFullModeGate(env: OrderAppFullModeEnv): OrderAppFullModeGateResult {
   const errors: string[] = [];
-  const productApiBaseUrl = firstConfigured(env.VITE_PRODUCT_API_BASE_URL, env.VITE_UVP_CHAIN_SERVICES_URL);
-  const flowSummaryPath = firstConfigured(
-    env.UVP_ORDER_APP_FULL_FLOW_SUMMARY,
-    env.UVP_ORDER_APP_BROWSER_E2E_FLOW_SUMMARY
-  );
-  const runtimeProfile = normalizeRuntimeProfile(
-    env.VITE_UVP_RUNTIME_ENV ?? env.VITE_UVP_CHAIN_SERVICES_ENV ?? env.VITE_CHAIN_SERVICES_ENV
-  );
+  const productApiBaseUrl = firstConfigured(env.VITE_UVP_CHAIN_SERVICES_URL);
+  const flowSummaryPath = firstConfigured(env.UVP_ORDER_APP_FULL_FLOW_SUMMARY);
+  const runtimeProfile = normalizeRuntimeProfile(env.VITE_UVP_RUNTIME_ENV);
 
   if (normalizeProfile(env.UVP_ORDER_APP_E2E_PROFILE) !== "full") {
     errors.push("UVP_ORDER_APP_E2E_PROFILE must be full");
   }
   if (!productApiBaseUrl) {
-    errors.push("full mode requires VITE_PRODUCT_API_BASE_URL or VITE_UVP_CHAIN_SERVICES_URL");
+    errors.push("full mode requires VITE_UVP_CHAIN_SERVICES_URL");
   } else if (isStubProductApiUrl(productApiBaseUrl)) {
     errors.push(`full mode cannot use demo/API-stub Product API URL: ${productApiBaseUrl}`);
   }
   if (!flowSummaryPath) {
-    errors.push("full mode requires UVP_ORDER_APP_FULL_FLOW_SUMMARY or UVP_ORDER_APP_BROWSER_E2E_FLOW_SUMMARY");
+    errors.push("full mode requires UVP_ORDER_APP_FULL_FLOW_SUMMARY");
   }
   if (env.VITE_UVP_ORDER_APP_DEMO === "1") {
     errors.push("full mode cannot run with VITE_UVP_ORDER_APP_DEMO=1");

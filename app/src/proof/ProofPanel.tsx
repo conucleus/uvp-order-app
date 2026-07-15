@@ -63,23 +63,9 @@ export function ProofPanel({ order, task, submissionProof }: ProofPanelProps) {
         </div>
       </div>
 
-      {task?.supplierTrustStatus === "revoked" ? (
-        <div className="blocked-copy" role="alert">
-          <ShieldAlert aria-hidden="true" />
-          当前供应商链上背书已撤销，请暂停提交并联系订单负责人。
-        </div>
-      ) : null}
-
       {signalContainer ? (
         <div className="proof-context-grid" aria-label="待办证明要素">
           <ProofContextItem label="执行方钱包" value={signalContainer.executingWalletLabel} />
-          {signalContainer.supplierTrustLabel ? (
-            <ProofContextItem
-              label="供应商背书"
-              tone={signalContainer.supplierTrustTone}
-              value={signalContainer.supplierTrustLabel}
-            />
-          ) : null}
           <ProofContextItem label="必填输入/凭证" value={signalContainer.requiredSummary} />
           <ProofContextItem
             label="凭证指纹"

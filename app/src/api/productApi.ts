@@ -70,12 +70,9 @@ export interface ParticipantQueryInput {
 export interface ProductApiClientOptions {
   readonly baseUrl?: string | undefined;
   readonly demoMode?: boolean | undefined;
-  readonly evidenceRouteMode?: EvidenceRouteMode | undefined;
   readonly fetcher?: Fetcher | undefined;
   readonly runtimeEnv?: string | undefined;
 }
-
-export type EvidenceRouteMode = "prd63" | "chain-services-compat";
 
 export interface AcceptInviteInput {
   readonly displayName: string;
@@ -399,20 +396,11 @@ export function createProductApiClient(options: ProductApiClientOptions = {}): P
   const runtime = normalizeRuntimeEnv(options.runtimeEnv ?? env.runtimeEnv);
   const demoModeRequested = options.demoMode ?? env.demoMode === "1";
   const config = {
-    baseUrl: normalizeBaseUrl(options.baseUrl ?? env.chainServicesUrl ?? env.productApiBaseUrl),
+    baseUrl: normalizeBaseUrl(options.baseUrl ?? env.chainServicesUrl),
     demoMode: demoModeRequested && !isProductionLikeRuntime(runtime),
-    evidenceRouteMode: options.evidenceRouteMode ?? readEvidenceRouteMode(env),
     fetcher: options.fetcher ?? globalThis.fetch.bind(globalThis)
   };
   return new BrowserProductApiClient(config);
-}
-
-export function evidenceRoutes(mode: EvidenceRouteMode): { readonly upload: string; proof(evidenceId: string): string } {
-  const root = mode === "chain-services-compat" ? "/product/evidence" : "/evidence";
-  return {
-    upload: root,
-    proof: (evidenceId: string) => `${root}/${encodeURIComponent(evidenceId)}/proof`
-  };
 }
 
 class BrowserProductApiClient implements ProductApiClient {
@@ -420,7 +408,6 @@ class BrowserProductApiClient implements ProductApiClient {
     private readonly config: {
       readonly baseUrl?: string | undefined;
       readonly demoMode: boolean;
-      readonly evidenceRouteMode: EvidenceRouteMode;
       readonly fetcher: Fetcher;
     }
   ) {}
@@ -554,12 +541,12 @@ class BrowserProductApiClient implements ProductApiClient {
   }
 
   async uploadEvidence(input: CreateEvidenceInput): Promise<EvidenceUploadResponseDTO> {
-    return await this.postJson<EvidenceUploadResponseDTO>(evidenceRoutes(this.config.evidenceRouteMode).upload, input);
+    return await this.postJson<EvidenceUploadResponseDTO>("/product/evidence", input);
   }
 
   async getEvidenceProof(evidenceId: string): Promise<EvidenceProofDTO> {
     const response = await this.getJson<{ readonly proof: EvidenceProofDTO }>(
-      evidenceRoutes(this.config.evidenceRouteMode).proof(evidenceId)
+      `/product/evidence/${encodeURIComponent(evidenceId)}/proof`
     );
     return response.proof;
   }
@@ -647,11 +634,7 @@ function sortTasks(tasks: readonly ProductTaskDTO[]): readonly ProductTaskDTO[] 
 
 function sortOrders(orders: readonly ProductOrderDTO[]): readonly ProductOrderDTO[] {
   const statusRank: Readonly<Record<ProductOrderDTO["status"], number>> = {
-    active: 0,
-    in_dispute: 1,
-    pending_participants: 2,
-    draft: 3,
-    completed: 4
+    registered: 0
   };
   return [...orders].sort((left, right) =>
     statusRank[left.status] - statusRank[right.status] ||
@@ -678,25 +661,15 @@ function normalizeBaseUrl(baseUrl: string | undefined): string | undefined {
 
 function runtimeEnv(): {
   readonly chainServicesUrl?: string | undefined;
-  readonly productApiBaseUrl?: string | undefined;
   readonly demoMode?: string | undefined;
-  readonly evidenceRouteMode?: string | undefined;
   readonly runtimeEnv?: string | undefined;
 } {
   const env = import.meta.env as Readonly<Record<string, string | undefined>> | undefined;
   return {
     chainServicesUrl: env?.VITE_UVP_CHAIN_SERVICES_URL,
-    productApiBaseUrl: env?.VITE_PRODUCT_API_BASE_URL,
     demoMode: env?.VITE_UVP_ORDER_APP_DEMO,
-    evidenceRouteMode: env?.VITE_UVP_ORDER_APP_EVIDENCE_ROUTE_MODE,
-    runtimeEnv: env?.VITE_UVP_RUNTIME_ENV ?? env?.VITE_UVP_CHAIN_SERVICES_ENV ?? env?.VITE_CHAIN_SERVICES_ENV
+    runtimeEnv: env?.VITE_UVP_RUNTIME_ENV
   };
-}
-
-function readEvidenceRouteMode(env: ReturnType<typeof runtimeEnv>): EvidenceRouteMode {
-  return env.evidenceRouteMode === "chain-services-compat"
-    ? "chain-services-compat"
-    : "prd63";
 }
 
 function normalizeRuntimeEnv(value: string | undefined): string | undefined {

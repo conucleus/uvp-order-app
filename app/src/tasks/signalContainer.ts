@@ -1,16 +1,12 @@
-import type { ChainAttestationStatus, ChainProofRowDTO, ProductTaskDTO } from "@uvp-eth/product-dto";
+import type { ChainProofRowDTO, ProductTaskDTO } from "@uvp-eth/product-dto";
 import { executorOverlayForTask, resourceRequirementDisplays } from "./addOnTypes";
 import { taskRequiredInputsFromCapability } from "./taskPresentation";
 import { cleanString } from "./taskUtils";
-
-export type SupplierTrustTone = "ok" | "danger" | "neutral";
 
 export interface TaskSignalContainerSummary {
   readonly executingWallet?: string;
   readonly executingWalletLabel: string;
   readonly executingWalletSourceLabel: string;
-  readonly supplierTrustLabel?: string;
-  readonly supplierTrustTone: SupplierTrustTone;
   readonly requiredInputLabels: readonly string[];
   readonly evidenceLabels: readonly string[];
   readonly requiredSummary: string;
@@ -29,10 +25,6 @@ export function signalContainerForTask(task: ProductTaskDTO): TaskSignalContaine
     ...(executingWallet.wallet ? { executingWallet: executingWallet.wallet } : {}),
     executingWalletLabel: executingWallet.wallet ?? "等待分配",
     executingWalletSourceLabel: executingWallet.sourceLabel,
-    ...(task.supplierTrustStatus || task.supplierSubjectId
-      ? { supplierTrustLabel: supplierTrustLabel(task.supplierTrustStatus) }
-      : {}),
-    supplierTrustTone: supplierTrustTone(task.supplierTrustStatus),
     requiredInputLabels,
     evidenceLabels,
     requiredSummary: compactLabels(requiredInputLabels, "暂无必填输入"),
@@ -41,44 +33,6 @@ export function signalContainerForTask(task: ProductTaskDTO): TaskSignalContaine
     proofSummaryLabel: proofSummaryLabel(task),
     proofAvailable: Boolean(task.proofSummary?.txHash || task.proofSummary?.payloadHash || task.proofRows.length > 0)
   };
-}
-
-export function supplierTrustBlocker(task: ProductTaskDTO): string | undefined {
-  if (task.supplierTrustStatus === "revoked") {
-    return "供应商背书已撤销，不能继续提交。";
-  }
-  if (task.supplierTrustStatus === "not_found") {
-    return "未发现供应商背书，不能继续提交。";
-  }
-  if (task.supplierSubjectId && !task.supplierTrustStatus) {
-    return "供应商背书待同步，不能继续提交。";
-  }
-  return undefined;
-}
-
-export function supplierTrustLabel(status: ChainAttestationStatus | undefined): string {
-  switch (status) {
-    case "attested":
-      return "已背书";
-    case "revoked":
-      return "背书已撤销";
-    case "not_found":
-      return "未发现背书";
-    case undefined:
-      return "背书待同步";
-  }
-}
-
-export function supplierTrustTone(status: ChainAttestationStatus | undefined): SupplierTrustTone {
-  switch (status) {
-    case "attested":
-      return "ok";
-    case "revoked":
-      return "danger";
-    case "not_found":
-    case undefined:
-      return "neutral";
-  }
 }
 
 export function compactLabels(labels: readonly string[], emptyLabel: string, limit = 3): string {

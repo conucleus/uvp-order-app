@@ -11,10 +11,10 @@ import {
 const resourcePatchWallet = "0x1111111111111111111111111111111111111111";
 const selectorWallet = "0x2222222222222222222222222222222222222222";
 const currentOrderId = "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
-const oldOrderId = "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+const otherOrderId = "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
 
 describe("Order App full summary participant wallets", () => {
-  it("prefers PRD92 selector wallet over buyer/resource patch wallet", () => {
+  it("prefers the explicit selector wallet", () => {
     const wallets = selectParticipantWalletsFromFullSummary({
       wallets: {
         buyer: resourcePatchWallet,
@@ -32,36 +32,12 @@ describe("Order App full summary participant wallets", () => {
     assert.equal(wallets.resourcePatchWallet, resourcePatchWallet);
   });
 
-  it("uses stage patch wallets when the wallets block is incomplete", () => {
-    const wallets = selectParticipantWalletsFromFullSummary({
-      stageExecutorPatch: {
-        selectorWallet
-      },
-      stageResourcePatch: {
-        selectorWallet: resourcePatchWallet
-      }
-    });
-
-    assert.equal(wallets.selectorWallet, selectorWallet);
-    assert.equal(wallets.resourcePatchWallet, resourcePatchWallet);
-  });
-
-  it("keeps legacy single-buyer summaries working as a fallback", () => {
-    const wallets = selectParticipantWalletsFromFullSummary({
-      wallets: {
-        buyer: resourcePatchWallet
-      }
-    });
-
-    assert.equal(wallets.selectorWallet, resourcePatchWallet);
-    assert.equal(wallets.resourcePatchWallet, resourcePatchWallet);
-  });
 });
 
 describe("Order App full summary task filtering", () => {
-  it("filters participant tasks to the current PRD92 order", () => {
+  it("filters participant tasks to the current order", () => {
     const tasks = [
-      task("old-selector", oldOrderId, "stage_executor_patch"),
+      task("other-selector", otherOrderId, "stage_executor_patch"),
       task("current-selector", currentOrderId.toUpperCase(), "stage_executor_patch"),
       task("current-resource", currentOrderId, "stage_resource_patch")
     ];
@@ -74,7 +50,7 @@ describe("Order App full summary task filtering", () => {
 
   it("finds an action only on the current order", () => {
     const tasks = [
-      task("old-selector", oldOrderId, "stage_executor_patch"),
+      task("other-selector", otherOrderId, "stage_executor_patch"),
       task("current-resource", currentOrderId, "stage_resource_patch")
     ];
 

@@ -17,7 +17,6 @@ import {
   targetStageId
 } from "./addOnTypes";
 import type { PrepareSubmitInput } from "./pluginRuntime";
-import { supplierTrustBlocker } from "./signalContainer";
 import { parseEvidenceIds, sameAddress } from "./taskUtils";
 
 export interface AddOnManifestRuntimeState {
@@ -110,11 +109,6 @@ export function validateAddOnManifestAction(
   if (state.task.canSubmit === false) {
     errors.push("当前钱包暂不能提交此待办。请确认你使用的钱包与订单登记的一致。");
   }
-  const trustBlocker = supplierTrustBlocker(state.task);
-  if (trustBlocker) {
-    errors.push(trustBlocker);
-  }
-
   for (const component of addOnManifestInputComponents(manifest)) {
     if (!component.required || !component.inputId) {
       continue;
@@ -245,7 +239,7 @@ function semanticErrorsForAction(
       }
     }
     if (action.inputBindings.writerWallet) {
-      errors.push("Phase 2 资源补充必须使用 selectorWallet，不能使用 writerWallet。");
+      errors.push("资源补充必须使用 selectorWallet，不能使用 writerWallet。");
     }
     if (action.inputBindings.visibility) {
       errors.push("资源可见性属于链下资源清单，不能发送到 prepare 请求。");

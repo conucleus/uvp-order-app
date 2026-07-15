@@ -73,8 +73,6 @@ function readWalletAddressOverride(
 export function walletOverrideAllowed(env: Readonly<Record<string, string | boolean | undefined>> | undefined = readImportMetaEnv()): boolean {
   const runtime = (
     envString(env, "VITE_UVP_RUNTIME_ENV") ??
-    envString(env, "VITE_UVP_CHAIN_SERVICES_ENV") ??
-    envString(env, "VITE_CHAIN_SERVICES_ENV") ??
     envString(env, "MODE")
   )?.trim().toLowerCase();
   if (runtime) {

@@ -18,7 +18,7 @@ test.describe("UVP Order App participant shell", () => {
     await expect(page.getByText("凭证指纹").first()).toBeVisible();
   });
 
-  test("renders PRD65 task plugin runtime and keeps proof drawer collapsed", async ({ page }) => {
+  test("renders task plugin task plugin runtime and keeps proof drawer collapsed", async ({ page }) => {
     await page.goto("/");
 
     await expect(page.getByRole("heading", { name: "我的待办" })).toBeVisible();

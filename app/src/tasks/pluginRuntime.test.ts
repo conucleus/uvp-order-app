@@ -33,10 +33,7 @@ import {
   taskExecutorDisplay,
   taskPrimaryActionLabel
 } from "./taskPresentation.js";
-import {
-  signalContainerForTask,
-  supplierTrustBlocker
-} from "./signalContainer.js";
+import { signalContainerForTask } from "./signalContainer.js";
 import {
   filterParticipantTasksForWallet,
   sortParticipantTasks,
@@ -47,7 +44,7 @@ import {
 const wallet = "0x9d8A62f656a8d1615C1294FD71E9cfB3e4855A4F";
 
 describe("task plugin runtime", () => {
-  it("defines PRD84 add-on kinds and keeps legacy fulfillment kinds available", () => {
+  it("defines add-on action kinds and supported capability plugin kinds", () => {
     assert.deepEqual(supportedTaskAddOnKinds, [
       "submit_signal",
       "stage_executor_patch",
@@ -62,7 +59,7 @@ describe("task plugin runtime", () => {
     ]);
 
     for (const kind of supportedTaskAddOnKinds) {
-      const task = taskFixture(legacyKindForAddOn(kind), { addOnKind: kind, canSubmit: true });
+      const task = taskFixture(capabilityKindForAddOn(kind), { addOnKind: kind, canSubmit: true });
       const plugin = pluginForTask(task);
       const state = filledState(task);
       const validation = plugin.validate(state);
@@ -71,9 +68,9 @@ describe("task plugin runtime", () => {
       assert.equal(taskAddOnKind(task), kind);
       assert.equal(plugin.kind, kind);
       assert.equal(validation.ok, true);
-      assert.deepEqual(prepareInput.evidenceIds, [`evidence-${legacyKindForAddOn(kind)}`]);
+      assert.deepEqual(prepareInput.evidenceIds, [`evidence-${capabilityKindForAddOn(kind)}`]);
       assert.equal(prepareInput.walletAddress, wallet);
-      assert.equal(prepareInput.intent, legacyKindForAddOn(kind) === "dispute_material" ? "raise_dispute" : "confirm_stage");
+      assert.equal(prepareInput.intent, capabilityKindForAddOn(kind) === "dispute_material" ? "raise_dispute" : "confirm_stage");
     }
   });
 
@@ -92,9 +89,8 @@ describe("task plugin runtime", () => {
     assert.equal(plugin.validate(filledState(task)).ok, true);
   });
 
-  it("uses capability plugin metadata before legacy fulfillmentKind presentation", () => {
+  it("uses explicit capability plugin metadata for presentation", () => {
     const task = taskFixture("delivery_update", {
-      fulfillmentKind: "delivery_update",
       capabilityPlugin: {
         pluginKind: "validation_confirm",
         source: "explicit",
@@ -128,20 +124,6 @@ describe("task plugin runtime", () => {
     assert.equal(taskPrimaryActionLabel(task), "确认验收结论");
   });
 
-  it("keeps legacy fulfillmentKind-only tasks selectable", () => {
-    const task = taskFixture("dispute_material", {
-      capabilityPlugin: undefined,
-      fulfillmentKind: "dispute_material"
-    });
-    const plugin = pluginForTask(task);
-    const presentation = pluginPresentationForTask(task, plugin);
-
-    assert.equal(taskAddOnKind(task), "submit_signal");
-    assert.equal(plugin.kind, "submit_signal");
-    assert.equal(presentation.title, "争议材料");
-    assert.match(presentation.summary, /争议说明/);
-  });
-
   it("keeps canSubmit false tasks blocked at the runtime boundary", () => {
     const task = taskFixture("validation_confirm", { canSubmit: false });
     const plugin = pluginForTask(task);
@@ -150,27 +132,8 @@ describe("task plugin runtime", () => {
     assert.match(plugin.validate(filledState(task)).errors.join("\n"), /当前钱包暂不能提交/);
   });
 
-  it("fails closed when supplier trust is missing or revoked", () => {
-    const missing = taskFixture("delivery_update", {
-      supplierSubjectId: "supplier-1",
-      supplierTrustStatus: "not_found",
-      canSubmit: true
-    });
-    const revoked = taskFixture("delivery_update", {
-      supplierSubjectId: "supplier-1",
-      supplierTrustStatus: "revoked",
-      canSubmit: true
-    });
-    const plugin = pluginForTask(revoked);
-
-    assert.equal(supplierTrustBlocker(missing), "未发现供应商背书，不能继续提交。");
-    assert.equal(supplierTrustBlocker(revoked), "供应商背书已撤销，不能继续提交。");
-    assert.equal(plugin.validate(filledState(revoked)).ok, false);
-    assert.match(plugin.validate(filledState(revoked)).errors.join("\n"), /供应商背书已撤销/);
-  });
-
   it("renders the payment placeholder contract without real funding claims", () => {
-    const task = taskFixture("payment_placeholder", { capabilityPlugin: undefined });
+    const task = taskFixture("payment_placeholder");
     const plugin = pluginForTask(task);
     const presentation = pluginPresentationForTask(task, plugin);
     const copy = [
@@ -183,6 +146,12 @@ describe("task plugin runtime", () => {
     assert.match(copy, /付款条件占位/);
     assert.match(copy, /不托管、不划转、不释放、不退款/);
     assert.doesNotMatch(copy, /escrow released|funds held|资金已划转|资金已释放/u);
+  });
+
+  it("rejects tasks without an explicit capability plugin kind", () => {
+    const task = taskFixture("payment_placeholder", { capabilityPlugin: undefined });
+
+    assert.throws(() => pluginForTask(task), /missing capabilityPlugin\.pluginKind/);
   });
 
   it("uses executor patch action targets for executor patch capable tasks", () => {
@@ -270,7 +239,7 @@ describe("task plugin runtime", () => {
     assert.equal(modes.every((mode) => mode.priorAuthorityLabel === "已完成部分不变"), true);
   });
 
-  it("renders executor requirements and access status before legacy evidence", () => {
+  it("renders executor requirements and access status before evidence", () => {
     const task = taskFixture("delivery_update", {
       addOnKind: "submit_signal",
       resourceRequirements: {
@@ -383,7 +352,7 @@ describe("task plugin runtime", () => {
     assert.equal("visibility" in resourcePatchPrepare.input, false);
   });
 
-  it("blocks malformed Phase 2 manifest patch fields before prepare", () => {
+  it("blocks malformed manifest patch fields before prepare", () => {
     const selectorManifest = addOnManifestFixture("stage_executor_patch", "stage_executor_patch");
     const selectorAction = selectorManifest.actions[0]!;
     const selectorTask = taskFixture("evidence_submission", {
@@ -404,7 +373,7 @@ describe("task plugin runtime", () => {
       confirmations: {}
     });
     const resourcePatchManifest = addOnManifestFixture("stage_resource_patch", "stage_resource_patch", {
-      legacyResourceBindings: true
+      unsupportedResourceBindings: true
     });
     const resourcePatchAction = resourcePatchManifest.actions[0]!;
     const resourcePatchTask = taskFixture("payment_placeholder", {
@@ -538,8 +507,6 @@ describe("participant task inbox helpers", () => {
   it("summarizes signal container elements without protocol jargon", () => {
     const task = taskFixture("delivery_update", {
       participantWallet: wallet,
-      supplierSubjectId: "supplier-1",
-      supplierTrustStatus: "attested",
       proofSummary: {
         label: "已生成证明",
         txHash: "0x7a3b",
@@ -550,15 +517,12 @@ describe("participant task inbox helpers", () => {
     const visibleCopy = [
       summary.executingWalletLabel,
       summary.executingWalletSourceLabel,
-      summary.supplierTrustLabel,
       summary.requiredSummary,
       summary.proofSummaryLabel,
       summary.proofFingerprint
     ].join(" ");
 
     assert.equal(summary.executingWallet, wallet);
-    assert.equal(summary.supplierTrustLabel, "已背书");
-    assert.equal(summary.supplierTrustTone, "ok");
     assert.deepEqual(summary.evidenceLabels, ["凭证指纹"]);
     assert.equal(summary.proofAvailable, true);
     assert.doesNotMatch(visibleCopy, /HookReady|sourceId|signalId|ABI|calldata|gas/u);
@@ -675,7 +639,11 @@ function taskFixture(
     fundingImpact: "进入下一阶段条件检查",
     requiredEvidence: ["凭证指纹"],
     status: overrides.status ?? "open",
-    fulfillmentKind: kind,
+    capabilityPlugin: overrides.capabilityPlugin ?? {
+      pluginKind: kind,
+      source: "explicit",
+      requiredEvidence: ["凭证指纹"]
+    },
     primaryActionLabel: "提交确认",
     requiredInputs: [
       {
@@ -721,7 +689,7 @@ function filledState(task: ProductTaskDTO): TaskPluginState {
   };
 }
 
-function legacyKindForAddOn(kind: ParticipantAddOnKind): FulfillmentPluginKind {
+function capabilityKindForAddOn(kind: ParticipantAddOnKind): FulfillmentPluginKind {
   switch (kind) {
     case "stage_executor_patch":
     case "submit_signal":
@@ -734,7 +702,7 @@ function legacyKindForAddOn(kind: ParticipantAddOnKind): FulfillmentPluginKind {
 function addOnManifestFixture(
   addOnKind: ParticipantAddOnKind,
   actionKind: ParticipantAddOnManifestDTO["actions"][number]["actionKind"],
-  options: { readonly legacyResourceBindings?: boolean } = {}
+  options: { readonly unsupportedResourceBindings?: boolean } = {}
 ): ParticipantAddOnManifestDTO {
   if (actionKind === "stage_executor_patch") {
     return {
@@ -781,14 +749,14 @@ function addOnManifestFixture(
   }
   if (actionKind === "stage_resource_patch") {
     const resourceComponents: ParticipantAddOnManifestComponentDTO[] = [
-      { componentId: "selector-wallet", componentKind: "wallet", inputId: options.legacyResourceBindings ? "writerWallet" : "selectorWallet", label: "请求方钱包", required: true },
+      { componentId: "selector-wallet", componentKind: "wallet", inputId: options.unsupportedResourceBindings ? "writerWallet" : "selectorWallet", label: "请求方钱包", required: true },
       { componentId: "target-stage", componentKind: "stage_select", inputId: "targetStageId", label: "目标阶段", required: true },
       { componentId: "resource-key", componentKind: "text", inputId: "resourceKey", label: "资源键", required: true },
       { componentId: "manifest-uri", componentKind: "uri", inputId: "manifestURI", label: "资源清单 URI", required: true },
       { componentId: "manifest-hash", componentKind: "hash", inputId: "manifestHash", label: "清单指纹", required: true },
       { componentId: "policy-hash", componentKind: "hash", inputId: "policyHash", label: "权限指纹", required: true }
     ];
-    if (options.legacyResourceBindings) {
+    if (options.unsupportedResourceBindings) {
       resourceComponents.push({
         componentId: "visibility",
         componentKind: "select",
@@ -821,13 +789,13 @@ function addOnManifestFixture(
         label: "补充凭证要求",
         primary: true,
         inputBindings: {
-          ...(options.legacyResourceBindings ? { writerWallet: "writerWallet" } : { selectorWallet: "selectorWallet" }),
+          ...(options.unsupportedResourceBindings ? { writerWallet: "writerWallet" } : { selectorWallet: "selectorWallet" }),
           targetStageId: "targetStageId",
           resourceKey: "resourceKey",
           manifestURI: "manifestURI",
           manifestHash: "manifestHash",
           policyHash: "policyHash",
-          ...(options.legacyResourceBindings ? { visibility: "visibility" } : {})
+          ...(options.unsupportedResourceBindings ? { visibility: "visibility" } : {})
         }
       }]
     };
