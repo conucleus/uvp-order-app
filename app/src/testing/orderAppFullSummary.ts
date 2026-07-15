@@ -10,21 +10,10 @@ export interface OrderAppFullParticipantWallets {
 export function selectParticipantWalletsFromFullSummary(raw: JsonRecord): OrderAppFullParticipantWallets {
   return {
     selectorWallet: requiredString(raw, [
-      "wallets.selector",
-      "stageExecutorPatch.selectorWallet",
-      "selectorWallet",
-      "selector.wallet",
-      "wallets.buyer",
-      "buyerWallet"
+      "wallets.selector"
     ], "selector wallet"),
     resourcePatchWallet: requiredString(raw, [
-      "wallets.buyer",
-      "stageResourcePatch.selectorWallet",
-      "wallets.resourcePatch",
-      "resourcePatchWallet",
-      "buyerWallet",
-      "wallets.selector",
-      "selectorWallet"
+      "wallets.buyer"
     ], "resource patch wallet")
   };
 }

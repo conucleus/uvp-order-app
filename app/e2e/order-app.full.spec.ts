@@ -25,14 +25,14 @@ interface TaskListResponse {
 }
 
 interface OrderResponse {
-  readonly order: Phase2ProductOrderDTO;
+  readonly order: ChainBackedProductOrderDTO;
 }
 
 interface ProofResponse {
   readonly proof: unknown;
 }
 
-type Phase2ProductOrderDTO = ProductOrderDTO & {
+type ChainBackedProductOrderDTO = ProductOrderDTO & {
   readonly planId?: string;
   readonly planHash?: string;
 };
@@ -63,17 +63,17 @@ const fullModeEnabled = process.env.UVP_ORDER_APP_E2E_PROFILE === "full";
 const fullModeGate = fullModeEnabled ? assertOrderAppFullModeGate(process.env) : undefined;
 const summary = fullModeGate ? readSummaryExpectations(fullModeGate) : placeholderSummary();
 
-test.describe.serial("PRD104 full Order App staging participant gate", () => {
+test.describe.serial("full staging participant full Order App staging participant gate", () => {
   test.skip(
     !fullModeEnabled,
-    "PRD104 full E2E requires UVP_ORDER_APP_E2E_PROFILE=full, Product API URL, and flow summary"
+    "full staging participant full E2E requires UVP_ORDER_APP_E2E_PROFILE=full, Product API URL, and flow summary"
   );
 
   test.beforeAll(() => {
     assertSummaryGate(summary);
   });
 
-  test("Product DTOs expose chain-backed Phase 2 proof data", async ({ request }) => {
+  test("Product DTOs expose chain-backed proof data", async ({ request }) => {
     const selectorTasks = await loadParticipantTasks(request, summary.selectorWallet);
     const resourcePatchTasks = await loadParticipantTasks(request, summary.resourcePatchWallet);
     const executorTasks = await loadParticipantTasks(request, summary.activeExecutorWallet);
@@ -220,7 +220,7 @@ function readSummaryExpectations(gate: OrderAppFullModeGate): SummaryExpectation
       "metadataURI",
       "stageExecutorPatch.metadataURI",
       "transactions.StageExecutorPatchApplied.metadataURI"
-    ]) ?? "ipfs://phase2-customs-executor-metadata",
+    ]) ?? "ipfs://customs-executor-metadata",
     resourceKey: optionalString(raw, [
       "resourceManifest.resourceKey",
       "stageResourcePatch.resourceKey",
@@ -230,7 +230,7 @@ function readSummaryExpectations(gate: OrderAppFullModeGate): SummaryExpectation
       "resourceManifest.manifestURI",
       "stageResourcePatch.manifestURI",
       "manifestURI"
-    ]) ?? "ipfs://phase2-customs-resource-manifest",
+    ]) ?? "ipfs://customs-resource-manifest",
     resourceManifestHash: requiredString(raw, [
       "resourceManifest.manifestHash",
       "resourceManifest.hash",
@@ -317,7 +317,7 @@ function shouldRetryTasksWithoutOrderId(status: number): boolean {
   return status === 400 || status === 404;
 }
 
-async function loadOrder(request: APIRequestContext, orderId: string): Promise<Phase2ProductOrderDTO> {
+async function loadOrder(request: APIRequestContext, orderId: string): Promise<ChainBackedProductOrderDTO> {
   const response = await request.get(`${summary.chainServicesUrl}/product/orders/${encodeURIComponent(orderId)}`);
   expect(response.ok(), await response.text()).toBe(true);
   return ((await response.json()) as OrderResponse).order;
@@ -362,14 +362,14 @@ async function installSigningWallet(page: Page, allowedWallets: readonly string[
   );
   if (missingWallets.length > 0) {
     throw new Error([
-      `no PRD104 test private key configured for wallet ${missingWallets.join(", ")}`,
-      "set UVP_STAGING_SELECTOR_PRIVATE_KEY for executor patch actions, UVP_PHASE2_BUYER_PRIVATE_KEY for resource patch actions, and UVP_PHASE2_CUSTOMS_EXECUTOR_PRIVATE_KEY for submit signal actions"
+      `no full staging participant test private key configured for wallet ${missingWallets.join(", ")}`,
+      "set UVP_STAGING_SELECTOR_PRIVATE_KEY for executor patch actions, UVP_CUSTOMS_BUYER_PRIVATE_KEY for resource patch actions, and UVP_CUSTOMS_EXECUTOR_PRIVATE_KEY for submit signal actions"
     ].join("; "));
   }
   await page.exposeFunction("__uvpOrderAppE2eSignTypedData", async (walletAddress: string, encodedTypedData: string) => {
     const account = accounts.find((item) => sameAddress(item.address, walletAddress));
     if (!account) {
-      throw new Error(`no PRD104 test private key configured for ${walletAddress}`);
+      throw new Error(`no full staging participant test private key configured for ${walletAddress}`);
     }
     const typedData = JSON.parse(encodedTypedData) as {
       readonly domain: Record<string, unknown>;
@@ -410,8 +410,8 @@ interface SigningAccount {
 function signingAccounts(): SigningAccount[] {
   const keys = [
     optionalEnvPrivateKey("UVP_STAGING_SELECTOR_PRIVATE_KEY"),
-    requiredEnvPrivateKey("UVP_PHASE2_BUYER_PRIVATE_KEY"),
-    requiredEnvPrivateKey("UVP_PHASE2_CUSTOMS_EXECUTOR_PRIVATE_KEY")
+    requiredEnvPrivateKey("UVP_CUSTOMS_BUYER_PRIVATE_KEY"),
+    requiredEnvPrivateKey("UVP_CUSTOMS_EXECUTOR_PRIVATE_KEY")
   ].filter((key): key is Hex => Boolean(key));
   const accounts = keys.map((key) => {
     const account = privateKeyToAccount(key);
@@ -743,22 +743,8 @@ function eventTxHashPaths(eventName: EventName): readonly string[] {
     `transactions.${eventName}.txHash`,
     `transactions.${eventName}.transactionHash`,
     `transactions.${key}.txHash`,
-    `transactions.${key}.transactionHash`,
-    ...legacyEventTxPaths(eventName)
+    `transactions.${key}.transactionHash`
   ];
-}
-
-function legacyEventTxPaths(eventName: EventName): readonly string[] {
-  switch (eventName) {
-    case "StageExecutorPatchApplied":
-      return ["executorPatchTxHash", "stageExecutorPatchTxHash", "stageExecutorPatch.txHash"];
-    case "StageExecutorActivated":
-      return ["executorActivatedTxHash", "stageExecutorActivatedTxHash", "stageExecutorActivated.txHash", "executorPatchTxHash"];
-    case "StageResourcePatchApplied":
-      return ["resourcePatchTxHash", "stageResourcePatchTxHash", "stageResourcePatch.txHash"];
-    case "SignalSubmitted":
-      return ["targetSignalTxHash", "signalTxHash", "targetSignal.txHash", "transactions.submitSignalTxHash"];
-  }
 }
 
 function requiredEvidenceRef(value: JsonRecord): string {

@@ -24,7 +24,6 @@ import {
   taskRequiredEvidenceLabels,
   taskRequiredInputsFromCapability
 } from "./taskPresentation";
-import { supplierTrustBlocker } from "./signalContainer";
 import { parseEvidenceIds } from "./taskUtils";
 
 export type TaskSubmitIntent = "confirm_stage" | "reject_stage" | "raise_dispute" | "resolve_dispute";
@@ -92,7 +91,7 @@ export const supportedTaskAddOnKinds: readonly ParticipantAddOnKind[] = [
   "stage_resource_patch"
 ];
 
-export const supportedLegacyFulfillmentKinds: readonly FulfillmentPluginKind[] = [
+export const supportedTaskPluginKinds: readonly FulfillmentPluginKind[] = [
   "payment_placeholder",
   "evidence_submission",
   "delivery_update",
@@ -100,9 +99,7 @@ export const supportedLegacyFulfillmentKinds: readonly FulfillmentPluginKind[] =
   "dispute_material"
 ];
 
-export const supportedTaskPluginKinds = supportedLegacyFulfillmentKinds;
-
-const legacyPresentationByKind: Readonly<Record<FulfillmentPluginKind, Omit<TaskPluginSpec, "kind">>> = {
+const defaultPresentationByKind: Readonly<Record<FulfillmentPluginKind, Omit<TaskPluginSpec, "kind">>> = {
   payment_placeholder: {
     title: "付款条件占位",
     summary: "记录付款条件、凭证指纹和参与方确认；当前不代表真实资金移动。",
@@ -224,17 +221,17 @@ export function requiredInputsForTask(task: ProductTaskDTO, plugin: TaskPlugin):
 
 export function pluginPresentationForTask(task: ProductTaskDTO, plugin: TaskPlugin = pluginForTask(task)): TaskPluginPresentation {
   const requiredEvidence = taskRequiredEvidenceLabels(task);
-  const legacyKind = taskCapabilityPluginKind(task);
-  const legacy = legacyPresentationByKind[legacyKind];
+  const pluginKind = taskCapabilityPluginKind(task);
+  const defaults = defaultPresentationByKind[pluginKind];
   const manifest = addOnManifestForTask(task);
   return {
     kind: plugin.kind,
     ...(task.capabilityPlugin?.source ? { source: task.capabilityPlugin.source } : {}),
-    title: manifest?.title ?? task.capabilityPlugin?.title ?? legacy.title ?? plugin.title,
-    summary: manifest?.summary ?? task.capabilityPlugin?.summary ?? legacy.summary ?? plugin.summary,
+    title: manifest?.title ?? task.capabilityPlugin?.title ?? defaults.title ?? plugin.title,
+    summary: manifest?.summary ?? task.capabilityPlugin?.summary ?? defaults.summary ?? plugin.summary,
     primaryActionLabel: taskPrimaryActionLabel(task),
-    allowedEvidenceTypes: requiredEvidence.length > 0 ? requiredEvidence : legacy.allowedEvidenceTypes ?? plugin.allowedEvidenceTypes,
-    confirmationCopy: legacy.confirmationCopy ?? plugin.confirmationCopy
+    allowedEvidenceTypes: requiredEvidence.length > 0 ? requiredEvidence : defaults.allowedEvidenceTypes ?? plugin.allowedEvidenceTypes,
+    confirmationCopy: defaults.confirmationCopy ?? plugin.confirmationCopy
   };
 }
 
@@ -274,7 +271,7 @@ function createTaskPlugin(spec: TaskPluginSpec): TaskPlugin {
     buildPrepareSubmit: (input) => ({
       evidenceIds: collectEvidenceIds(input),
       walletAddress: input.walletAddress ?? "",
-      intent: legacyPresentationByKind[taskCapabilityPluginKind(input.task)].intent
+      intent: defaultPresentationByKind[taskCapabilityPluginKind(input.task)].intent
     })
   };
 }
@@ -501,11 +498,6 @@ function validateTaskPluginInput(spec: TaskPluginSpec, state: TaskPluginState): 
   if (task.canSubmit === false) {
     errors.push("当前钱包暂不能提交此待办。请确认你使用的钱包与订单登记的一致。");
   }
-  const trustBlocker = supplierTrustBlocker(task);
-  if (trustBlocker) {
-    errors.push(trustBlocker);
-  }
-
   for (const input of requiredInputsForTask(task, plugin)) {
     if (!input.required || input.completed) {
       continue;

@@ -11,7 +11,6 @@ import {
   XCircle
 } from "lucide-react";
 import type {
-  ChainAttestationStatus,
   ParticipantStatus,
   ProductOrderDTO,
   ProductTaskDTO,
@@ -246,11 +245,6 @@ export function OrderRoom({ order, task, tasks = [] }: OrderRoomProps) {
                 </div>
                 <div className="participant-badges">
                   {participantTask?.status === "open" ? <span className="mini-badge mini-action">待处理</span> : null}
-                  {participantTask?.supplierTrustStatus ? (
-                    <span className={`mini-badge mini-${trustTone(participantTask.supplierTrustStatus)}`}>
-                      {trustLabel(participantTask.supplierTrustStatus)}
-                    </span>
-                  ) : null}
                   <span className="mini-badge mini-neutral">权限以订单权限表为准</span>
                 </div>
               </div>
@@ -441,28 +435,6 @@ function findParticipantTask(role: string, tasks: readonly ProductTaskDTO[]): Pr
 function nextResponsibilityForParticipant(role: string, order: ProductOrderDTO): string {
   const stage = order.stages.find((item) => item.ownerRole && (role.includes(item.ownerRole) || item.ownerRole.includes(role)));
   return stage ? `${stage.name}：${stageLabel[stage.status]}` : "暂无当前待办";
-}
-
-function trustLabel(status: ChainAttestationStatus): string {
-  switch (status) {
-    case "attested":
-      return "已背书";
-    case "revoked":
-      return "背书撤销";
-    case "not_found":
-      return "未发现背书";
-  }
-}
-
-function trustTone(status: ChainAttestationStatus): "ok" | "danger" | "neutral" {
-  switch (status) {
-    case "attested":
-      return "ok";
-    case "revoked":
-      return "danger";
-    case "not_found":
-      return "neutral";
-  }
 }
 
 function orderTimeline(order: OrderRoomOrder): readonly OrderTimelineEvent[] {

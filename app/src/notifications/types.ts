@@ -5,9 +5,7 @@ export type OrderAppNotificationKind =
   | "signal_submitted"
   | "submission_confirmed"
   | "submission_failed"
-  | "task_revoked"
-  | "plan_revoked"
-  | "supplier_revoked";
+  | "task_revoked";
 
 export type OrderAppNotificationSeverity = "info" | "action" | "warning" | "critical" | "success";
 export type OrderAppNotificationReadStatus = "read" | "unread";

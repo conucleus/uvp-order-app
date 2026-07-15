@@ -53,7 +53,11 @@ export function taskAddOnLabel(kind: ParticipantAddOnKind): string {
 }
 
 export function taskCapabilityPluginKind(task: ProductTaskDTO): FulfillmentPluginKind {
-  return task.capabilityPlugin?.pluginKind ?? task.fulfillmentKind ?? "evidence_submission";
+  const pluginKind = task.capabilityPlugin?.pluginKind;
+  if (!pluginKind) {
+    throw new Error(`task ${task.taskId} is missing capabilityPlugin.pluginKind`);
+  }
+  return pluginKind;
 }
 
 export function taskPrimaryActionLabel(task: ProductTaskDTO, fallback?: string): string {

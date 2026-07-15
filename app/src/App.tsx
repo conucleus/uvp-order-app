@@ -127,7 +127,7 @@ export default function App() {
         <SystemBanner
           tone="warn"
           title="参与者服务未配置"
-          text="请设置 VITE_UVP_CHAIN_SERVICES_URL 或 VITE_PRODUCT_API_BASE_URL；本应用不会自动伪造真实订单。"
+          text="请设置 VITE_UVP_CHAIN_SERVICES_URL；本应用不会自动伪造真实订单。"
         />
       ) : null}
       {data?.source.kind === "demo" ? (
@@ -319,6 +319,6 @@ function selectOrder(
 ): ProductOrderDTO | undefined {
   return orders.find((order) => order.orderId === orderId) ??
     orders.find((order) => order.orderId === task?.orderId) ??
-    orders.find((order) => order.status === "active") ??
+    orders.find((order) => order.status === "registered") ??
     orders[0];
 }

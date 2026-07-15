@@ -3,7 +3,6 @@ import { describe, it } from "node:test";
 import { demoProductCatalog } from "@uvp-eth/product-dto/fixtures";
 import {
   createProductApiClient,
-  evidenceRoutes,
   type ProductApiClientOptions
 } from "./productApi.js";
 
@@ -148,13 +147,6 @@ describe("order app Product API boundary", () => {
     assert.equal(accepted.invite && (accepted.invite as { readonly status: string }).status, "accepted");
     assert.ok(requested.some((request) => request.method === "GET" && request.url.includes("walletAddress=")));
     assert.ok(requested.some((request) => request.method === "POST" && request.url.includes("/accept")));
-  });
-
-  it("keeps PRD63 evidence routes separate from the chain-services compatibility route", () => {
-    assert.equal(evidenceRoutes("prd63").upload, "/evidence");
-    assert.equal(evidenceRoutes("prd63").proof("ev 1"), "/evidence/ev%201/proof");
-    assert.equal(evidenceRoutes("chain-services-compat").upload, "/product/evidence");
-    assert.equal(evidenceRoutes("chain-services-compat").proof("ev 1"), "/product/evidence/ev%201/proof");
   });
 
   it("prepares and submits executor and resource patches through Product API routes", async () => {

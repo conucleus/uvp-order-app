@@ -1,6 +1,6 @@
 import { expect, test } from "@playwright/test";
 
-test.describe("PRD98 signal container evidence and proof experience", () => {
+test.describe("signal container signal container evidence and proof experience", () => {
   test("blocks submit until required evidence references are supplied", async ({ page }) => {
     await page.goto("/");
     await openCustomsTask(page);

@@ -61,7 +61,6 @@ import {
 import { shortWallet } from "../auth/participant";
 import {
   signalContainerForTask,
-  supplierTrustBlocker,
   type TaskSignalContainerSummary
 } from "./signalContainer";
 import { cleanString, sameAddress } from "./taskUtils";
@@ -306,9 +305,6 @@ export function TaskPluginHost({
           <Detail label="截止时间" value={task.deadline} />
           <Detail label="影响" value={task.fundingImpact} />
           <Detail label="订单" value={order?.title ?? task.orderTitle} />
-          {signalContainer.supplierTrustLabel ? (
-            <Detail label="供应商背书" value={signalContainer.supplierTrustLabel} />
-          ) : null}
           <Detail label="必填项" value={signalContainer.requiredSummary} />
           <Detail label="状态" value={display.label} />
         </div>
@@ -472,13 +468,6 @@ function TaskContainerSummary({ summary }: { readonly summary: TaskSignalContain
         <span>{summary.executingWalletLabel}</span>
         <small>{summary.executingWalletSourceLabel}</small>
       </div>
-      {summary.supplierTrustLabel ? (
-        <div className={`signal-container-item signal-container-trust-${summary.supplierTrustTone}`}>
-          <strong>供应商背书</strong>
-          <span>{summary.supplierTrustLabel}</span>
-          <small>{summary.supplierTrustTone === "danger" ? "暂停提交并联系订单负责人" : "提交前核对背书状态"}</small>
-        </div>
-      ) : null}
       <div className="signal-container-item">
         <strong>必填输入/凭证</strong>
         <span>{summary.requiredSummary}</span>
@@ -934,10 +923,6 @@ function manifestActionBlockers(input: {
   readonly hasInjectedWallet: boolean;
 }): readonly string[] {
   const blockers: string[] = [];
-  const trustBlocker = supplierTrustBlocker(input.state.task);
-  if (trustBlocker) {
-    blockers.push(trustBlocker);
-  }
   if (input.action.actionKind === "stage_executor_patch" || input.action.actionKind === "stage_resource_patch") {
     if (input.source?.kind !== "real") {
       blockers.push(input.action.actionKind === "stage_executor_patch"
@@ -1934,10 +1919,6 @@ function executorPatchBlockers(input: {
   if (input.task.canSubmit === false) {
     blockers.push("当前钱包暂不能提交此待办。请确认你使用的钱包与订单登记的一致。");
   }
-  const trustBlocker = supplierTrustBlocker(input.task);
-  if (trustBlocker) {
-    blockers.push(trustBlocker);
-  }
   if (!input.selectedTarget || !input.draft.targetStageId.trim()) {
     blockers.push("请选择目标阶段。");
   } else if (input.selectedTarget.allowed === false) {
@@ -1999,10 +1980,6 @@ function resourcePatchBlockers(input: {
   }
   if (input.task.canSubmit === false) {
     blockers.push("当前钱包暂不能提交此待办。请确认你使用的钱包与订单登记的一致。");
-  }
-  const trustBlocker = supplierTrustBlocker(input.task);
-  if (trustBlocker) {
-    blockers.push(trustBlocker);
   }
   if (!input.selectedTarget || !input.draft.targetStageId.trim()) {
     blockers.push("请选择目标阶段。");

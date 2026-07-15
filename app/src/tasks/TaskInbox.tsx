@@ -99,11 +99,6 @@ export function TaskInbox({ tasks, participantWallet, selectedTaskId, onSelectTa
                     {executorDisplay.assigneeRoleLabel !== executorDisplay.performanceSlotLabel ? (
                       <span className="task-card-assignee">任务角色：{executorDisplay.assigneeRoleLabel}</span>
                     ) : null}
-                    {signalContainer.supplierTrustLabel ? (
-                      <span className={`signal-chip signal-chip-${signalContainer.supplierTrustTone}`}>
-                        供应商背书：{signalContainer.supplierTrustLabel}
-                      </span>
-                    ) : null}
                   </span>
                   {signalContainer.proofFingerprint ? (
                     <span className="task-card-proof">

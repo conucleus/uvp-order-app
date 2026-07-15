@@ -26,7 +26,6 @@ import {
   resourceRequirementDisplays,
   sameAddress,
   signalContainerForTask,
-  supplierTrustBlocker,
   taskPrimaryActionLabel,
   taskRequiredInputsFromCapability
 } from "../task-model";
@@ -304,12 +303,6 @@ export function EvidencePanel({
             <span>执行方钱包</span>
             <strong>{signalContainer?.executingWalletLabel ?? authorizedWallet ?? "等待分配"}</strong>
           </div>
-          {signalContainer?.supplierTrustLabel ? (
-            <div className="evidence-preflight-row">
-              <span>供应商背书</span>
-              <strong>{signalContainer.supplierTrustLabel}</strong>
-            </div>
-          ) : null}
           <label className="evidence-preflight-row">
             <span>签名钱包</span>
             <input
@@ -864,10 +857,6 @@ function preflightBlockers(input: {
   }
   if (input.task.canSubmit === false) {
     blockers.push("当前钱包暂不能提交此待办。请确认你使用的钱包与订单登记的一致。");
-  }
-  const trustBlocker = supplierTrustBlocker(input.task);
-  if (trustBlocker) {
-    blockers.push(trustBlocker);
   }
   if (!input.signingWallet.trim()) {
     blockers.push("缺少签名钱包。");

@@ -16,11 +16,9 @@ import {
 } from "./product-api-stub";
 
 test.describe("UVP Order App production readiness negatives", () => {
-  test("shows signal container wallet, trust, requirements, and proof context", async ({ page }) => {
+  test("shows signal container wallet, requirements, and proof context", async ({ page }) => {
     await installProductApiStub(page, {
       task: readinessTask({
-        supplierSubjectId: "supplier-customs-1",
-        supplierTrustStatus: "attested",
         proofSummary: {
           label: "等待提交凭证",
           payloadHash: "0x1111111111111111111111111111111111111111111111111111111111111111"
@@ -31,12 +29,10 @@ test.describe("UVP Order App production readiness negatives", () => {
 
     await expect(page.getByText("UVP Signal Console")).toBeVisible();
     await expect(page.getByLabel("待办提交要素").getByText("执行方钱包")).toBeVisible();
-    await expect(page.getByText("供应商背书：已背书")).toBeVisible();
     await expect(page.getByLabel("待办提交要素").getByText("必填输入/凭证")).toBeVisible();
     await expect(page.getByLabel("待办提交要素").getByText("凭证指纹")).toBeVisible();
 
     await page.getByRole("button", { name: "证明", exact: true }).click();
-    await expect(page.getByLabel("待办证明要素").getByText("已背书")).toBeVisible();
     await expect(page.getByLabel("待办证明要素").getByText("0x1111111111111111111111111111111111111111111111111111111111111111")).toBeVisible();
   });
 
@@ -98,21 +94,6 @@ test.describe("UVP Order App production readiness negatives", () => {
 
     await expect(page.getByText("提交已收到，等待索引确认")).toBeVisible();
     await expect(page.getByText("提交已确认")).toHaveCount(0);
-  });
-
-  test("negative: revoked plan warning remains visible", async ({ page }) => {
-    await installProductApiStub(page, {
-      task: readinessTask({
-        supplierTrustStatus: "revoked",
-        canSubmit: false
-      })
-    });
-    await page.goto("/");
-
-    await expect(page.getByText("当前供应商链上背书已撤销，请暂停提交并联系订单负责人。")).toBeVisible();
-    await expect(page.getByLabel("待办提交要素").getByText("背书已撤销")).toBeVisible();
-    await expect(page.getByLabel("提交阻断原因").getByText("当前钱包暂不能提交此待办。")).toBeVisible();
-    await expect(page.getByLabel("提交阻断原因").getByText("供应商背书已撤销，不能继续提交。")).toBeVisible();
   });
 
   test("submit_signal add-on renders resource requirements and access status", async ({ page }) => {
@@ -245,7 +226,7 @@ test.describe("UVP Order App production readiness negatives", () => {
     await expect(page.getByText("选择履约者", { exact: true }).first()).toBeVisible();
   });
 
-  test("executor patch action requires old executor signature for voluntary handoff", async ({ page }) => {
+  test("executor patch action requires previous executor signature for voluntary handoff", async ({ page }) => {
     await installProductApiStub(page, { task: handoffSelectorTask() });
     await page.goto("/");
 

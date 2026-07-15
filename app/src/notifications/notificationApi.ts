@@ -182,26 +182,6 @@ export function deriveOrderAppNotifications(input: {
     }
   }
 
-  for (const order of input.orders) {
-    if (revokedOrderText(order)) {
-      notifications.push({
-        notificationId: localNotificationId("plan_revoked", order.orderId),
-        kind: "plan_revoked",
-        severity: "critical",
-        readStatus: "unread",
-        orderId: order.orderId,
-        orderTitle: order.title,
-        eventLabel: "订单存在撤销风险",
-        message: revokedOrderText(order) ?? "订单关联的背书或参与方状态已撤销，请核对证明。",
-        actionHref: routeHash("orders", order.orderId),
-        proofHref: routeHash("proof", order.orderId),
-        createdAt: latestOrderEventTime(order),
-        source: "local_projection",
-        privacy: "participant_only"
-      });
-    }
-  }
-
   return [...dedupeNotifications(notifications)].sort(compareNotifications);
 }
 
@@ -279,15 +259,6 @@ function blockedNotificationKind(task: ProductTaskDTO): Extract<OrderAppNotifica
   return /撤销|revoked|cancel|取消/u.test(text) ? "task_revoked" : "submission_failed";
 }
 
-function revokedOrderText(order: ProductOrderDTO): string | undefined {
-  const text = `${order.statusLabel} ${order.currentTaskSummary} ${order.recentEvents.map((event) => event.text).join(" ")}`;
-  return /撤销|revoked|revoke|背书已撤销/u.test(text) ? "订单时间线出现撤销或背书风险，请核对证明后再继续处理。" : undefined;
-}
-
-function latestOrderEventTime(order: ProductOrderDTO): string {
-  return order.recentEvents[0]?.time ?? "";
-}
-
 function dedupeNotifications(notifications: readonly OrderAppNotificationDTO[]): readonly OrderAppNotificationDTO[] {
   return [...new Map(notifications.map((notification) => [notification.notificationId, notification])).values()];
 }
@@ -327,8 +298,6 @@ function notificationKind(value: unknown): OrderAppNotificationKind {
     case "submission_confirmed":
     case "submission_failed":
     case "task_revoked":
-    case "plan_revoked":
-    case "supplier_revoked":
       return value;
     default:
       return "task_ready";
@@ -364,10 +333,6 @@ function labelForKind(kind: OrderAppNotificationKind): string {
       return "处理失败";
     case "task_revoked":
       return "任务已撤销";
-    case "plan_revoked":
-      return "秩序背书已撤销";
-    case "supplier_revoked":
-      return "参与方背书已撤销";
   }
 }
 
