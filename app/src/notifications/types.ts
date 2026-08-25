@@ -29,6 +29,8 @@ export interface OrderAppNotificationDTO {
   readonly proofHref?: string;
   readonly createdAt: string;
   readonly readAt?: string;
+  /** True when the local read is kept but the server read receipt is still unsynced. */
+  readonly syncPending?: boolean;
   readonly source: OrderAppNotificationSource;
   readonly privacy: "participant_only";
 }

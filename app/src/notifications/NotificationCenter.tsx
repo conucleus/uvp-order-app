@@ -146,7 +146,9 @@ export function NotificationCenter({
               <div className="notification-copy">
                 <div className="notification-title-line">
                   <strong>{notification.eventLabel}</strong>
-                  <span>{notification.readStatus === "read" ? "已读" : "未读"}</span>
+                  <span>
+                    {notification.readStatus === "read" ? (notification.syncPending ? "已读·回执待同步" : "已读") : "未读"}
+                  </span>
                 </div>
                 <p>{notification.message}</p>
                 <div className="notification-meta">

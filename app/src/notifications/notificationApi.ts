@@ -31,6 +31,7 @@ export async function loadOrderAppNotifications(
   }
 
   try {
+    await syncPendingNotificationReads(data, session, fetcher);
     const response = await fetcher(joinUrl(data.source.baseUrl, participantPath("/product/me/activity-feed", session)), {
       method: "GET",
       headers: {
@@ -70,28 +71,71 @@ export async function markOrderAppNotificationRead(
   }
 
   try {
-    const response = await fetcher(
-      joinUrl(data.source.baseUrl, `/product/me/activity-feed/${encodeURIComponent(notification.notificationId)}/read`),
-      {
-        method: "POST",
-        headers: {
-          "content-type": "application/json"
-        },
-        body: JSON.stringify({
-          ...(session.walletAddress ? { walletAddress: session.walletAddress } : {})
-        })
-      }
-    );
+    const response = await postReadReceipt(data.source.baseUrl, session, notification.notificationId, fetcher);
     if (!response.ok) {
       throw new Error(await responseText(response));
     }
+    clearPendingRead(session, notification.notificationId);
     const body = await response.json() as ApiNotificationReadResponse;
     return body.notification
       ? normalizeApiNotification(body.notification)
       : { ...notification, readStatus: "read", readAt };
-  } catch {
-    return { ...notification, readStatus: "read", readAt };
+  } catch (error) {
+    enqueuePendingRead(session, notification.notificationId, readAt);
+    console.warn(`read receipt not persisted; queued for retry: ${notification.notificationId}`, error);
+    return { ...notification, readStatus: "read", readAt, syncPending: true };
   }
+}
+
+/**
+ * Replays read receipts that failed to reach the server earlier. Kept
+ * entries stay queued until a POST succeeds; the local read state is never
+ * rolled back.
+ */
+export async function syncPendingNotificationReads(
+  data: ProductHomeData,
+  session: ParticipantSession,
+  fetcher: Fetcher = globalThis.fetch.bind(globalThis)
+): Promise<{ readonly synced: number; readonly remaining: number }> {
+  const pending = pendingReadEntries(session);
+  if (data.source.kind !== "real" || pending.length === 0) {
+    return { synced: 0, remaining: pending.length };
+  }
+
+  let synced = 0;
+  for (const [notificationId] of pending) {
+    try {
+      const response = await postReadReceipt(data.source.baseUrl, session, notificationId, fetcher);
+      if (!response.ok) {
+        continue;
+      }
+      clearPendingRead(session, notificationId);
+      synced += 1;
+    } catch {
+      // keep queued for the next sync pass
+    }
+  }
+  return { synced, remaining: pending.length - synced };
+}
+
+function postReadReceipt(
+  baseUrl: string,
+  session: ParticipantSession,
+  notificationId: string,
+  fetcher: Fetcher
+): Promise<Response> {
+  return fetcher(
+    joinUrl(baseUrl, `/product/me/activity-feed/${encodeURIComponent(notificationId)}/read`),
+    {
+      method: "POST",
+      headers: {
+        "content-type": "application/json"
+      },
+      body: JSON.stringify({
+        ...(session.walletAddress ? { walletAddress: session.walletAddress } : {})
+      })
+    }
+  );
 }
 
 export function derivedNotificationList(data: ProductHomeData, session: ParticipantSession): OrderAppNotificationList {
@@ -369,6 +413,44 @@ function readNotificationIds(session: ParticipantSession): ReadonlyMap<string, s
 
 function localReadStateKey(session: ParticipantSession): string {
   return `uvp-order-app:notification-read:${session.walletAddress?.toLowerCase() ?? "anonymous"}`;
+}
+
+function pendingReadEntries(session: ParticipantSession): readonly (readonly [string, string])[] {
+  if (typeof window === "undefined") {
+    return [];
+  }
+  try {
+    const raw = window.localStorage.getItem(pendingReadStateKey(session));
+    const parsed = raw ? JSON.parse(raw) as Record<string, unknown> : {};
+    return Object.entries(parsed).filter((entry): entry is [string, string] => typeof entry[1] === "string");
+  } catch {
+    return [];
+  }
+}
+
+function enqueuePendingRead(session: ParticipantSession, notificationId: string, readAt: string): void {
+  if (typeof window === "undefined") {
+    return;
+  }
+  const next = Object.fromEntries(pendingReadEntries(session));
+  next[notificationId] = readAt;
+  window.localStorage.setItem(pendingReadStateKey(session), JSON.stringify(next));
+}
+
+function clearPendingRead(session: ParticipantSession, notificationId: string): void {
+  if (typeof window === "undefined") {
+    return;
+  }
+  const entries = pendingReadEntries(session);
+  if (!entries.some(([id]) => id === notificationId)) {
+    return;
+  }
+  const next = Object.fromEntries(entries.filter(([id]) => id !== notificationId));
+  window.localStorage.setItem(pendingReadStateKey(session), JSON.stringify(next));
+}
+
+function pendingReadStateKey(session: ParticipantSession): string {
+  return `uvp-order-app:notification-read-pending:${session.walletAddress?.toLowerCase() ?? "anonymous"}`;
 }
 
 function localNotificationId(kind: OrderAppNotificationKind, ...parts: readonly string[]): string {
