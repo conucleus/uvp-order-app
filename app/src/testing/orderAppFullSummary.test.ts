@@ -10,21 +10,22 @@ import {
 
 const resourcePatchWallet = "0x1111111111111111111111111111111111111111";
 const selectorWallet = "0x2222222222222222222222222222222222222222";
+const patchDerivedWallet = "0x3333333333333333333333333333333333333333";
 const currentOrderId = "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
 const otherOrderId = "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
 
 describe("Order App full summary participant wallets", () => {
-  it("prefers the explicit selector wallet", () => {
+  it("prefers the explicit summary wallets over stage patch wallets", () => {
     const wallets = selectParticipantWalletsFromFullSummary({
       wallets: {
         buyer: resourcePatchWallet,
         selector: selectorWallet
       },
       stageExecutorPatch: {
-        selectorWallet
+        selectorWallet: patchDerivedWallet
       },
       stageResourcePatch: {
-        selectorWallet: resourcePatchWallet
+        selectorWallet: patchDerivedWallet
       }
     });
 
