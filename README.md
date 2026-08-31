@@ -11,4 +11,4 @@ pnpm --filter @uvp-eth/order-app test
 pnpm --filter @uvp-eth/order-app test:e2e
 ```
 
-Set `VITE_UVP_CHAIN_SERVICES_URL` for the current Product API. `VITE_UVP_ORDER_APP_DEMO=1` enables checked-in local fixtures.
+Set `VITE_UVP_CHAIN_SERVICES_URL` for the current Product API. The app only talks to the real Product API; without it the shell renders fail-closed with no tasks or proofs.

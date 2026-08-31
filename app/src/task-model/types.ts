@@ -1,7 +1,6 @@
-import type { ChainProofRowDTO, ProductOrderDTO, ProductTaskDTO } from "@uvp-eth/product-dto";
+import type { ChainProofRowDTO } from "@uvp-eth/product-dto";
 
 export type EvidenceCaptureStatus = "empty" | "uploading" | "uploaded" | "failed" | "quarantined";
-export type EvidenceCaptureSource = "api" | "demo";
 export type EvidenceVerificationStatus = "unbound" | "matched" | "mismatch" | "missing_file";
 
 export type TaskSubmissionStatus =
@@ -13,8 +12,7 @@ export type TaskSubmissionStatus =
   | "confirmed"
   | "failed"
   | "expired"
-  | "replaced"
-  | "demo_confirmed";
+  | "replaced";
 
 export interface EvidenceRequirement {
   readonly slotId: string;
@@ -26,7 +24,6 @@ export interface EvidenceRequirement {
 export interface CapturedEvidence {
   readonly requirement: EvidenceRequirement;
   readonly status: EvidenceCaptureStatus;
-  readonly source?: EvidenceCaptureSource | undefined;
   readonly evidenceId?: string | undefined;
   readonly fileName?: string | undefined;
   readonly mimeType?: string | undefined;
@@ -56,13 +53,4 @@ export interface TaskSubmissionProof {
   readonly stateMachineAddress?: string | undefined;
   readonly evidence: readonly CapturedEvidence[];
   readonly proofRows: readonly ChainProofRowDTO[];
-}
-
-export interface EvidencePanelContext {
-  readonly task: ProductTaskDTO;
-  readonly order?: ProductOrderDTO | undefined;
-  readonly participantWallet?: string | undefined;
-  readonly source?: {
-    readonly kind: "real" | "demo" | "missing";
-  } | undefined;
 }

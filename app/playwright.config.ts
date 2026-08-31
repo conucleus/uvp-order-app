@@ -8,16 +8,18 @@ import {
 const host = "127.0.0.1";
 const port = process.env.UVP_ORDER_APP_E2E_PORT ?? "4183";
 const baseURL = process.env.PLAYWRIGHT_BASE_URL ?? `http://${host}:${port}`;
-const profile = (process.env.UVP_ORDER_APP_E2E_PROFILE ?? "demo").trim().toLowerCase();
+const profile = (process.env.UVP_ORDER_APP_E2E_PROFILE ?? "api-stub").trim().toLowerCase();
 const includeMobile = process.env.UVP_ORDER_APP_E2E_MOBILE === "1";
 const runtimeProfile = process.env.VITE_UVP_RUNTIME_ENV?.trim().toLowerCase();
 const fullModeGate = profile === "full" ? assertOrderAppFullModeGate(process.env) : undefined;
 
-if (
-  isProductionLikeRuntime(runtimeProfile) &&
-  (profile === "demo" || profile === "api-stub" || process.env.VITE_UVP_ORDER_APP_DEMO === "1")
-) {
-  throw new Error("production-like Order App E2E runtime cannot enable demo fixtures or API stubs");
+if (isProductionLikeRuntime(runtimeProfile) && profile === "api-stub") {
+  throw new Error("production-like Order App E2E runtime cannot use API stubs");
+}
+if (profile !== "fail-closed" && profile !== "api-stub" && profile !== "full") {
+  throw new Error(
+    `Unsupported UVP_ORDER_APP_E2E_PROFILE "${profile}". Use "api-stub" (default), "fail-closed", or "full".`
+  );
 }
 if (fullModeGate && !existsSync(fullModeGate.flowSummaryPath)) {
   throw new Error(`Order App full-mode flow summary does not exist: ${fullModeGate.flowSummaryPath}`);
@@ -30,10 +32,7 @@ function webServerCommand(): string {
   if (profile === "api-stub") {
     return `VITE_UVP_CHAIN_SERVICES_URL=http://product-api.test pnpm dev --host ${host} --port ${port} --strictPort`;
   }
-  if (profile === "full") {
-    return `pnpm dev --host ${host} --port ${port} --strictPort`;
-  }
-  return `pnpm dev:demo --host ${host} --port ${port} --strictPort`;
+  return `pnpm dev --host ${host} --port ${port} --strictPort`;
 }
 
 export default defineConfig({

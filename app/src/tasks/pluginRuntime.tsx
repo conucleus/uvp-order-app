@@ -367,8 +367,8 @@ function PluginFields({
         <div className="executor-overlay-summary" aria-label="履约者证明">
           <strong>{overlay.modeLabel ?? (overlay.mode ? executorPatchModeLabel(overlay.mode) : "履约者调整已生效")}</strong>
           <span>{overlay.activeExecutorWallet ? `当前履约者 ${overlay.activeExecutorWallet}` : "履约者由阶段补充确定"}</span>
-          {overlay.previousExecutor ?? overlay.previousExecutorWallet ? (
-            <span>原履约者 {overlay.previousExecutor ?? overlay.previousExecutorWallet}</span>
+          {overlay.previousExecutor ? (
+            <span>原履约者 {overlay.previousExecutor}</span>
           ) : null}
           {overlay.priorAuthorityLabel ? <span>{overlay.priorAuthorityLabel}</span> : null}
           {overlay.futureAuthorityLabel ? <span>{overlay.futureAuthorityLabel}</span> : null}

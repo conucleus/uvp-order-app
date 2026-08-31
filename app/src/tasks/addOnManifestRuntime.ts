@@ -229,6 +229,10 @@ function semanticErrorsForAction(
     if (executorMetadataHash && !looksLikeHash(executorMetadataHash)) {
       errors.push("executorMetadataHash 必须是 0x 开头的 32 字节指纹。");
     }
+    const approval = boundValue(action, state, "approval");
+    if (approval && !isValidJsonText(approval)) {
+      errors.push("替换证明（approval）必须是合法的 JSON 文本，不能按原始字符串发送。");
+    }
   }
   if (action.actionKind === "stage_resource_patch") {
     pushWalletMismatchError(errors, state, boundValue(action, state, "selectorWallet"));
@@ -309,7 +313,16 @@ function parseOptionalJson(value: string): unknown {
   try {
     return JSON.parse(trimmed) as unknown;
   } catch {
-    return trimmed;
+    throw new Error("替换证明（approval）不是合法的 JSON 文本，已停止准备提交。");
+  }
+}
+
+function isValidJsonText(value: string): boolean {
+  try {
+    JSON.parse(value.trim());
+    return true;
+  } catch {
+    return false;
   }
 }
 

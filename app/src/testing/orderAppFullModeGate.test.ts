@@ -30,18 +30,16 @@ describe("Order App full-mode gate", () => {
     assert.match(result.ok ? "" : result.errors.join("\n"), /FLOW_SUMMARY/u);
   });
 
-  it("rejects demo and API-stub inputs in full mode", () => {
+  it("rejects API-stub inputs in full mode", () => {
     const result = validateOrderAppFullModeGate({
       UVP_ORDER_APP_E2E_PROFILE: "full",
       VITE_UVP_CHAIN_SERVICES_URL: "http://product-api.test",
       UVP_ORDER_APP_FULL_FLOW_SUMMARY: "/tmp/summary.json",
-      VITE_UVP_ORDER_APP_DEMO: "1",
       UVP_ORDER_APP_E2E_INSTALL_API_STUB: "1"
     });
 
     assert.equal(result.ok, false);
     assert.match(result.ok ? "" : result.errors.join("\n"), /API-stub Product API URL/u);
-    assert.match(result.ok ? "" : result.errors.join("\n"), /VITE_UVP_ORDER_APP_DEMO=1/u);
     assert.match(result.ok ? "" : result.errors.join("\n"), /UVP_ORDER_APP_E2E_INSTALL_API_STUB=1/u);
   });
 

@@ -37,10 +37,10 @@ import {
   executorPatchWorkStarted,
   selectableTargetsForTask,
   resourceRequirementDisplays,
+  resourceRequirementsForTask,
   targetStageId as selectableTargetStageId,
   targetStageLabel,
   type ExecutorPatchModeOptionDTO,
-  type FileResourceHandleDTO,
   type SelectableTargetStageDTO
 } from "./addOnTypes";
 import {
@@ -1790,7 +1790,7 @@ function initialResourcePatchDraft(
   return {
     selectorWallet: task.participantWallet ?? task.assigneeWallet ?? participantWallet ?? "",
     targetStageId: firstTarget ? selectableTargetStageId(firstTarget) : "",
-    resourceKey: resource?.resourceKey ?? "resource_1",
+    resourceKey: resource?.resourceKey ?? "",
     manifestURI: resource?.manifestURI ?? "",
     manifestHash: resource?.manifestHash ?? "",
     policyHash: resource?.policyHash ?? "",
@@ -1808,61 +1808,27 @@ interface TargetResourceOption {
 }
 
 function targetResourceOptions(task: ProductTaskDTO, target: SelectableTargetStageDTO | undefined): readonly TargetResourceOption[] {
-  const resources = target?.resourceRequirements ??
-    target?.effectiveResourceRequirements ??
-    target?.effectiveFileResources ??
-    target?.fileResources;
-  const entries = resourceEntries(resources);
-  if (entries.length > 0) {
-    return entries.map(([resourceKey, value]) => {
-      const objectValue = typeof value === "object" && value !== null ? value : undefined;
-      const key = cleanString(objectValue?.resourceKey) ?? cleanString(objectValue?.resourceId) ?? resourceKey;
+  const resources = target?.resourceRequirements ?? resourceRequirementsForTask(task);
+  if (resources.length > 0) {
+    return resources.map((resource) => {
+      const visibility = normalizeVisibility(resource.visibility ?? resource.accessPolicy?.visibility);
       return {
-        resourceKey: key,
-        label: cleanString(objectValue?.label) ?? cleanString(objectValue?.title) ?? cleanString(objectValue?.name) ?? key,
-        ...(cleanString(objectValue?.manifestURI) ? { manifestURI: cleanString(objectValue?.manifestURI) } : {}),
-        ...(cleanString(objectValue?.manifestHash) ? { manifestHash: cleanString(objectValue?.manifestHash) } : {}),
-        ...(cleanString(objectValue?.accessPolicy?.policyHash) ? { policyHash: cleanString(objectValue?.accessPolicy?.policyHash) } : {}),
-        ...(normalizeVisibility(objectValue?.visibility) ? { visibility: normalizeVisibility(objectValue?.visibility) } : {})
+        resourceKey: cleanString(resource.resourceKey) ?? resource.resourceId,
+        label: cleanString(resource.label) ?? resource.resourceId,
+        ...(cleanString(resource.manifestURI) ? { manifestURI: cleanString(resource.manifestURI) } : {}),
+        ...(cleanString(resource.manifestHash) ? { manifestHash: cleanString(resource.manifestHash) } : {}),
+        ...(cleanString(resource.accessPolicy?.policyHash)
+          ? { policyHash: cleanString(resource.accessPolicy?.policyHash) }
+          : {}),
+        ...(visibility ? { visibility } : {})
       };
     });
   }
-  const taskResources = resourceRequirementDisplays(task);
-  if (taskResources.length > 0) {
-    return taskResources.map((resource) => ({
-      resourceKey: resource.resourceId,
-      label: resource.label,
-      visibility: resource.visibility === "unknown" ? "protected" : resource.visibility
-    }));
-  }
-  return task.requiredEvidence.map((label, index) => ({
-    resourceKey: `resource_${index + 1}`,
-    label,
-    visibility: "protected"
+  return resourceRequirementDisplays(task).map((resource) => ({
+    resourceKey: resource.resourceId,
+    label: resource.label,
+    visibility: resource.visibility === "unknown" ? "protected" : resource.visibility
   }));
-}
-
-function resourceEntries(
-  resources: SelectableTargetStageDTO["resourceRequirements"] |
-    SelectableTargetStageDTO["effectiveResourceRequirements"] |
-    SelectableTargetStageDTO["effectiveFileResources"] |
-    SelectableTargetStageDTO["fileResources"] |
-    undefined
-): readonly (readonly [string, FileResourceHandleDTO | null | undefined])[] {
-  if (!resources) {
-    return [];
-  }
-  if (Array.isArray(resources)) {
-    return resources.map((resource, index) => [
-      typeof resource.resourceKey === "string" && resource.resourceKey.trim()
-        ? resource.resourceKey
-        : typeof resource.resourceId === "string" && resource.resourceId.trim()
-          ? resource.resourceId
-          : `resource_${index + 1}`,
-      resource
-    ] as const);
-  }
-  return Object.entries(resources);
 }
 
 function executorPatchPreviousExecutor(
@@ -1870,13 +1836,7 @@ function executorPatchPreviousExecutor(
   target: SelectableTargetStageDTO | undefined
 ): string {
   return cleanString(mode?.previousExecutor) ??
-    cleanString(mode?.previousExecutorWallet) ??
     cleanString(target?.previousExecutor) ??
-    cleanString(target?.previousExecutorWallet) ??
-    cleanString(target?.currentExecutorWallet) ??
-    cleanString(target?.executorOverlay?.previousExecutor) ??
-    cleanString(target?.executorOverlay?.previousExecutorWallet) ??
-    cleanString(target?.executorOverlay?.activeExecutorWallet) ??
     "";
 }
 

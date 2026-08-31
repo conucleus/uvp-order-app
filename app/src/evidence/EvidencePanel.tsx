@@ -19,7 +19,7 @@ import type {
   ProductSubmissionDTO
 } from "../api/productApi";
 import type { OrderAppActions } from "../actions/orderAppActions";
-import { bytesToBase64, sha256Hex, stableStringify } from "./hashing";
+import { bytesToBase64 } from "./hashing";
 import type { CapturedEvidence, EvidenceRequirement, TaskSubmissionProof } from "../task-model";
 import { shortWallet } from "../auth/participant";
 import {
@@ -45,7 +45,7 @@ type PrepareState =
   | { readonly status: "preparing" }
   | { readonly status: "prepared"; readonly prepared: PreparedSubmitView }
   | { readonly status: "submitting"; readonly prepared: PreparedSubmitView }
-  | { readonly status: "confirmed"; readonly proof: TaskSubmissionProof }
+  | { readonly status: "confirmed"; readonly proof: TaskSubmissionProof; readonly unverifiedProofs: number }
   | { readonly status: "failed"; readonly message: string; readonly prepared?: PreparedSubmitView | undefined };
 
 interface PreparedSubmitView {
@@ -53,7 +53,6 @@ interface PreparedSubmitView {
   readonly payloadHash: `0x${string}`;
   readonly expiresAt: string;
   readonly evidenceIds: readonly string[];
-  readonly source: "api" | "demo";
   readonly raw?: PreparedTaskSubmitDTO | undefined;
 }
 
@@ -61,7 +60,6 @@ const acceptedExtensions = [".pdf", ".png", ".jpg", ".jpeg", ".txt", ".json"];
 const acceptedMimePrefixes = ["image/"];
 const acceptedMimeTypes = new Set(["application/pdf", "text/plain", "application/json"]);
 const maxFileSizeBytes = 10 * 1024 * 1024;
-const demoBlockNumber = "18,734,899";
 
 export function EvidencePanel({
   actions,
@@ -90,7 +88,7 @@ export function EvidencePanel({
   const uploadedEvidence = capturedEvidence.filter((item) => item.status === "uploaded");
   const actionLabel = task ? taskPrimaryActionLabel(task, "确认任务完成") : "确认任务完成";
   const authorizedWallet = task?.assigneeWallet ?? task?.participantWallet ?? participantWallet;
-  const hasInjectedWallet = source?.kind === "demo" || actions.hasInjectedWallet();
+  const hasInjectedWallet = actions.hasInjectedWallet();
   const blockers = task
     ? preflightBlockers({
         capturedEvidence,
@@ -104,7 +102,6 @@ export function EvidencePanel({
   const canPrepare = blockers.length === 0 && prepareState.status !== "preparing" && prepareState.status !== "submitting";
   const canSubmitSignature =
     (prepareState.status === "prepared" || prepareState.status === "failed") &&
-    prepareState.prepared?.source === "api" &&
     canPrepare;
   const preparedForSummary =
     prepareState.status === "prepared" || prepareState.status === "submitting" || prepareState.status === "failed"
@@ -142,23 +139,9 @@ export function EvidencePanel({
       return;
     }
 
-    if (source?.kind === "demo" && /quarantine|virus|malware/iu.test(file.name)) {
-      setCaptures((current) => ({
-        ...current,
-        [requirement.slotId]: {
-          ...failedCapture(requirement, file, "安全扫描隔离：该凭证不能绑定到业务提交。"),
-          status: "quarantined",
-          source: "demo"
-        }
-      }));
-      return;
-    }
-
     try {
       const bytes = new Uint8Array(await file.arrayBuffer());
-      const nextCapture = source?.kind === "demo"
-        ? await demoEvidenceCapture({ bytes, file, requirement, task })
-        : await uploadEvidenceCapture({ actions, bytes, file, requirement, task });
+      const nextCapture = await uploadEvidenceCapture({ actions, bytes, file, requirement, task });
       setCaptures((current) => ({ ...current, [requirement.slotId]: nextCapture }));
     } catch (error) {
       setCaptures((current) => ({
@@ -178,9 +161,7 @@ export function EvidencePanel({
     }
     setPrepareState({ status: "preparing" });
     try {
-      const prepared = source?.kind === "demo"
-        ? await prepareDemoSubmit({ task, evidence: uploadedEvidence, signingWallet })
-        : await prepareApiSubmit({ actions, task, evidence: uploadedEvidence, signingWallet });
+      const prepared = await prepareApiSubmit({ actions, task, evidence: uploadedEvidence, signingWallet });
       setPrepareState({ status: "prepared", prepared });
     } catch (error) {
       setPrepareState({
@@ -188,23 +169,6 @@ export function EvidencePanel({
         message: error instanceof Error ? error.message : "提交预检失败"
       });
     }
-  }
-
-  async function handleDemoSubmit(prepared: PreparedSubmitView) {
-    if (!task) {
-      return;
-    }
-    setPrepareState({ status: "submitting", prepared });
-    const proof = await demoSubmissionProof({
-      prepared,
-      task,
-      order,
-      actionLabel,
-      signingWallet,
-      evidence: uploadedEvidence
-    });
-    setPrepareState({ status: "confirmed", proof });
-    onProofReady(proof);
   }
 
   async function handleSubmitSignature(prepared: PreparedSubmitView) {
@@ -225,8 +189,8 @@ export function EvidencePanel({
         signature,
         walletAddress: signingWallet.trim()
       });
-      const evidenceWithProof = await refreshEvidenceProofs(actions, uploadedEvidence);
-      setCaptures((current) => mergeProofCaptures(current, evidenceWithProof));
+      const refreshed = await refreshEvidenceProofs(actions, uploadedEvidence);
+      setCaptures((current) => mergeProofCaptures(current, refreshed.evidence));
       const proof = submissionProofFromApi({
         submission,
         task,
@@ -234,9 +198,9 @@ export function EvidencePanel({
         actionLabel,
         signingWallet,
         prepared,
-        evidence: evidenceWithProof
+        evidence: refreshed.evidence
       });
-      setPrepareState({ status: "confirmed", proof });
+      setPrepareState({ status: "confirmed", proof, unverifiedProofs: refreshed.failedChecks });
       onProofReady(proof);
     } catch (error) {
       setPrepareState({
@@ -268,7 +232,6 @@ export function EvidencePanel({
             <EvidenceCaptureCard
               capture={capture}
               key={capture.requirement.slotId}
-              source={source}
               onClear={() => {
                 setPrepareState({ status: "idle" });
                 setCaptures((current) => {
@@ -350,12 +313,6 @@ export function EvidencePanel({
             {prepareState.status === "preparing" ? <RefreshCw className="spin" aria-hidden="true" /> : <WalletCards aria-hidden="true" />}
             准备提交
           </button>
-          {prepareState.status === "prepared" && prepareState.prepared.source === "demo" ? (
-            <button className="evidence-secondary-button" onClick={() => void handleDemoSubmit(prepareState.prepared)} type="button">
-              <Send aria-hidden="true" />
-              确认提交样例签名
-            </button>
-          ) : null}
         </div>
 
         {preparedForSummary ? (
@@ -378,6 +335,11 @@ export function EvidencePanel({
               {submissionHandoff(prepareState.proof).title}
             </div>
             <p>{submissionHandoff(prepareState.proof).text}</p>
+            {prepareState.unverifiedProofs > 0 ? (
+              <p className="blocked-copy" role="alert">
+                证明核对未完成（{prepareState.unverifiedProofs} 条）：部分凭证的最新核验状态获取失败，下方可能仍显示旧核验结果，请稍后重新核对。
+              </p>
+            ) : null}
           </div>
         ) : null}
       </section>
@@ -387,12 +349,10 @@ export function EvidencePanel({
 
 function EvidenceCaptureCard({
   capture,
-  source,
   onClear,
   onFileSelected
 }: {
   readonly capture: CapturedEvidence;
-  readonly source?: ProductApiSource | undefined;
   readonly onClear: () => void;
   readonly onFileSelected: (file: File | undefined) => void;
 }) {
@@ -426,9 +386,6 @@ function EvidenceCaptureCard({
       <div className={`evidence-status-line evidence-status-${capture.status}`}>
         {statusIcon(capture)}
         <strong>{statusLabel}</strong>
-        {source?.kind === "demo" && capture.status === "uploaded" ? (
-          <span className="evidence-badge evidence-badge-demo">Demo 凭证，仅本地验证</span>
-        ) : null}
       </div>
 
       {capture.fileName ? (
@@ -497,14 +454,10 @@ function PreparedSummary({
         <span>有效期</span>
         <strong>{prepared.expiresAt}</strong>
       </div>
-      {prepared.source === "api" ? (
-        <>
-          <button className="evidence-primary-button" disabled={!canSubmitSignature || submitting} onClick={onSubmitSignature} type="button">
-            {submitting ? <RefreshCw className="spin" aria-hidden="true" /> : <Send aria-hidden="true" />}
-            使用钱包签名并提交
-          </button>
-        </>
-      ) : null}
+      <button className="evidence-primary-button" disabled={!canSubmitSignature || submitting} onClick={onSubmitSignature} type="button">
+        {submitting ? <RefreshCw className="spin" aria-hidden="true" /> : <Send aria-hidden="true" />}
+        使用钱包签名并提交
+      </button>
     </div>
   );
 }
@@ -613,7 +566,6 @@ async function uploadEvidenceCapture(input: {
   return {
     requirement: input.requirement,
     status: usable ? "uploaded" : "quarantined",
-    source: "api",
     evidenceId: evidence.evidenceId,
     fileName: evidence.fileName ?? input.file.name,
     mimeType: evidence.mimeType ?? input.file.type,
@@ -627,75 +579,6 @@ async function uploadEvidenceCapture(input: {
     businessLabel: input.requirement.label,
     verificationStatus: evidence.status === "bound" ? "matched" : "unbound",
     error: usable ? undefined : `凭证状态为 ${evidence.status}，不能绑定到业务提交。`
-  };
-}
-
-async function demoEvidenceCapture(input: {
-  readonly bytes: Uint8Array;
-  readonly file: File;
-  readonly requirement: EvidenceRequirement;
-  readonly task: ProductTaskDTO;
-}): Promise<CapturedEvidence> {
-  const contentHash = await sha256Hex(input.bytes);
-  const metadata = {
-    businessLabel: input.requirement.label,
-    documentType: input.requirement.documentType,
-    fileName: input.file.name,
-    fileSize: input.file.size,
-    stageIdentifier: input.task.stageId,
-    redaction: "public proof shows hashes and labels only"
-  };
-  const metadataHash = await sha256Hex(stableStringify(metadata));
-  const payloadHash = await sha256Hex(stableStringify({
-    kind: "uvp.order-app.demo-evidence.v1",
-    orderId: input.task.orderId,
-    taskId: input.task.taskId,
-    contentHash,
-    metadataHash
-  }));
-  const evidenceId = `demo-${input.task.taskId}-${input.requirement.slotId}-${contentHash.slice(2, 10)}`;
-
-  return {
-    requirement: input.requirement,
-    status: "uploaded",
-    source: "demo",
-    evidenceId,
-    fileName: input.file.name,
-    mimeType: input.file.type || "application/octet-stream",
-    size: input.file.size,
-    storageURI: `demo-offchain://${evidenceId}`,
-    contentHash,
-    metadataHash,
-    payloadHash,
-    payloadRef: `uvp-demo-evidence://product/${payloadHash.slice(2)}`,
-    createdAt: new Date().toISOString(),
-    businessLabel: input.requirement.label,
-    verificationStatus: "unbound"
-  };
-}
-
-async function prepareDemoSubmit(input: {
-  readonly task: ProductTaskDTO;
-  readonly evidence: readonly CapturedEvidence[];
-  readonly signingWallet: string;
-}): Promise<PreparedSubmitView> {
-  const payloadHash = await sha256Hex(stableStringify({
-    kind: "uvp.order-app.demo-submit.v1",
-    orderId: input.task.orderId,
-    taskId: input.task.taskId,
-    stageIdentifier: input.task.stageId,
-    signer: input.signingWallet,
-    evidence: input.evidence.map((item) => ({
-      evidenceId: item.evidenceId,
-      payloadHash: item.payloadHash
-    }))
-  }));
-  return {
-    prepareId: `demo-prepare-${payloadHash.slice(2, 12)}`,
-    payloadHash,
-    expiresAt: "demo session",
-    evidenceIds: input.evidence.map((item) => item.evidenceId ?? item.requirement.slotId),
-    source: "demo"
   };
 }
 
@@ -715,48 +598,7 @@ async function prepareApiSubmit(input: {
     payloadHash: prepared.payloadHash,
     expiresAt: prepared.expiresAt,
     evidenceIds: input.evidence.map((item) => item.evidenceId).filter((id): id is string => Boolean(id)),
-    source: "api",
     raw: prepared
-  };
-}
-
-async function demoSubmissionProof(input: {
-  readonly prepared: PreparedSubmitView;
-  readonly task: ProductTaskDTO;
-  readonly order?: ProductOrderDTO | undefined;
-  readonly actionLabel: string;
-  readonly signingWallet: string;
-  readonly evidence: readonly CapturedEvidence[];
-}): Promise<TaskSubmissionProof> {
-  const txHash = await sha256Hex(stableStringify({
-    kind: "uvp.order-app.demo-tx.v1",
-    prepareId: input.prepared.prepareId,
-    payloadHash: input.prepared.payloadHash
-  }));
-  const matchedEvidence = input.evidence.map((item): CapturedEvidence => ({
-    ...item,
-    verificationStatus: "matched"
-  }));
-
-  return {
-    taskId: input.task.taskId,
-    orderId: input.task.orderId,
-    orderTitle: input.order?.title ?? input.task.orderTitle,
-    taskTitle: input.task.title,
-    actionLabel: input.actionLabel,
-    status: "demo_confirmed",
-    txHash,
-    blockNumber: demoBlockNumber,
-    signerWallet: input.signingWallet,
-    payloadHash: input.prepared.payloadHash,
-    stateMachineAddress: input.task.stateMachineAddress ?? input.order?.stateMachineAddress,
-    evidence: matchedEvidence,
-    proofRows: [
-      { label: "Submission status", value: "confirmed-demo" },
-      { label: "Signature submitter", value: input.signingWallet },
-      { label: "Payload hash", value: input.prepared.payloadHash },
-      { label: "Transaction", value: txHash }
-    ]
   };
 }
 
@@ -789,18 +631,24 @@ function submissionProofFromApi(input: {
 async function refreshEvidenceProofs(
   actions: OrderAppActions,
   evidence: readonly CapturedEvidence[]
-): Promise<readonly CapturedEvidence[]> {
-  return await Promise.all(evidence.map(async (item) => {
+): Promise<{ readonly evidence: readonly CapturedEvidence[]; readonly failedChecks: number }> {
+  const results = await Promise.all(evidence.map(async (item): Promise<{ readonly item: CapturedEvidence; readonly failed: boolean }> => {
     if (!item.evidenceId) {
-      return item;
+      return { item, failed: false };
     }
     try {
       const proof = await actions.getEvidenceProof(item.evidenceId);
-      return evidenceFromProof(item, proof);
+      return { item: evidenceFromProof(item, proof), failed: false };
     } catch {
-      return item;
+      // The old verificationStatus must not pass silently: count the failure so
+      // the confirmation area can flag the incomplete proof check.
+      return { item, failed: true };
     }
   }));
+  return {
+    evidence: results.map((result) => result.item),
+    failedChecks: results.filter((result) => result.failed).length
+  };
 }
 
 function evidenceFromProof(item: CapturedEvidence, proof: EvidenceProofDTO): CapturedEvidence {
@@ -863,10 +711,10 @@ function preflightBlockers(input: {
   } else if (input.authorizedWallet && !sameAddress(input.signingWallet, input.authorizedWallet)) {
     blockers.push(`钱包与授权参与方不匹配。授权钱包为 ${shortWallet(input.authorizedWallet)}，请切换到对应钱包后重试。`);
   }
-  if (!input.source || input.source.kind === "missing") {
+  if (!input.source) {
     blockers.push("参与者服务未连接，不能提交真实业务动作。");
   }
-  if (input.source?.kind === "real" && !input.hasInjectedWallet) {
+  if (!input.hasInjectedWallet) {
     blockers.push("未检测到浏览器钱包，不能创建业务签名。");
   }
   return blockers;
@@ -947,7 +795,7 @@ function submissionHandoff(proof: TaskSubmissionProof): {
   readonly title: string;
   readonly text: string;
 } {
-  if (proof.status === "confirmed" || proof.status === "demo_confirmed") {
+  if (proof.status === "confirmed") {
     return {
       tone: "confirmed",
       title: "提交已确认",

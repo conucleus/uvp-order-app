@@ -63,12 +63,6 @@
   border-color: #b8c9ff;
 }
 
-.evidence-badge-demo {
-  color: var(--app-amber);
-  background: var(--app-amber-soft);
-  border-color: #f1c76a;
-}
-
 .evidence-status-uploaded {
   color: var(--app-green);
 }

@@ -27,7 +27,7 @@ export async function loadOrderAppNotifications(
   fetcher: Fetcher = globalThis.fetch.bind(globalThis)
 ): Promise<OrderAppNotificationList> {
   if (data.source.kind !== "real") {
-    return derivedNotificationList(data, session);
+    throw new Error("通知中心仅在参与者服务连接后可用。");
   }
 
   try {
@@ -42,7 +42,19 @@ export async function loadOrderAppNotifications(
       throw new Error(await responseText(response));
     }
     const body = await response.json() as ApiNotificationResponse;
-    const notifications = (body.notifications ?? []).map(normalizeApiNotification);
+    const notifications: OrderAppNotificationDTO[] = [];
+    let skippedNotificationCount = 0;
+    for (const entry of body.notifications ?? []) {
+      const normalized = normalizeApiNotification(entry);
+      if (normalized) {
+        notifications.push(normalized);
+      } else {
+        skippedNotificationCount += 1;
+      }
+    }
+    if (skippedNotificationCount > 0) {
+      console.warn(`activity-feed returned ${skippedNotificationCount} invalid notification entries; skipped`);
+    }
     return {
       notifications,
       unreadCount: body.unreadCount ?? notifications.filter((notification) => notification.readStatus === "unread").length,
@@ -50,10 +62,7 @@ export async function loadOrderAppNotifications(
       sourceOfTruth: body.sourceOfTruth ?? "product-projection-and-notification-read-state"
     };
   } catch (error) {
-    return {
-      ...derivedNotificationList(data, session),
-      error: error instanceof Error ? error.message : "通知服务暂不可用"
-    };
+    throw new Error(error instanceof Error ? error.message : "通知服务暂不可用");
   }
 }
 
@@ -77,9 +86,8 @@ export async function markOrderAppNotificationRead(
     }
     clearPendingRead(session, notification.notificationId);
     const body = await response.json() as ApiNotificationReadResponse;
-    return body.notification
-      ? normalizeApiNotification(body.notification)
-      : { ...notification, readStatus: "read", readAt };
+    const acknowledged = body.notification ? normalizeApiNotification(body.notification) : undefined;
+    return acknowledged ?? { ...notification, readStatus: "read", readAt };
   } catch (error) {
     enqueuePendingRead(session, notification.notificationId, readAt);
     console.warn(`read receipt not persisted; queued for retry: ${notification.notificationId}`, error);
@@ -136,21 +144,6 @@ function postReadReceipt(
       })
     }
   );
-}
-
-export function derivedNotificationList(data: ProductHomeData, session: ParticipantSession): OrderAppNotificationList {
-  const readIds = readNotificationIds(session);
-  const notifications = deriveOrderAppNotifications({
-    orders: data.orders,
-    tasks: data.tasks,
-    now: new Date()
-  }).map((notification) => applyLocalReadState(notification, readIds));
-  return {
-    notifications,
-    unreadCount: notifications.filter((notification) => notification.readStatus === "unread").length,
-    source: "derived",
-    sourceOfTruth: "local-product-projection"
-  };
 }
 
 export function deriveOrderAppNotifications(input: {
@@ -250,29 +243,45 @@ function baseNotification(
   };
 }
 
-function normalizeApiNotification(input: Partial<OrderAppNotificationDTO>): OrderAppNotificationDTO {
+function normalizeApiNotification(input: Partial<OrderAppNotificationDTO>): OrderAppNotificationDTO | undefined {
   const kind = notificationKind(input.kind);
+  if (
+    !kind ||
+    !isNonEmptyString(input.notificationId) ||
+    !isNonEmptyString(input.orderId) ||
+    !isNonEmptyString(input.orderTitle) ||
+    !isNonEmptyString(input.eventLabel) ||
+    !isNonEmptyString(input.message) ||
+    !isNonEmptyString(input.actionHref) ||
+    !isNonEmptyString(input.createdAt)
+  ) {
+    return undefined;
+  }
   return {
-    notificationId: typeof input.notificationId === "string" ? input.notificationId : localNotificationId(kind, input.orderId ?? "unknown"),
+    notificationId: input.notificationId,
     kind,
     severity: notificationSeverity(input.severity),
     readStatus: input.readStatus === "read" ? "read" : "unread",
-    orderId: input.orderId ?? "unknown",
-    orderTitle: input.orderTitle ?? "链上订单",
+    orderId: input.orderId,
+    orderTitle: input.orderTitle,
     ...(typeof input.taskId === "string" ? { taskId: input.taskId } : {}),
     ...(typeof input.taskTitle === "string" ? { taskTitle: input.taskTitle } : {}),
     ...(typeof input.stageId === "string" ? { stageId: input.stageId } : {}),
     ...(typeof input.stageLabel === "string" ? { stageLabel: input.stageLabel } : {}),
     ...(typeof input.participantRole === "string" ? { participantRole: input.participantRole } : {}),
-    eventLabel: input.eventLabel ?? labelForKind(kind),
-    message: input.message ?? "通知来自 Product projection；不会改变任务或链上状态。",
-    actionHref: input.actionHref ?? routeHash("orders", input.orderId ?? "unknown"),
+    eventLabel: input.eventLabel,
+    message: input.message,
+    actionHref: input.actionHref,
     ...(typeof input.proofHref === "string" ? { proofHref: input.proofHref } : {}),
-    createdAt: input.createdAt ?? "",
+    createdAt: input.createdAt,
     ...(typeof input.readAt === "string" ? { readAt: input.readAt } : {}),
     source: input.source === "notification_delivery" ? "notification_delivery" : "api",
     privacy: "participant_only"
   };
+}
+
+function isNonEmptyString(value: unknown): value is string {
+  return typeof value === "string" && value.trim().length > 0;
 }
 
 function slaStateForTask(task: ProductTaskDTO, now: Date): { readonly status: "none" | "ready" | "near_deadline" | "overdue" } {
@@ -333,7 +342,7 @@ function severityRank(severity: OrderAppNotificationSeverity): number {
   }
 }
 
-function notificationKind(value: unknown): OrderAppNotificationKind {
+function notificationKind(value: unknown): OrderAppNotificationKind | undefined {
   switch (value) {
     case "task_ready":
     case "task_near_deadline":
@@ -344,7 +353,7 @@ function notificationKind(value: unknown): OrderAppNotificationKind {
     case "task_revoked":
       return value;
     default:
-      return "task_ready";
+      return undefined;
   }
 }
 
@@ -361,33 +370,6 @@ function notificationSeverity(value: unknown): OrderAppNotificationSeverity {
   }
 }
 
-function labelForKind(kind: OrderAppNotificationKind): string {
-  switch (kind) {
-    case "task_ready":
-      return "任务已就绪";
-    case "task_near_deadline":
-      return "即将到期";
-    case "task_overdue":
-      return "任务已逾期";
-    case "signal_submitted":
-      return "链上信号已提交";
-    case "submission_confirmed":
-      return "提交已确认";
-    case "submission_failed":
-      return "处理失败";
-    case "task_revoked":
-      return "任务已撤销";
-  }
-}
-
-function applyLocalReadState(
-  notification: OrderAppNotificationDTO,
-  readIds: ReadonlyMap<string, string>
-): OrderAppNotificationDTO {
-  const readAt = readIds.get(notification.notificationId);
-  return readAt ? { ...notification, readStatus: "read", readAt } : notification;
-}
-
 function rememberReadNotification(session: ParticipantSession, notificationId: string, readAt: string): void {
   if (typeof window === "undefined") {
     return;
@@ -402,11 +384,14 @@ function readNotificationIds(session: ParticipantSession): ReadonlyMap<string, s
   if (typeof window === "undefined") {
     return new Map();
   }
+  const key = localReadStateKey(session);
   try {
-    const raw = window.localStorage.getItem(localReadStateKey(session));
+    const raw = window.localStorage.getItem(key);
     const parsed = raw ? JSON.parse(raw) as Record<string, unknown> : {};
     return new Map(Object.entries(parsed).filter((entry): entry is [string, string] => typeof entry[1] === "string"));
-  } catch {
+  } catch (error) {
+    console.error(`notification read state is corrupted; clearing ${key}`, error);
+    window.localStorage.removeItem(key);
     return new Map();
   }
 }
@@ -419,11 +404,14 @@ function pendingReadEntries(session: ParticipantSession): readonly (readonly [st
   if (typeof window === "undefined") {
     return [];
   }
+  const key = pendingReadStateKey(session);
   try {
-    const raw = window.localStorage.getItem(pendingReadStateKey(session));
+    const raw = window.localStorage.getItem(key);
     const parsed = raw ? JSON.parse(raw) as Record<string, unknown> : {};
     return Object.entries(parsed).filter((entry): entry is [string, string] => typeof entry[1] === "string");
-  } catch {
+  } catch (error) {
+    console.error(`pending notification read queue is corrupted; clearing ${key}`, error);
+    window.localStorage.removeItem(key);
     return [];
   }
 }

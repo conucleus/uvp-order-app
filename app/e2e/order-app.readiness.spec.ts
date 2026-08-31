@@ -102,12 +102,13 @@ test.describe("UVP Order App production readiness negatives", () => {
         addOnKind: "submit_signal",
         requiredEvidence: [],
         requiredInputs: [],
-        resourceRequirements: {
-          inspection_report: {
+        resourceRequirements: [
+          {
+            resourceId: "inspection_report",
+            resourceKey: "inspection_report",
             label: "第三方检验证明",
-            documentType: "inspection_report",
             required: true,
-            sourceLabel: "来自资源补充",
+            source: "resource_patch",
             visibility: "protected",
             manifestURI: "ipfs://bafyuvp-inspection-manifest",
             ciphertextHash: "0x1111111111111111111111111111111111111111111111111111111111111111",
@@ -117,7 +118,7 @@ test.describe("UVP Order App production readiness negatives", () => {
               canRead: false
             }
           }
-        },
+        ],
         executorOverlay: {
           targetStageId: "inspection",
           activeExecutorWallet: participantWallet,
@@ -162,7 +163,7 @@ test.describe("UVP Order App production readiness negatives", () => {
 
     await expect(page.getByRole("heading", { name: "补充凭证要求" })).toBeVisible();
     await expect(page.getByLabel("资源清单 URI")).toBeVisible();
-    await expect(page.getByLabel("有效凭证要求").getByText("报关单 PDF")).toBeVisible();
+    await expect(page.getByLabel("有效凭证要求").getByText("第三方检验证明")).toBeVisible();
 
     await page.getByLabel("资源键").fill("inspection_report");
     await page.getByLabel("资源清单 URI").fill("ipfs://manifest/resource-patch");

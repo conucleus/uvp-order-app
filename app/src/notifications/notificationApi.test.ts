@@ -4,6 +4,7 @@ import type { ProductOrderDTO, ProductTaskDTO } from "@uvp-eth/product-dto";
 import { demoOrder, demoTask } from "@uvp-eth/product-dto/fixtures";
 import {
   deriveOrderAppNotifications,
+  loadOrderAppNotifications,
   markOrderAppNotificationRead,
   syncPendingNotificationReads
 } from "./notificationApi.js";
@@ -36,9 +37,16 @@ const realSourceData = {
   source: { kind: "real", baseUrl: "https://product-api.example" }
 } as unknown as ProductHomeData;
 
-function installMemoryWindow(): void {
+type MemoryStorage = {
+  getItem: (key: string) => string | null;
+  setItem: (key: string, value: string) => void;
+  removeItem: (key: string) => void;
+  clear: () => void;
+};
+
+function installMemoryWindow(): MemoryStorage {
   const backing = new Map<string, string>();
-  const storage = {
+  const storage: MemoryStorage = {
     getItem: (key: string) => (backing.has(key) ? backing.get(key)! : null),
     setItem: (key: string, value: string) => {
       backing.set(key, String(value));
@@ -51,6 +59,7 @@ function installMemoryWindow(): void {
     }
   };
   (globalThis as { window?: unknown }).window = { localStorage: storage };
+  return storage;
 }
 
 function uninstallMemoryWindow(): void {
@@ -144,6 +153,123 @@ describe("order app notification read receipts", () => {
       );
       assert.deepEqual(sync, { synced: 0, remaining: 0 });
     } finally {
+      uninstallMemoryWindow();
+    }
+  });
+});
+
+describe("order app notification loading", () => {
+  it("fails fast when the activity feed is unreachable instead of deriving local reminders", async () => {
+    const failingFetcher = async () => new Response("feed down", { status: 503 });
+    await assert.rejects(
+      loadOrderAppNotifications(realSourceData, session, failingFetcher),
+      /feed down/
+    );
+  });
+
+  it("rejects notification loads for sources other than the real participant API", async () => {
+    const demoData = { ...realSourceData, source: { kind: "demo", reason: "demo-mode" } } as unknown as ProductHomeData;
+    await assert.rejects(loadOrderAppNotifications(demoData, session), /参与者服务/);
+  });
+
+  it("skips notifications without server-provided required fields and warns with the count", async () => {
+    const validEntry = {
+      notificationId: "notification-9",
+      kind: "signal_submitted",
+      severity: "success",
+      readStatus: "unread",
+      orderId: "order-7",
+      orderTitle: "真实订单标题",
+      eventLabel: "链上信号已提交",
+      message: "服务端下发的通知正文。",
+      actionHref: "#section=orders&order=order-7",
+      createdAt: "2026-08-01T00:00:00.000Z",
+      source: "notification_delivery"
+    };
+    const fetcher = async () => new Response(JSON.stringify({
+      notifications: [
+        validEntry,
+        { ...validEntry, notificationId: "notification-no-order-id", orderId: undefined },
+        { ...validEntry, notificationId: "notification-unknown-kind", kind: "mystery_kind" }
+      ]
+    }), { status: 200 });
+    const originalWarn = console.warn;
+    const warnings: string[] = [];
+    console.warn = (message?: unknown) => {
+      warnings.push(String(message));
+    };
+    try {
+      const result = await loadOrderAppNotifications(realSourceData, session, fetcher);
+
+      assert.equal(result.notifications.length, 1);
+      assert.deepEqual(result.notifications[0], {
+        notificationId: "notification-9",
+        kind: "signal_submitted",
+        severity: "success",
+        readStatus: "unread",
+        orderId: "order-7",
+        orderTitle: "真实订单标题",
+        eventLabel: "链上信号已提交",
+        message: "服务端下发的通知正文。",
+        actionHref: "#section=orders&order=order-7",
+        createdAt: "2026-08-01T00:00:00.000Z",
+        source: "notification_delivery",
+        privacy: "participant_only"
+      });
+      assert.equal(result.unreadCount, 1);
+      const serialized = JSON.stringify(result.notifications);
+      assert.equal(serialized.includes("链上订单"), false);
+      assert.equal(serialized.includes("unknown"), false);
+      assert.equal(warnings.filter((message) => /2 invalid notification entries/.test(message)).length, 1);
+    } finally {
+      console.warn = originalWarn;
+    }
+  });
+
+  it("clears corrupted local read state instead of silently discarding it", async () => {
+    const storage = installMemoryWindow();
+    const readKey = "uvp-order-app:notification-read:0xabc0000000000000000000000000000000000009";
+    storage.setItem(readKey, "{corrupted");
+    const originalError = console.error;
+    const errors: unknown[][] = [];
+    console.error = (...args: unknown[]) => {
+      errors.push(args);
+    };
+    try {
+      await markOrderAppNotificationRead(
+        readReceiptTarget,
+        { ...realSourceData, source: { kind: "demo", reason: "demo-mode" } } as unknown as ProductHomeData,
+        session,
+        async () => new Response("{}", { status: 200 })
+      );
+
+      assert.equal(errors.some((args) => String(args[0]).includes(readKey)), true);
+      const stored = storage.getItem(readKey);
+      assert.notEqual(stored, null);
+      assert.doesNotThrow(() => JSON.parse(stored!));
+    } finally {
+      console.error = originalError;
+      uninstallMemoryWindow();
+    }
+  });
+
+  it("clears a corrupted pending read queue before syncing", async () => {
+    const storage = installMemoryWindow();
+    const pendingKey = "uvp-order-app:notification-read-pending:0xabc0000000000000000000000000000000000009";
+    storage.setItem(pendingKey, "not-json");
+    const originalError = console.error;
+    const errors: unknown[][] = [];
+    console.error = (...args: unknown[]) => {
+      errors.push(args);
+    };
+    try {
+      const sync = await syncPendingNotificationReads(realSourceData, session, async () => new Response("{}", { status: 200 }));
+
+      assert.deepEqual(sync, { synced: 0, remaining: 0 });
+      assert.equal(errors.some((args) => String(args[0]).includes(pendingKey)), true);
+      assert.equal(storage.getItem(pendingKey), null);
+    } finally {
+      console.error = originalError;
       uninstallMemoryWindow();
     }
   });
