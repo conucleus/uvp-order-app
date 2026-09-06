@@ -439,12 +439,20 @@ function findParticipantTask(role: string, tasks: readonly ProductTaskDTO[]): Pr
       task.assigneeRole,
       task.participantRoleLabel
     ].filter((label): label is string => Boolean(label));
-    return labels.some((label) => role.includes(label) || label.includes(role));
+    return labels.some((label) => roleLabelEquals(role, label));
   });
 }
 
+// 0404 UI-8：参与方↔任务角色只认 trim 后全等。双向 includes 会把
+// "买家"沾到"老买家"、"报关行"沾到"XX 报关行"，参与方卡片挂上别人的
+// 待办；DTO 里没有 slot/participant 维度的结构化关联可回退，宁可显示
+// 暂无当前待办也不冒认（纯展示层，不影响提交与链上数据）。
+function roleLabelEquals(participantRole: string, label: string): boolean {
+  return label.trim() === participantRole.trim();
+}
+
 function nextResponsibilityForParticipant(role: string, order: ProductOrderDTO): string {
-  const stage = order.stages.find((item) => item.ownerRole && (role.includes(item.ownerRole) || item.ownerRole.includes(role)));
+  const stage = order.stages.find((item) => item.ownerRole && roleLabelEquals(role, item.ownerRole));
   return stage ? `${stage.name}：${stageLabel[stage.status]}` : "暂无当前待办";
 }
 
