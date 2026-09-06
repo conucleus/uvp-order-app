@@ -7,7 +7,11 @@ import type {
   ProductResourceRequirementDTO,
   ProductTaskDTO
 } from "@uvp-eth/product-dto";
-import { buildProductSubmitTypedData } from "@uvp-eth/executor-kit/participant";
+import {
+  buildProductSubmitTypedData,
+  STAGE_EXECUTOR_PATCH_DOMAIN_NAME,
+  STAGE_EXECUTOR_PATCH_DOMAIN_VERSION
+} from "@uvp-eth/executor-kit/participant";
 import type { ProductTaskWithAddOns, SelectableTargetStageDTO } from "../src/tasks/addOnTypes";
 
 export type { ProductTaskWithAddOns };
@@ -264,6 +268,48 @@ const inspectionResourceRequirement: ProductResourceRequirementDTO = {
   }
 };
 
+// BFF 任务契约要求 capabilityPlugin.pluginKind（缺省会使前端 taskCapabilityPluginKind 直接抛错）。
+// 与 product-dto fixtures/customs.ts 的插件形态保持一致。
+const customsDeliveryPlugin = {
+  pluginKind: "delivery_update",
+  source: "explicit",
+  roleSlotId: "delivery",
+  title: "交付进度更新",
+  summary: "报关履约者提交报关、装船、物流凭证并更新交付状态。",
+  primaryActionLabel: "确认报关完成",
+  requiredEvidence: ["报关单 PDF"]
+} as const;
+
+const stageSelectorPlugin = {
+  pluginKind: "evidence_submission",
+  source: "explicit",
+  roleSlotId: "buyer-selector",
+  title: "选择履约者",
+  summary: "买家为目标阶段选择、交接或替换履约者。",
+  primaryActionLabel: "选择履约者",
+  requiredEvidence: []
+} as const;
+
+const resourceControllerPlugin = {
+  pluginKind: "evidence_submission",
+  source: "explicit",
+  roleSlotId: "buyer-resource-controller",
+  title: "补充凭证要求",
+  summary: "买家发布内容寻址资源清单和访问策略。",
+  primaryActionLabel: "补充凭证要求",
+  requiredEvidence: []
+} as const;
+
+const inspectionValidationPlugin = {
+  pluginKind: "validation_confirm",
+  source: "explicit",
+  roleSlotId: "validation",
+  title: "检验验收确认",
+  summary: "验收方核对检验凭证并确认验收结果。",
+  primaryActionLabel: "确认验收结果",
+  requiredEvidence: []
+} as const;
+
 const customsBaseTask: ProductTaskWithAddOns = {
   taskId: "task-customs-submit-001",
   orderId: stubOrder.orderId,
@@ -280,6 +326,7 @@ const customsBaseTask: ProductTaskWithAddOns = {
   status: "open",
   addOnKind: "submit_signal",
   addOnManifest: deliveryAddOnManifest,
+  capabilityPlugin: customsDeliveryPlugin,
   primaryActionLabel: "确认报关完成",
   participantRoleLabel: "报关行",
   responsibilityStatements: [],
@@ -296,6 +343,27 @@ export function readinessTask(overrides: Partial<ProductTaskWithAddOns> = {}): P
   } as ProductTaskDTO;
 }
 
+/**
+ * 无 addOnManifest 的提交任务：EvidencePanel 直渲染路径（evidenceSpec 单轨口径），
+ * 用于必填凭证校验、钱包授权预检与签名提交链路的负向用例。
+ */
+export function customsEvidenceTask(overrides: Partial<ProductTaskWithAddOns> = {}): ProductTaskDTO {
+  return readinessTask({
+    taskId: "task-customs-evidence-001",
+    addOnManifest: undefined,
+    evidenceSpec: [
+      {
+        key: "customs_declaration_pdf",
+        label: "报关单 PDF",
+        required: true,
+        inputKind: "file",
+        accept: ["application/pdf", ".pdf"]
+      }
+    ],
+    ...overrides
+  });
+}
+
 const manifestTasks: Readonly<Record<string, ProductTaskDTO>> = {
   "task-customs-submit-001": readinessTask(),
   "task-selector-customs-001": readinessTask({
@@ -307,6 +375,7 @@ const manifestTasks: Readonly<Record<string, ProductTaskDTO>> = {
     requiredEvidence: [],
     addOnKind: "stage_executor_patch",
     addOnManifest: selectorAddOnManifest,
+    capabilityPlugin: stageSelectorPlugin,
     selectableTargets: [
       {
         targetStageId: "customs-complete",
@@ -325,6 +394,7 @@ const manifestTasks: Readonly<Record<string, ProductTaskDTO>> = {
     requiredEvidence: [],
     addOnKind: "stage_resource_patch",
     addOnManifest: resourcePatchAddOnManifest,
+    capabilityPlugin: resourceControllerPlugin,
     selectableTargets: [
       {
         targetStageId: "customs-complete",
@@ -356,6 +426,7 @@ export function executorManifestTask(overrides: Partial<ProductTaskWithAddOns> =
     requiredEvidence: [],
     addOnKind: "submit_signal",
     addOnManifest: validationAddOnManifest,
+    capabilityPlugin: inspectionValidationPlugin,
     primaryActionLabel: "确认验收结果",
     participantRoleLabel: "验收方",
     ...overrides
@@ -375,6 +446,10 @@ export function selectorTask(overrides: Partial<ProductTaskWithAddOns> = {}): Pr
     primaryActionLabel: "选择履约者",
     participantRoleLabel: "选择方",
     addOnKind: "stage_executor_patch",
+    // 补丁动作走 ExecutorPatchPanel 直渲染：不带 addOnManifest（否则 manifest 流量门控
+    // 会改为渲染 ManifestAddOnPanel，覆盖不到履约者选择表单）。
+    addOnManifest: undefined,
+    capabilityPlugin: stageSelectorPlugin,
     selectableTargets: [
       {
         targetStageId: "inspection",
@@ -530,6 +605,9 @@ export function resourcePatchTask(overrides: Partial<ProductTaskWithAddOns> = {}
     primaryActionLabel: "补充凭证要求",
     participantRoleLabel: "资源配置方",
     addOnKind: "stage_resource_patch",
+    // 资源补充走 ResourcePatchPanel 直渲染：不带 addOnManifest。
+    addOnManifest: undefined,
+    capabilityPlugin: resourceControllerPlugin,
     selectableTargets: [
       {
         targetStageId: "inspection",
@@ -745,8 +823,8 @@ export async function installProductApiStub(page: Page, options: StubOptions = {
         expiresAt: "2026-04-29T13:00:00.000Z",
         typedData: {
           domain: {
-            name: "UVPStagePatchModule",
-            version: "0.1",
+            name: STAGE_EXECUTOR_PATCH_DOMAIN_NAME,
+            version: STAGE_EXECUTOR_PATCH_DOMAIN_VERSION,
             chainId: 31337,
             verifyingContract: "0x8888888888888888888888888888888888888888"
           },
@@ -855,8 +933,8 @@ export async function installProductApiStub(page: Page, options: StubOptions = {
         expiresAt: "2026-04-29T13:00:00.000Z",
         typedData: {
           domain: {
-            name: "UVPStagePatchModule",
-            version: "0.1",
+            name: STAGE_EXECUTOR_PATCH_DOMAIN_NAME,
+            version: STAGE_EXECUTOR_PATCH_DOMAIN_VERSION,
             chainId: 31337,
             verifyingContract: "0x8888888888888888888888888888888888888888"
           },
@@ -940,7 +1018,8 @@ export async function uploadCustomsPdf(page: Page): Promise<void> {
   await page.getByLabel("选择报关单 PDF").setInputFiles({
     name: "customs.pdf",
     mimeType: "application/pdf",
-    buffer: Buffer.from("order app readiness customs pdf")
+    // %PDF- 首字节魔数：evidenceSpec accept=pdf 时前端做快检，伪造 MIME/扩展名在上传前拦截。
+    buffer: Buffer.from("%PDF-1.4\norder app readiness customs pdf")
   });
 }
 
