@@ -22,11 +22,13 @@ import {
   taskPrimaryActionLabel,
   taskResourceRequirementInputs,
   taskRequiredEvidenceLabels,
-  taskRequiredInputsFromCapability
+  taskRequiredInputsFromCapability,
+  taskSubmitIntent,
+  type TaskSubmitIntent
 } from "./taskPresentation";
 import { parseEvidenceIds } from "./taskUtils";
 
-export type TaskSubmitIntent = "confirm_stage" | "reject_stage" | "raise_dispute" | "resolve_dispute";
+export type { TaskSubmitIntent };
 
 export interface PrepareSubmitInput {
   readonly evidenceIds: readonly string[];
@@ -81,7 +83,6 @@ interface TaskPluginSpec {
   readonly title: string;
   readonly summary: string;
   readonly allowedEvidenceTypes: readonly string[];
-  readonly intent: TaskSubmitIntent;
   readonly confirmationCopy: string;
 }
 
@@ -104,35 +105,30 @@ const defaultPresentationByKind: Readonly<Record<FulfillmentPluginKind, Omit<Tas
     title: "付款条件占位",
     summary: "记录付款条件、凭证指纹和参与方确认；当前不代表真实资金移动。",
     allowedEvidenceTypes: ["付款条件确认", "资金凭证指纹", "外部付款记录引用"],
-    intent: "confirm_stage",
     confirmationCopy: "提交后只进入付款条件确认流程；当前不托管、不划转、不释放、不退款任何资金。"
   },
   evidence_submission: {
     title: "凭证提交",
     summary: "提交本阶段要求的链下凭证引用和凭证指纹。",
     allowedEvidenceTypes: ["凭证指纹", "业务文件引用"],
-    intent: "confirm_stage",
     confirmationCopy: "提交后等待链上确认，明文文件继续保留在链下系统。"
   },
   delivery_update: {
     title: "履约更新",
     summary: "提交本阶段履约进展，并绑定对应凭证。",
     allowedEvidenceTypes: ["履约凭证", "进展说明", "业务文件指纹"],
-    intent: "confirm_stage",
     confirmationCopy: "提交后该履约进展会进入订单时间线，并等待链上确认。"
   },
   validation_confirm: {
     title: "验收确认",
     summary: "核对阶段凭证是否满足订单条件，并提交确认结论。",
     allowedEvidenceTypes: ["验收记录", "补充凭证", "证明摘要"],
-    intent: "confirm_stage",
     confirmationCopy: "提交后验收结论会成为本阶段可核对证明的一部分。"
   },
   dispute_material: {
     title: "争议材料",
     summary: "提交争议说明、补充凭证和裁定所需材料。",
     allowedEvidenceTypes: ["争议说明", "往来记录指纹", "裁定通知", "补充凭证"],
-    intent: "raise_dispute",
     confirmationCopy: "提交后争议材料会进入订单证明记录，等待相关参与方处理。"
   }
 };
@@ -143,7 +139,6 @@ const pluginSpecs: readonly TaskPluginSpec[] = [
     title: "调整执行者",
     summary: "为目标阶段选择或更新执行者，提交执行者引用和指纹。",
     allowedEvidenceTypes: ["执行者钱包", "执行者参考", "选择证明"],
-    intent: "confirm_stage",
     confirmationCopy: "提交后等待链上确认；业务文件原文继续保留在链下系统。"
   },
   {
@@ -151,7 +146,6 @@ const pluginSpecs: readonly TaskPluginSpec[] = [
     title: "提交执行信号",
     summary: "按当前有效凭证要求提交链下文件引用和凭证指纹。",
     allowedEvidenceTypes: ["凭证指纹", "资源清单", "业务确认"],
-    intent: "confirm_stage",
     confirmationCopy: "提交后等待链上确认，明文文件继续保留在链下系统。"
   },
   {
@@ -159,7 +153,6 @@ const pluginSpecs: readonly TaskPluginSpec[] = [
     title: "配置资源要求",
     summary: "为目标阶段发布或更新加密资源清单和访问策略。",
     allowedEvidenceTypes: ["资源清单 URI", "清单指纹", "权限指纹"],
-    intent: "confirm_stage",
     confirmationCopy: "提交后等待链上确认；本页面不会托管或划转任何资金。"
   }
 ];
@@ -271,7 +264,8 @@ function createTaskPlugin(spec: TaskPluginSpec): TaskPlugin {
     buildPrepareSubmit: (input) => ({
       evidenceIds: collectEvidenceIds(input),
       walletAddress: input.walletAddress ?? "",
-      intent: defaultPresentationByKind[taskCapabilityPluginKind(input.task)].intent
+      // 提交意图按能力插件类型推导，单一来源见 taskSubmitIntent。
+      intent: taskSubmitIntent(input.task)
     })
   };
 }

@@ -1,4 +1,4 @@
-import type { ChainProofRowDTO } from "@uvp-eth/product-dto";
+import type { ChainProofRowDTO, TaskEvidenceInputKind } from "@uvp-eth/product-dto";
 
 export type EvidenceCaptureStatus = "empty" | "uploading" | "uploaded" | "failed" | "quarantined";
 export type EvidenceVerificationStatus = "unbound" | "matched" | "mismatch" | "missing_file";
@@ -19,6 +19,11 @@ export interface EvidenceRequirement {
   readonly label: string;
   readonly documentType: string;
   readonly required: boolean;
+  /** 槽位收集方式；缺省视为 file。 */
+  readonly inputKind?: TaskEvidenceInputKind | undefined;
+  /** 文件槽位的格式约束（MIME 或扩展名）；空数组表示不限制。 */
+  readonly accept?: readonly string[] | undefined;
+  readonly description?: string | undefined;
 }
 
 export interface CapturedEvidence {

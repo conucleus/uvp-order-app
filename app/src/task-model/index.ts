@@ -21,7 +21,9 @@ export {
   taskRequiredEvidenceLabels,
   taskRequiredInputsFromCapability,
   taskResourceRequirementInputs,
-  type TaskExecutorDisplay
+  taskSubmitIntent,
+  type TaskExecutorDisplay,
+  type TaskSubmitIntent
 } from "../tasks/taskPresentation";
 export {
   resourceRequirementDisplays,
