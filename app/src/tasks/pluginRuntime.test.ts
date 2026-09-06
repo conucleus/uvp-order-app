@@ -608,6 +608,28 @@ describe("participant task inbox helpers", () => {
     assert.equal(taskDisplay(ordered[0]!, now).label, "逾期待办");
   });
 
+  it("keeps done tasks confirmed even when a stale errorCode lingers from an earlier failed attempt", () => {
+    const doneWithResidualError = taskFixture("delivery_update", {
+      taskId: "done-residual-error",
+      status: "done",
+      errorCode: "EARLIER_ATTEMPT_FAILED"
+    });
+
+    const display = taskDisplay(doneWithResidualError);
+
+    assert.equal(display.state, "confirmed");
+    assert.equal(display.label, "已确认");
+  });
+
+  it("renders submitted tasks as waiting-for-indexing, never as confirmed", () => {
+    const submitted = taskFixture("delivery_update", { taskId: "submitted-only", status: "submitted" });
+
+    const display = taskDisplay(submitted);
+
+    assert.equal(display.state, "submitted");
+    assert.equal(display.label, "等待链上确认");
+  });
+
   it("returns all tasks unfiltered when no wallet is provided", () => {
     const result = filterParticipantTasksForWallet([
       taskFixture("delivery_update", { taskId: "a", assigneeWallet: wallet }),

@@ -581,7 +581,8 @@ function summarizeParticipantHome(
     orderCount: orders.length,
     openTaskCount: tasks.filter((task) => task.status === "open").length,
     blockedTaskCount: tasks.filter((task) => task.status === "blocked").length,
-    completedTaskCount: tasks.filter((task) => task.status === "done" || task.status === "submitted").length
+    // submitted 是等待索引的中间态，不计入已完成（与 taskStatus 口径一致）。
+    completedTaskCount: tasks.filter((task) => task.status === "done").length
   };
 }
 

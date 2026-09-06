@@ -303,7 +303,12 @@ describe("order app notification projection", () => {
     assert.equal(JSON.stringify(notifications).includes("private-buyer@example.com"), false);
   });
 
-  it("represents confirmed, failed, and revoked states as non-authoritative notifications", () => {
+  it("represents confirmed, waiting-indexing, failed, and revoked states as non-authoritative notifications", () => {
+    const doneTask = {
+      ...demoTask,
+      taskId: "done-task",
+      status: "done"
+    } satisfies ProductTaskDTO;
     const submittedTask = {
       ...demoTask,
       taskId: "submitted-task",
@@ -324,12 +329,18 @@ describe("order app notification projection", () => {
 
     const notifications = deriveOrderAppNotifications({
       orders: [demoOrder],
-      tasks: [submittedTask, failedTask, revokedTask],
+      tasks: [doneTask, submittedTask, failedTask, revokedTask],
       now: new Date("2026-04-29T12:00:00.000Z")
     });
     const kinds = notifications.map((notification) => notification.kind);
 
     assert.ok(kinds.includes("submission_confirmed"));
+    // submitted 只能产生等待索引的中间态通知，不得提前宣布"提交已确认"。
+    const submittedNotification = notifications.find((notification) => notification.notificationId.includes("submitted-task"));
+    assert.equal(submittedNotification?.kind, "signal_submitted");
+    assert.equal(submittedNotification?.severity, "info");
+    assert.equal(submittedNotification?.eventLabel, "等待索引确认");
+    assert.equal(kinds.filter((kind) => kind === "submission_confirmed").length, 1);
     assert.ok(kinds.includes("submission_failed"));
     assert.ok(kinds.includes("task_revoked"));
     assert.equal(notifications.every((notification) => notification.source === "local_projection"), true);

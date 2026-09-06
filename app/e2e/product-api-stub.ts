@@ -593,7 +593,8 @@ export async function installProductApiStub(page: Page, options: StubOptions = {
           orderCount: orders.length,
           openTaskCount: tasks.filter((item) => item.status === "open").length,
           blockedTaskCount: tasks.filter((item) => item.status === "blocked").length,
-          completedTaskCount: tasks.filter((item) => item.status === "done" || item.status === "submitted").length
+          // submitted 是等待索引的中间态，不计入已完成。
+          completedTaskCount: tasks.filter((item) => item.status === "done").length
         }
       });
       return;

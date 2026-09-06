@@ -159,14 +159,28 @@ export function deriveOrderAppNotifications(input: {
     const sla = slaStateForTask(task, input.now);
     const base = baseNotification(task, order);
 
-    if (task.status === "done" || task.status === "submitted") {
+    // done 才是链上确认的完成态；submitted 仍是等待索引的中间态，
+    // 通知口径与 taskStatus/ProofPanel 一致，不提前宣布"提交已确认"。
+    if (task.status === "done") {
       notifications.push({
         ...base,
         notificationId: localNotificationId("submission_confirmed", task.taskId),
         kind: "submission_confirmed",
         severity: "success",
         eventLabel: "提交已确认",
-        message: `${task.stageName} 已完成或已提交，继续关注后续订单状态。`
+        message: `${task.stageName} 已确认完成，继续关注后续订单状态。`
+      });
+      continue;
+    }
+
+    if (task.status === "submitted") {
+      notifications.push({
+        ...base,
+        notificationId: localNotificationId("signal_submitted", task.taskId),
+        kind: "signal_submitted",
+        severity: "info",
+        eventLabel: "等待索引确认",
+        message: `${task.stageName} 已提交，等待链上索引确认；确认前不会显示为完成。`
       });
       continue;
     }
