@@ -102,12 +102,6 @@ export function taskResourceRequirementInputs(task: ProductTaskDTO): readonly Fu
   }));
 }
 
-export function taskRequiredEvidenceLabels(task: ProductTaskDTO): readonly string[] {
-  return task.capabilityPlugin?.requiredEvidence && task.capabilityPlugin.requiredEvidence.length > 0
-    ? task.capabilityPlugin.requiredEvidence
-    : task.requiredEvidence;
-}
-
 export function taskExecutorDisplay(task: ProductTaskDTO): TaskExecutorDisplay {
   const roleLabel = cleanLabel(task.participantRoleLabel) ?? cleanLabel(task.assigneeRole) ?? "参与方";
   const slotId = cleanLabel(task.performanceSlotId) ?? cleanLabel(task.capabilityPlugin?.roleSlotId);

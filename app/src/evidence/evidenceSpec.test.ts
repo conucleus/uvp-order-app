@@ -3,7 +3,6 @@ import { describe, it } from "node:test";
 import type { ProductTaskDTO } from "@uvp-eth/product-dto";
 import {
   EVIDENCE_MAX_FILE_BYTES,
-  GENERIC_EVIDENCE_SLOT_KEY,
   acceptAllowsFile,
   acceptAttribute,
   acceptHint,
@@ -31,7 +30,6 @@ function taskFixture(overrides: Partial<ProductTaskDTO> = {}): ProductTaskDTO {
     stageName: "阶段",
     deadline: "2026-05-01 18:00",
     fundingImpact: "无",
-    requiredEvidence: [],
     status: "open",
     responsibilityStatements: [],
     proofRows: [],
@@ -56,7 +54,6 @@ function fileLike(input: { readonly name: string; readonly type: string; readonl
 describe("evidence spec single-track planning", () => {
   it("builds slots strictly from the delivered evidenceSpec, including text and date fields", () => {
     const task = taskFixture({
-      requiredEvidence: ["报关单"],
       evidenceSpec: [
         { key: "customs_pdf", label: "报关单", accept: ["pdf"], required: true },
         { key: "invoice_no", label: "发票号", inputKind: "text", required: true },
@@ -79,23 +76,18 @@ describe("evidence spec single-track planning", () => {
     assert.deepEqual(fieldSlots(plan).map((slot) => slot.slotId), ["invoice_no", "shipped_on"]);
   });
 
-  it("degrades declared evidence labels to one generic slot without industry keyword guessing", () => {
-    const task = taskFixture({ requiredEvidence: ["报关单 PDF", "物流凭证"] });
+  it("yields no evidence slots without a spec: no synthesized generic slot", () => {
+    const task = taskFixture();
 
     const plan = planTaskEvidence(task);
 
-    assert.equal(plan.mode, "fallback");
-    assert.deepEqual(plan.declaredLabels, ["报关单 PDF", "物流凭证"]);
-    // 关键词"报关"不得再映射为 customs_declaration；统一为通用槽位 key。
-    assert.equal(plan.slots.length, 1);
-    assert.equal(plan.slots[0]?.slotId, GENERIC_EVIDENCE_SLOT_KEY);
-    assert.equal(plan.slots[0]?.documentType, GENERIC_EVIDENCE_SLOT_KEY);
-    assert.deepEqual(plan.slots[0]?.accept, []);
+    // 无 spec 即无凭证槽位（与 zhixu-store 同口径）：不从声明文本臆造通用槽位。
+    assert.equal(plan.mode, "none");
+    assert.deepEqual(plan.slots, []);
   });
 
-  it("keeps structured resource requirement slots in fallback mode", () => {
+  it("keeps structured resource requirement slots when no spec is delivered", () => {
     const task = taskFixture({
-      requiredEvidence: ["报关单"],
       resourceRequirements: [
         {
           resourceId: "inspection_report",
@@ -109,17 +101,14 @@ describe("evidence spec single-track planning", () => {
 
     const plan = planTaskEvidence(task);
 
-    assert.equal(plan.mode, "fallback");
-    assert.deepEqual(plan.slots.map((slot) => slot.slotId), [
-      "resource-requirement:inspection_report",
-      GENERIC_EVIDENCE_SLOT_KEY
-    ]);
+    // 资源要求是服务端结构化数据，不是 requiredEvidence 声明文本，槽位保留。
+    assert.equal(plan.mode, "none");
+    assert.deepEqual(plan.slots.map((slot) => slot.slotId), ["resource-requirement:inspection_report"]);
     assert.equal(plan.slots[0]?.documentType, "inspection_report");
   });
 
-  it("rejects an invalid evidenceSpec by degrading to the generic slot instead of throwing", () => {
+  it("rejects an invalid evidenceSpec into no slots instead of throwing", () => {
     const task = taskFixture({
-      requiredEvidence: ["凭证"],
       evidenceSpec: [
         { key: "", label: "空 key" },
         { key: "dup", label: "重复" },
@@ -129,8 +118,8 @@ describe("evidence spec single-track planning", () => {
 
     const plan = planTaskEvidence(task);
 
-    assert.equal(plan.mode, "fallback");
-    assert.equal(plan.slots[0]?.slotId, GENERIC_EVIDENCE_SLOT_KEY);
+    assert.equal(plan.mode, "none");
+    assert.deepEqual(plan.slots, []);
   });
 
   it("checks required file slots by upload and text/date slots by field value", () => {
@@ -207,9 +196,9 @@ describe("evidence file validation before upload", () => {
 });
 
 describe("evidence metadata fields", () => {
-  it("carries spec field values and declared labels into upload metadata", () => {
-    const fields = evidenceMetadataFields({ invoice_no: " INV-1 ", empty: "  " }, ["报关单", "物流凭证"]);
-    assert.deepEqual(fields, { invoice_no: "INV-1", declared_requirements: "报关单, 物流凭证" });
+  it("carries spec field values into upload metadata without synthetic keys", () => {
+    const fields = evidenceMetadataFields({ invoice_no: " INV-1 ", empty: "  " });
+    assert.deepEqual(fields, { invoice_no: "INV-1" });
   });
 
   it("signs metadata fields order-independently for staleness checks", () => {

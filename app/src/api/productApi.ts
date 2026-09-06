@@ -113,7 +113,10 @@ export interface ProductInvitePreviewDTO {
     readonly roleSlotId: string;
     readonly label: string;
     readonly duty: string;
-    readonly requiredEvidence: readonly string[];
+    readonly evidenceSpec?: readonly {
+      readonly key: string;
+      readonly label: string;
+    }[];
   };
   readonly walletBinding?: {
     readonly walletAddress: string;

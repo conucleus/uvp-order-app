@@ -91,6 +91,9 @@ describe("task plugin runtime", () => {
 
   it("uses explicit capability plugin metadata for presentation", () => {
     const task = taskFixture("delivery_update", {
+      evidenceSpec: [
+        { key: "acceptance_form", label: "验收单", required: true }
+      ],
       capabilityPlugin: {
         pluginKind: "validation_confirm",
         source: "explicit",
@@ -98,7 +101,6 @@ describe("task plugin runtime", () => {
         title: "验收插件标题",
         summary: "来自 DTO 的验收插件说明",
         primaryActionLabel: "确认验收结论",
-        requiredEvidence: ["验收单"],
         inputPolicy: [
           {
             inputId: "inspection-report",
@@ -119,6 +121,7 @@ describe("task plugin runtime", () => {
     assert.equal(presentation.title, "验收插件标题");
     assert.equal(presentation.summary, "来自 DTO 的验收插件说明");
     assert.equal(presentation.primaryActionLabel, "确认验收结论");
+    // 允许的凭证类型由发布者 evidenceSpec 标签派生（单轨）。
     assert.deepEqual(presentation.allowedEvidenceTypes, ["验收单"]);
     assert.deepEqual(requiredInputsForTask(task, plugin).map((input) => input.label), ["验收报告编号"]);
     assert.equal(taskPrimaryActionLabel(task), "确认验收结论");
@@ -704,12 +707,10 @@ function taskFixture(
     stageName: "阶段一",
     deadline: overrides.deadline ?? "2026-05-01 18:00",
     fundingImpact: "进入下一阶段条件检查",
-    requiredEvidence: ["凭证指纹"],
     status: overrides.status ?? "open",
     capabilityPlugin: overrides.capabilityPlugin ?? {
       pluginKind: kind,
-      source: "explicit",
-      requiredEvidence: ["凭证指纹"]
+      source: "explicit"
     },
     primaryActionLabel: "提交确认",
     requiredInputs: [

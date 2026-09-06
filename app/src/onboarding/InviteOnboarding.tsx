@@ -167,7 +167,7 @@ export function InviteOnboarding({ inviteId, actions, session, onAccepted, onDis
         </div>
         <dl className="invite-facts">
           <Fact label="职责" value={invite?.role?.duty ?? "待确认"} />
-          <Fact label="凭证" value={(invite?.role?.requiredEvidence ?? []).join(" / ") || "按待办要求提交"} />
+          <Fact label="凭证" value={(invite?.role?.evidenceSpec ?? []).map((slot) => slot.label).join(" / ") || "按待办要求提交"} />
           <Fact label="到期" value={invite ? new Date(invite.invite.expiresAt).toLocaleString() : "待确认"} />
           <Fact label="钱包" value={shortWallet(walletAddress)} />
         </dl>

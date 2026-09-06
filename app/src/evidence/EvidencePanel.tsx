@@ -184,7 +184,7 @@ export function EvidencePanel({
         file,
         requirement,
         task,
-        metadataFields: evidenceMetadataFields(fieldValues, plan.declaredLabels)
+        metadataFields: evidenceMetadataFields(fieldValues)
       });
       if (taskScopeRef.current !== requestScopeKey) {
         return;

@@ -21,7 +21,6 @@ import {
   taskCapabilityPluginKind,
   taskPrimaryActionLabel,
   taskResourceRequirementInputs,
-  taskRequiredEvidenceLabels,
   taskRequiredInputsFromCapability,
   taskSubmitIntent,
   type TaskSubmitIntent
@@ -192,16 +191,7 @@ export function requiredInputsForTask(task: ProductTaskDTO, plugin: TaskPlugin):
       }
     ];
   }
-  const evidenceInputs = taskRequiredEvidenceLabels(task).map((label, index): FulfillmentRequiredInputDTO => ({
-    inputId: `${task.taskId}:evidence:${index}`,
-    label,
-    inputType: "evidence",
-    required: true,
-    completed: false
-  }));
-
   return [
-    ...evidenceInputs,
     {
       inputId: `${task.taskId}:confirmation`,
       label: taskCapabilityPluginKind(task) === "payment_placeholder" ? "确认付款条件占位" : taskPrimaryActionLabel(task),
@@ -213,17 +203,20 @@ export function requiredInputsForTask(task: ProductTaskDTO, plugin: TaskPlugin):
 }
 
 export function pluginPresentationForTask(task: ProductTaskDTO, plugin: TaskPlugin = pluginForTask(task)): TaskPluginPresentation {
-  const requiredEvidence = taskRequiredEvidenceLabels(task);
   const pluginKind = taskCapabilityPluginKind(task);
   const defaults = defaultPresentationByKind[pluginKind];
   const manifest = addOnManifestForTask(task);
+  // 允许的凭证类型单轨：有 evidenceSpec 时由发布者标签派生，否则用通用兜底文案。
+  const specLabels = (task.evidenceSpec ?? [])
+    .map((entry) => entry.label.trim())
+    .filter((label) => label.length > 0);
   return {
     kind: plugin.kind,
     ...(task.capabilityPlugin?.source ? { source: task.capabilityPlugin.source } : {}),
     title: manifest?.title ?? task.capabilityPlugin?.title ?? defaults.title ?? plugin.title,
     summary: manifest?.summary ?? task.capabilityPlugin?.summary ?? defaults.summary ?? plugin.summary,
     primaryActionLabel: taskPrimaryActionLabel(task),
-    allowedEvidenceTypes: requiredEvidence.length > 0 ? requiredEvidence : defaults.allowedEvidenceTypes ?? plugin.allowedEvidenceTypes,
+    allowedEvidenceTypes: specLabels.length > 0 ? specLabels : defaults.allowedEvidenceTypes ?? plugin.allowedEvidenceTypes,
     confirmationCopy: defaults.confirmationCopy ?? plugin.confirmationCopy
   };
 }

@@ -73,7 +73,6 @@ function task(taskId: string, orderId: string, actionKind: ParticipantAddOnManif
     stageName: "Stage",
     deadline: "2026-05-02T00:00:00.000Z",
     fundingImpact: "",
-    requiredEvidence: [],
     status: "open",
     addOnManifest: {
       schemaVersion: "participant-addon-manifest.v1",

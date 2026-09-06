@@ -41,7 +41,6 @@ const stubTasks: readonly ProductTaskDTO[] = [
     stageName: "报关",
     deadline: "2026-05-01 18:00",
     fundingImpact: "不影响资金",
-    requiredEvidence: ["报关单"],
     status: "open",
     responsibilityStatements: [],
     proofRows: []
@@ -148,7 +147,7 @@ describe("order app Product API boundary", () => {
             roleSlotId: "delivery",
             label: "物流/报关",
             duty: "提交物流凭证",
-            requiredEvidence: ["报关单"]
+            evidenceSpec: [{ key: "customs_declaration", label: "报关单" }]
           },
           acceptance: {
             canAccept: true,

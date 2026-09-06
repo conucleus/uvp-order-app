@@ -107,7 +107,6 @@ test.describe("UVP Order App production readiness negatives", () => {
         // PluginFields 渲染有效凭证要求/资源权限/履约者证明，EvidencePanel
         // 渲染资源要求对应的文件槽位。
         addOnManifest: undefined,
-        requiredEvidence: [],
         requiredInputs: [],
         resourceRequirements: [
           {

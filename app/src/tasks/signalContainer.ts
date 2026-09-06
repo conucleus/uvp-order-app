@@ -101,8 +101,7 @@ function requiredInputsForTask(task: ProductTaskDTO): readonly string[] {
     .map((input) => input.label);
   return uniqueLabels([
     ...resources,
-    ...policyInputs,
-    ...task.requiredEvidence
+    ...policyInputs
   ]);
 }
 
@@ -115,8 +114,7 @@ function evidenceRequirementsForTask(task: ProductTaskDTO): readonly string[] {
     .map((input) => input.label);
   return uniqueLabels([
     ...resources,
-    ...evidenceInputs,
-    ...task.requiredEvidence
+    ...evidenceInputs
   ]);
 }
 

@@ -18,7 +18,6 @@ export {
   taskCapabilityPluginKind,
   taskExecutorDisplay,
   taskPrimaryActionLabel,
-  taskRequiredEvidenceLabels,
   taskRequiredInputsFromCapability,
   taskResourceRequirementInputs,
   taskSubmitIntent,

@@ -276,8 +276,7 @@ const customsDeliveryPlugin = {
   roleSlotId: "delivery",
   title: "交付进度更新",
   summary: "报关履约者提交报关、装船、物流凭证并更新交付状态。",
-  primaryActionLabel: "确认报关完成",
-  requiredEvidence: ["报关单 PDF"]
+  primaryActionLabel: "确认报关完成"
 } as const;
 
 const stageSelectorPlugin = {
@@ -286,8 +285,7 @@ const stageSelectorPlugin = {
   roleSlotId: "buyer-selector",
   title: "选择履约者",
   summary: "买家为目标阶段选择、交接或替换履约者。",
-  primaryActionLabel: "选择履约者",
-  requiredEvidence: []
+  primaryActionLabel: "选择履约者"
 } as const;
 
 const resourceControllerPlugin = {
@@ -296,8 +294,7 @@ const resourceControllerPlugin = {
   roleSlotId: "buyer-resource-controller",
   title: "补充凭证要求",
   summary: "买家发布内容寻址资源清单和访问策略。",
-  primaryActionLabel: "补充凭证要求",
-  requiredEvidence: []
+  primaryActionLabel: "补充凭证要求"
 } as const;
 
 const inspectionValidationPlugin = {
@@ -306,8 +303,7 @@ const inspectionValidationPlugin = {
   roleSlotId: "validation",
   title: "检验验收确认",
   summary: "验收方核对检验凭证并确认验收结果。",
-  primaryActionLabel: "确认验收结果",
-  requiredEvidence: []
+  primaryActionLabel: "确认验收结果"
 } as const;
 
 const customsBaseTask: ProductTaskWithAddOns = {
@@ -322,7 +318,6 @@ const customsBaseTask: ProductTaskWithAddOns = {
   stageName: "出口报关",
   deadline: "2026-05-03 18:00",
   fundingImpact: "进入验收；通过后第 2 阶段付款条件满足",
-  requiredEvidence: ["报关单 PDF"],
   status: "open",
   addOnKind: "submit_signal",
   addOnManifest: deliveryAddOnManifest,
@@ -372,7 +367,6 @@ const manifestTasks: Readonly<Record<string, ProductTaskDTO>> = {
     subtitle: "未开始阶段可选择履约者；已开始阶段需走交接或替换证明。",
     stageId: "order-confirmed",
     stageName: "订单确认",
-    requiredEvidence: [],
     addOnKind: "stage_executor_patch",
     addOnManifest: selectorAddOnManifest,
     capabilityPlugin: stageSelectorPlugin,
@@ -391,7 +385,6 @@ const manifestTasks: Readonly<Record<string, ProductTaskDTO>> = {
     subtitle: "你可以为目标阶段发布加密内容寻址资源清单和访问策略。",
     stageId: "order-confirmed",
     stageName: "订单确认",
-    requiredEvidence: [],
     addOnKind: "stage_resource_patch",
     addOnManifest: resourcePatchAddOnManifest,
     capabilityPlugin: resourceControllerPlugin,
@@ -423,7 +416,6 @@ export function executorManifestTask(overrides: Partial<ProductTaskWithAddOns> =
     subtitle: "核对提交材料并确认验收结果。",
     stageId: "inspection",
     stageName: "检验验收",
-    requiredEvidence: [],
     addOnKind: "submit_signal",
     addOnManifest: validationAddOnManifest,
     capabilityPlugin: inspectionValidationPlugin,
@@ -442,7 +434,6 @@ export function selectorTask(overrides: Partial<ProductTaskWithAddOns> = {}): Pr
     stageName: "检验方选择",
     deadline: "2026-05-02 18:00",
     fundingImpact: "目标阶段履约者更新后继续推进",
-    requiredEvidence: [],
     primaryActionLabel: "选择履约者",
     participantRoleLabel: "选择方",
     addOnKind: "stage_executor_patch",
@@ -601,7 +592,6 @@ export function resourcePatchTask(overrides: Partial<ProductTaskWithAddOns> = {}
     stageName: "检验凭证要求",
     deadline: "2026-05-02 18:00",
     fundingImpact: "目标阶段凭证清单更新后继续推进",
-    requiredEvidence: [],
     primaryActionLabel: "补充凭证要求",
     participantRoleLabel: "资源配置方",
     addOnKind: "stage_resource_patch",

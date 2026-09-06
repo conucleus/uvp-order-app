@@ -244,7 +244,7 @@ function readSummaryExpectations(gate: OrderAppFullModeGate): SummaryExpectation
       "resourcePolicyHash",
       "policyHash"
     ], "resource policy hash"),
-    evidenceRef: requiredEvidenceRef(raw),
+    evidenceRef: evidenceRefValue(raw),
     eventTxHashes: Object.fromEntries(requiredEvents.map((eventName) => [
       eventName,
       requiredString(raw, eventTxHashPaths(eventName), `${eventName} tx hash`)
@@ -747,7 +747,7 @@ function eventTxHashPaths(eventName: EventName): readonly string[] {
   ];
 }
 
-function requiredEvidenceRef(value: JsonRecord): string {
+function evidenceRefValue(value: JsonRecord): string {
   const direct = optionalString(value, ["evidence.evidenceId", "evidence.id", "evidence.payloadRef", "evidenceRef", "evidenceId"]);
   if (direct) {
     return direct;

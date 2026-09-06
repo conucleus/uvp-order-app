@@ -5,32 +5,24 @@ import type { EvidenceRequirement } from "../task-model";
 
 /**
  * 证据规则单轨：槽位只来自 BFF 下发的 evidenceSpec（含 text/date 必填字段），
- * spec 缺失或非法时降级为通用槽位；前端不维护行业关键词→documentType
- * 匹配表，也不维护硬编码格式白名单。与 zhixu-store planTaskEvidence 同口径。
+ * spec 缺失或非法即无凭证槽位（纯字段确认或按业务约定线下提交），不从声明
+ * 文本臆造通用槽位；资源要求是服务端结构化数据，其上传槽位保留。前端不
+ * 维护行业关键词→documentType 匹配表，也不维护硬编码格式白名单。与
+ * zhixu-store planTaskEvidence 同口径。
  */
 export interface TaskEvidencePlan {
-  readonly mode: "spec" | "fallback";
+  readonly mode: "spec" | "none";
   readonly slots: readonly EvidenceRequirement[];
-  /** requiredEvidence 声明文本，降级模式下原样随元数据上送，不静默丢弃。 */
-  readonly declaredLabels: readonly string[];
 }
-
-export const GENERIC_EVIDENCE_SLOT_KEY = "task_evidence_generic";
-export const GENERIC_EVIDENCE_SLOT_LABEL = "阶段凭证";
 
 /** 与后端证据服务一致的解码上限（HTTP body 上限 16MB）。 */
 export const EVIDENCE_MAX_FILE_BYTES = 10 * 1024 * 1024;
 
 export function planTaskEvidence(task: ProductTaskDTO): TaskEvidencePlan {
-  const declaredLabels = task.requiredEvidence
-    .map((label) => label.trim())
-    .filter((label) => label.length > 0);
-
   const spec = task.evidenceSpec;
   if (spec && spec.length > 0 && validateTaskEvidenceSpec(spec).length === 0) {
     return {
       mode: "spec",
-      declaredLabels,
       slots: spec.map((entry): EvidenceRequirement => ({
         slotId: entry.key,
         label: entry.label,
@@ -45,9 +37,6 @@ export function planTaskEvidence(task: ProductTaskDTO): TaskEvidencePlan {
       }))
     };
   }
-
-  // 降级：资源要求是服务端结构化数据（documentType=resourceType），
-  // 声明文本合并为一个通用文件槽位，格式不设限、不做关键词猜测。
   const resourceSlots: EvidenceRequirement[] = resourceRequirementDisplays(task)
     .filter((resource) => resource.documentType !== "metadata")
     .map((resource) => ({
@@ -58,20 +47,7 @@ export function planTaskEvidence(task: ProductTaskDTO): TaskEvidencePlan {
       inputKind: "file" as const,
       accept: []
     }));
-  const slots = declaredLabels.length > 0
-    ? [
-        ...resourceSlots,
-        {
-          slotId: GENERIC_EVIDENCE_SLOT_KEY,
-          label: GENERIC_EVIDENCE_SLOT_LABEL,
-          documentType: GENERIC_EVIDENCE_SLOT_KEY,
-          required: true,
-          inputKind: "file" as const,
-          accept: []
-        }
-      ]
-    : resourceSlots;
-  return { mode: "fallback", declaredLabels, slots };
+  return { mode: "none", slots: resourceSlots };
 }
 
 export function fileSlots(plan: TaskEvidencePlan): readonly EvidenceRequirement[] {
@@ -227,8 +203,7 @@ async function readHead(file: EvidenceFileLike, length: number): Promise<string>
 
 /** 随上传进入元数据的字段值：key 全部来自下发 spec，框架不造业务键。 */
 export function evidenceMetadataFields(
-  fieldValues: Readonly<Record<string, string>>,
-  declaredLabels: readonly string[]
+  fieldValues: Readonly<Record<string, string>>
 ): Readonly<Record<string, string>> {
   const fields: Record<string, string> = {};
   for (const [key, value] of Object.entries(fieldValues)) {
@@ -236,9 +211,6 @@ export function evidenceMetadataFields(
     if (trimmed) {
       fields[key] = trimmed;
     }
-  }
-  if (declaredLabels.length > 0) {
-    fields.declared_requirements = declaredLabels.join(", ");
   }
   return fields;
 }
