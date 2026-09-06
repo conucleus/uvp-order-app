@@ -270,6 +270,59 @@ describe("task plugin runtime", () => {
     assert.equal(inputs[0]?.label, "第三方检验证明");
   });
 
+  it("keeps same-label required inputs with distinct inputIds instead of swallowing one", () => {
+    const task = taskFixture("evidence_submission", {
+      addOnKind: "submit_signal",
+      resourceRequirements: [
+        {
+          resourceId: "acceptance_form",
+          resourceKey: "acceptance_form",
+          label: "验收单",
+          required: true,
+          source: "resource_patch",
+          visibility: "protected",
+          ciphertextHash: "0x2222222222222222222222222222222222222222222222222222222222222222",
+          accessStatus: {
+            state: "request_required",
+            label: "需要授权后查看加密文件",
+            canRead: false
+          }
+        }
+      ],
+      capabilityPlugin: {
+        pluginKind: "evidence_submission",
+        source: "explicit",
+        inputPolicy: [
+          {
+            inputId: "acceptance-form-number",
+            label: "验收单",
+            inputType: "text",
+            required: true,
+            completed: false
+          }
+        ]
+      }
+    });
+    const plugin = pluginForTask(task);
+    const inputs = requiredInputsForTask(task, plugin);
+
+    // 标签是展示文案，去重只能按 inputId：同标签的两条必填都要保留，
+    // 否则提交校验永远缺一步（0216 O24）。
+    assert.deepEqual(inputs.map((input) => input.inputId), [
+      "resource-requirement:acceptance_form",
+      "acceptance-form-number"
+    ]);
+    assert.equal(inputs.filter((input) => input.label === "验收单").length, 2);
+
+    const missing = plugin.validate({
+      task,
+      walletAddress: wallet,
+      values: { "acceptance-form-number": "ACC-1" },
+      confirmations: {}
+    }).missingInputIds;
+    assert.deepEqual(missing, ["resource-requirement:acceptance_form"]);
+  });
+
   it("builds submit_signal inputs from a declarative add-on manifest", () => {
     const manifest = addOnManifestFixture("submit_signal", "submit_signal");
     const task = taskFixture("delivery_update", {

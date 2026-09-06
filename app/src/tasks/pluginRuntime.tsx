@@ -530,16 +530,15 @@ function mergeRequiredInputs(
   primary: readonly FulfillmentRequiredInputDTO[],
   secondary: readonly FulfillmentRequiredInputDTO[]
 ): readonly FulfillmentRequiredInputDTO[] {
+  // 只按 inputId 去重：label 是展示文案，两个必填项可以共用同一标签
+  // （不同 inputId）；按 label 合并会把第二项整个吞掉，提交校验永远缺一步。
   const seen = new Set<string>();
   const merged: FulfillmentRequiredInputDTO[] = [];
   for (const input of [...primary, ...secondary]) {
-    const key = `${input.inputId}:${input.label.trim().toLowerCase()}`;
-    const labelKey = `label:${input.label.trim().toLowerCase()}`;
-    if (seen.has(key) || seen.has(labelKey)) {
+    if (seen.has(input.inputId)) {
       continue;
     }
-    seen.add(key);
-    seen.add(labelKey);
+    seen.add(input.inputId);
     merged.push(input);
   }
   return merged;
