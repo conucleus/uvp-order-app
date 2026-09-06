@@ -91,6 +91,9 @@ describe("task plugin runtime", () => {
 
   it("uses explicit capability plugin metadata for presentation", () => {
     const task = taskFixture("delivery_update", {
+      evidenceSpec: [
+        { key: "acceptance_form", label: "验收单", required: true }
+      ],
       capabilityPlugin: {
         pluginKind: "validation_confirm",
         source: "explicit",
@@ -98,7 +101,6 @@ describe("task plugin runtime", () => {
         title: "验收插件标题",
         summary: "来自 DTO 的验收插件说明",
         primaryActionLabel: "确认验收结论",
-        requiredEvidence: ["验收单"],
         inputPolicy: [
           {
             inputId: "inspection-report",
@@ -119,6 +121,7 @@ describe("task plugin runtime", () => {
     assert.equal(presentation.title, "验收插件标题");
     assert.equal(presentation.summary, "来自 DTO 的验收插件说明");
     assert.equal(presentation.primaryActionLabel, "确认验收结论");
+    // 允许的凭证类型由发布者 evidenceSpec 标签派生（单轨）。
     assert.deepEqual(presentation.allowedEvidenceTypes, ["验收单"]);
     assert.deepEqual(requiredInputsForTask(task, plugin).map((input) => input.label), ["验收报告编号"]);
     assert.equal(taskPrimaryActionLabel(task), "确认验收结论");
@@ -242,12 +245,13 @@ describe("task plugin runtime", () => {
   it("renders executor requirements and access status before evidence", () => {
     const task = taskFixture("delivery_update", {
       addOnKind: "submit_signal",
-      resourceRequirements: {
-        inspection_report: {
+      resourceRequirements: [
+        {
+          resourceId: "inspection_report",
+          resourceKey: "inspection_report",
           label: "第三方检验证明",
-          documentType: "inspection_report",
           required: true,
-          sourceLabel: "来自资源补充",
+          source: "resource_patch",
           visibility: "protected",
           ciphertextHash: "0x1111111111111111111111111111111111111111111111111111111111111111",
           accessStatus: {
@@ -256,7 +260,7 @@ describe("task plugin runtime", () => {
             canRead: false
           }
         }
-      }
+      ]
     });
     const plugin = pluginForTask(task);
     const inputs = requiredInputsForTask(task, plugin);
@@ -264,7 +268,59 @@ describe("task plugin runtime", () => {
     assert.equal(resourceRequirementDisplays(task)[0]?.label, "第三方检验证明");
     assert.equal(resourceRequirementDisplays(task)[0]?.accessLabel, "需要授权后查看加密文件");
     assert.equal(inputs[0]?.label, "第三方检验证明");
-    assert.ok(inputs.some((input) => input.label === "凭证指纹"));
+  });
+
+  it("keeps same-label required inputs with distinct inputIds instead of swallowing one", () => {
+    const task = taskFixture("evidence_submission", {
+      addOnKind: "submit_signal",
+      resourceRequirements: [
+        {
+          resourceId: "acceptance_form",
+          resourceKey: "acceptance_form",
+          label: "验收单",
+          required: true,
+          source: "resource_patch",
+          visibility: "protected",
+          ciphertextHash: "0x2222222222222222222222222222222222222222222222222222222222222222",
+          accessStatus: {
+            state: "request_required",
+            label: "需要授权后查看加密文件",
+            canRead: false
+          }
+        }
+      ],
+      capabilityPlugin: {
+        pluginKind: "evidence_submission",
+        source: "explicit",
+        inputPolicy: [
+          {
+            inputId: "acceptance-form-number",
+            label: "验收单",
+            inputType: "text",
+            required: true,
+            completed: false
+          }
+        ]
+      }
+    });
+    const plugin = pluginForTask(task);
+    const inputs = requiredInputsForTask(task, plugin);
+
+    // 标签是展示文案，去重只能按 inputId：同标签的两条必填都要保留，
+    // 否则提交校验永远缺一步（0216 O24）。
+    assert.deepEqual(inputs.map((input) => input.inputId), [
+      "resource-requirement:acceptance_form",
+      "acceptance-form-number"
+    ]);
+    assert.equal(inputs.filter((input) => input.label === "验收单").length, 2);
+
+    const missing = plugin.validate({
+      task,
+      walletAddress: wallet,
+      values: { "acceptance-form-number": "ACC-1" },
+      confirmations: {}
+    }).missingInputIds;
+    assert.deepEqual(missing, ["resource-requirement:acceptance_form"]);
   });
 
   it("builds submit_signal inputs from a declarative add-on manifest", () => {
@@ -402,6 +458,51 @@ describe("task plugin runtime", () => {
     assert.match(resourcePatchValidation.errors.join("\n"), /selectorWallet/);
     assert.match(resourcePatchValidation.errors.join("\n"), /writerWallet/);
     assert.match(resourcePatchValidation.errors.join("\n"), /资源可见性/);
+  });
+
+  it("blocks approval input that is not valid JSON instead of sending the raw string", () => {
+    const manifest = addOnManifestFixture("stage_executor_patch", "stage_executor_patch", { withApprovalBinding: true });
+    const action = manifest.actions[0]!;
+    const task = taskFixture("evidence_submission", {
+      addOnManifest: manifest,
+      canSubmit: true,
+      selectableTargets: [{ targetStageId: "inspection", targetStageName: "检验", allowed: true }]
+    });
+    const baseValues = {
+      selectorWallet: wallet,
+      targetStageId: "inspection",
+      executorWallet: "0x0000000000000000000000000000000000000002",
+      executorMetadataHash: "0x2222222222222222222222222222222222222222222222222222222222222222",
+      metadataURI: "ipfs://executor/inspection",
+      mode: "assign"
+    };
+
+    const invalidValidation = validateAddOnManifestAction(manifest, action, {
+      ...createInitialAddOnManifestState(task, wallet),
+      values: { ...baseValues, approval: "source-id signal-id" },
+      confirmations: {}
+    });
+    assert.equal(invalidValidation.ok, false);
+    assert.match(invalidValidation.errors.join("\n"), /approval.*JSON/u);
+
+    assert.throws(
+      () => buildAddOnManifestPrepareInput(action, {
+        ...createInitialAddOnManifestState(task, wallet),
+        values: { ...baseValues, approval: "source-id signal-id" },
+        confirmations: {}
+      }),
+      /approval.*JSON/u
+    );
+
+    const validPrepare = buildAddOnManifestPrepareInput(action, {
+      ...createInitialAddOnManifestState(task, wallet),
+      values: { ...baseValues, approval: JSON.stringify({ sourceId: "0xaaaa", signalId: "0xbbbb" }) },
+      confirmations: {}
+    });
+    assert.equal(validPrepare.actionKind, "stage_executor_patch");
+    if (validPrepare.actionKind === "stage_executor_patch") {
+      assert.deepEqual(validPrepare.input.approval, { sourceId: "0xaaaa", signalId: "0xbbbb" });
+    }
   });
 
   it("blocks manifest wallet fields that do not match the authorized participant", () => {
@@ -563,6 +664,28 @@ describe("participant task inbox helpers", () => {
     assert.equal(taskDisplay(ordered[0]!, now).label, "逾期待办");
   });
 
+  it("keeps done tasks confirmed even when a stale errorCode lingers from an earlier failed attempt", () => {
+    const doneWithResidualError = taskFixture("delivery_update", {
+      taskId: "done-residual-error",
+      status: "done",
+      errorCode: "EARLIER_ATTEMPT_FAILED"
+    });
+
+    const display = taskDisplay(doneWithResidualError);
+
+    assert.equal(display.state, "confirmed");
+    assert.equal(display.label, "已确认");
+  });
+
+  it("renders submitted tasks as waiting-for-indexing, never as confirmed", () => {
+    const submitted = taskFixture("delivery_update", { taskId: "submitted-only", status: "submitted" });
+
+    const display = taskDisplay(submitted);
+
+    assert.equal(display.state, "submitted");
+    assert.equal(display.label, "等待链上确认");
+  });
+
   it("returns all tasks unfiltered when no wallet is provided", () => {
     const result = filterParticipantTasksForWallet([
       taskFixture("delivery_update", { taskId: "a", assigneeWallet: wallet }),
@@ -637,12 +760,10 @@ function taskFixture(
     stageName: "阶段一",
     deadline: overrides.deadline ?? "2026-05-01 18:00",
     fundingImpact: "进入下一阶段条件检查",
-    requiredEvidence: ["凭证指纹"],
     status: overrides.status ?? "open",
     capabilityPlugin: overrides.capabilityPlugin ?? {
       pluginKind: kind,
-      source: "explicit",
-      requiredEvidence: ["凭证指纹"]
+      source: "explicit"
     },
     primaryActionLabel: "提交确认",
     requiredInputs: [
@@ -702,9 +823,15 @@ function capabilityKindForAddOn(kind: ParticipantAddOnKind): FulfillmentPluginKi
 function addOnManifestFixture(
   addOnKind: ParticipantAddOnKind,
   actionKind: ParticipantAddOnManifestDTO["actions"][number]["actionKind"],
-  options: { readonly unsupportedResourceBindings?: boolean } = {}
+  options: { readonly unsupportedResourceBindings?: boolean; readonly withApprovalBinding?: boolean } = {}
 ): ParticipantAddOnManifestDTO {
   if (actionKind === "stage_executor_patch") {
+    const approvalComponent: ParticipantAddOnManifestComponentDTO = {
+      componentId: "approval",
+      componentKind: "text",
+      inputId: "approval",
+      label: "替换证明"
+    };
     return {
       schemaVersion: "participant-addon-manifest.v1",
       manifestId: "stage-executor-patch:v1",
@@ -726,7 +853,8 @@ function addOnManifestFixture(
             { componentId: "executor-metadata-hash", componentKind: "hash", inputId: "executorMetadataHash", label: "履约者指纹", required: true },
             { componentId: "executor-reference", componentKind: "text", inputId: "executorReference", label: "履约者参考" },
             { componentId: "metadata-uri", componentKind: "uri", inputId: "metadataURI", label: "补充说明 URI", required: true },
-            { componentId: "mode", componentKind: "select", inputId: "mode", label: "处理方式", options: [{ value: "assign", label: "选择履约者" }] }
+            { componentId: "mode", componentKind: "select", inputId: "mode", label: "处理方式", options: [{ value: "assign", label: "选择履约者" }] },
+            ...(options.withApprovalBinding ? [approvalComponent] : [])
           ]
         }]
       }],
@@ -742,7 +870,8 @@ function addOnManifestFixture(
           executorMetadataHash: "executorMetadataHash",
           executorReference: "executorReference",
           metadataURI: "metadataURI",
-          mode: "mode"
+          mode: "mode",
+          ...(options.withApprovalBinding ? { approval: "approval" } : {})
         }
       }]
     };

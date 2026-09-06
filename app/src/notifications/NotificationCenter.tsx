@@ -111,7 +111,7 @@ export function NotificationCenter({
           <h2>协作提醒</h2>
         </div>
         <span className={`notification-source source-${data?.source ?? "loading"}`}>
-          {data?.source === "api" ? "参与者服务" : "本地投影"}
+          {data?.source === "api" ? "参与者服务" : "未连接"}
         </span>
       </div>
 
@@ -123,7 +123,7 @@ export function NotificationCenter({
       ) : null}
 
       {loadState.status === "error" ? (
-        <p className="notification-service-warning">{loadState.message}；下方仅展示从当前订单和待办派生的本地提醒。</p>
+        <p className="notification-service-warning" role="alert">{loadState.message}</p>
       ) : null}
 
       {loadState.status !== "loading" && notifications.length === 0 ? (
@@ -146,7 +146,9 @@ export function NotificationCenter({
               <div className="notification-copy">
                 <div className="notification-title-line">
                   <strong>{notification.eventLabel}</strong>
-                  <span>{notification.readStatus === "read" ? "已读" : "未读"}</span>
+                  <span>
+                    {notification.readStatus === "read" ? (notification.syncPending ? "已读·回执待同步" : "已读") : "未读"}
+                  </span>
                 </div>
                 <p>{notification.message}</p>
                 <div className="notification-meta">

@@ -1,8 +1,20 @@
 import type { Page, Route } from "@playwright/test";
-import { demoProductCatalog } from "@uvp-eth/product-dto/fixtures";
-import type { ProductExecutorPatchMode, ProductOrderDTO, ProductParticipantProfileDTO, ProductTaskDTO } from "@uvp-eth/product-dto";
-import { buildProductSubmitTypedData } from "@uvp-eth/executor-kit/participant";
-import type { ProductTaskWithAddOns } from "../src/tasks/addOnTypes";
+import type {
+  ParticipantAddOnManifestDTO,
+  ProductExecutorPatchMode,
+  ProductOrderDTO,
+  ProductParticipantProfileDTO,
+  ProductResourceRequirementDTO,
+  ProductTaskDTO
+} from "@uvp-eth/product-dto";
+import {
+  buildProductSubmitTypedData,
+  STAGE_EXECUTOR_PATCH_DOMAIN_NAME,
+  STAGE_EXECUTOR_PATCH_DOMAIN_VERSION
+} from "@uvp-eth/executor-kit/participant";
+import type { ProductTaskWithAddOns, SelectableTargetStageDTO } from "../src/tasks/addOnTypes";
+
+export type { ProductTaskWithAddOns };
 
 export const productApiBaseUrl = "http://product-api.test";
 export const participantWallet = "0x9d8A62f656a8d1615C1294FD71E9cfB3e4855A4F";
@@ -19,20 +31,306 @@ interface StubOptions {
 }
 
 const participant: ProductParticipantProfileDTO = {
-  participantId: "demo-customs-agent",
+  participantId: "participant-customs-agent",
   displayName: "张经理",
   walletAddress: participantWallet,
   roleLabels: ["报关行", "交付方"],
   source: "wallet"
 };
 
-export function readinessTask(overrides: Partial<ProductTaskWithAddOns> = {}): ProductTaskDTO {
-  const baseTask = demoProductCatalog.tasks.find((task) => task.taskId === "task-customs-complete-001") ??
-    demoProductCatalog.tasks[1] ??
-    demoProductCatalog.tasks[0];
-  const { addOnManifest: _addOnManifest, ...fallbackBaseTask } = baseTask as ProductTaskWithAddOns;
+const stubOrder: ProductOrderDTO = {
+  orderId: "order-cross-border-001",
+  zhixuId: "zhixu-cross-border-001",
+  title: "跨境出口报关订单",
+  status: "registered",
+  statusLabel: "履约中",
+  totalAmount: { amount: "10000", currency: "USDC", display: "10,000 USDC" },
+  fundingStatus: "funds_protected",
+  currentStageId: "customs-complete",
+  currentStageName: "出口报关",
+  currentTaskId: "task-customs-submit-001",
+  currentTaskTitle: "确认出口报关完成",
+  currentTaskSummary: "提交本阶段报关凭证并确认阶段完成。",
+  stages: [],
+  participants: [],
+  recentEvents: [],
+  proofRows: []
+};
+
+function submitSignalManifest(input: {
+  readonly roleSlotId: string;
+  readonly title: string;
+  readonly summary: string;
+  readonly stageBindings: readonly string[];
+  readonly actionLabel: string;
+  readonly evidenceLabel: string;
+}): ParticipantAddOnManifestDTO {
   return {
-    ...fallbackBaseTask,
+    schemaVersion: "participant-addon-manifest.v1",
+    manifestId: `${input.roleSlotId}:submit-signal:v1`,
+    roleSlotId: input.roleSlotId,
+    addOnKind: "submit_signal",
+    title: input.title,
+    summary: input.summary,
+    stageBindings: [...input.stageBindings],
+    pages: [
+      {
+        pageId: "main",
+        title: input.title,
+        summary: input.summary,
+        sections: [
+          {
+            sectionId: "inputs",
+            title: "提交材料",
+            components: [
+              {
+                componentId: "wallet",
+                componentKind: "wallet",
+                inputId: `${input.roleSlotId}.wallet`,
+                label: "参与方钱包",
+                required: true
+              },
+              {
+                componentId: "evidence",
+                componentKind: "evidence_refs",
+                inputId: `${input.roleSlotId}.evidence`,
+                label: input.evidenceLabel,
+                required: true,
+                placeholder: "输入 evidenceId、CID 或凭证指纹；多个值可换行"
+              },
+              {
+                componentId: "confirmation",
+                componentKind: "confirmation",
+                inputId: `${input.roleSlotId}.confirmation`,
+                label: input.actionLabel,
+                required: true
+              },
+              {
+                componentId: "proof",
+                componentKind: "proof_rows",
+                label: "证明"
+              }
+            ]
+          }
+        ]
+      }
+    ],
+    actions: [
+      {
+        actionId: `${input.roleSlotId}.confirm`,
+        actionKind: "submit_signal",
+        label: input.actionLabel,
+        primary: true,
+        intent: "confirm_stage",
+        inputBindings: {
+          walletAddress: `${input.roleSlotId}.wallet`,
+          evidenceIds: `${input.roleSlotId}.evidence`,
+          confirmation: `${input.roleSlotId}.confirmation`
+        }
+      }
+    ]
+  };
+}
+
+const deliveryAddOnManifest = submitSignalManifest({
+  roleSlotId: "delivery",
+  title: "交付进度更新",
+  summary: "提交报关、装船、物流和到港凭证，更新交付环节状态。",
+  stageBindings: ["customs-complete"],
+  actionLabel: "确认报关完成",
+  evidenceLabel: "交付凭证引用"
+});
+
+const validationAddOnManifest = submitSignalManifest({
+  roleSlotId: "validation",
+  title: "检验验收确认",
+  summary: "核对检验报告和验收单，确认阶段条件是否满足。",
+  stageBindings: ["inspection"],
+  actionLabel: "确认验收结果",
+  evidenceLabel: "验收凭证引用"
+});
+
+const selectorAddOnManifest: ParticipantAddOnManifestDTO = {
+  schemaVersion: "participant-addon-manifest.v1",
+  manifestId: "buyer-selector:v1",
+  roleSlotId: "buyer-selector",
+  addOnKind: "stage_executor_patch",
+  title: "选择履约者",
+  summary: "为目标阶段选择、交接或替换后续履约者。",
+  stageBindings: ["customs-complete"],
+  pages: [
+    {
+      pageId: "executor-selection",
+      title: "履约者选择",
+      sections: [
+        {
+          sectionId: "selection",
+          title: "选择设置",
+          components: [
+            { componentId: "target-stage", componentKind: "stage_select", inputId: "selector.targetStageId", label: "目标阶段", required: true },
+            { componentId: "mode", componentKind: "select", inputId: "selector.mode", label: "处理方式", required: true, defaultValue: "assign", options: [
+              { value: "assign", label: "选择履约者" },
+              { value: "handoff", label: "交接履约者" },
+              { value: "replacement", label: "申请替换履约者" }
+            ] },
+            { componentId: "selector-wallet", componentKind: "wallet", inputId: "selector.selectorWallet", label: "选择方钱包", required: true },
+            { componentId: "executor-wallet", componentKind: "wallet", inputId: "selector.executorWallet", label: "履约者钱包", required: true },
+            { componentId: "executor-metadata-hash", componentKind: "hash", inputId: "selector.executorMetadataHash", label: "履约者元数据指纹", required: true },
+            { componentId: "executor-reference", componentKind: "text", inputId: "selector.executorReference", label: "履约者参考" },
+            { componentId: "metadata-uri", componentKind: "uri", inputId: "selector.metadataURI", label: "补充说明 URI", required: true },
+            { componentId: "proof", componentKind: "proof_rows", label: "证明" }
+          ]
+        }
+      ]
+    }
+  ],
+  actions: [
+    {
+      actionId: "selector.apply-executor-patch",
+      actionKind: "stage_executor_patch",
+      label: "选择履约者",
+      primary: true,
+      inputBindings: {
+        selectorWallet: "selector.selectorWallet",
+        targetStageId: "selector.targetStageId",
+        mode: "selector.mode",
+        executorWallet: "selector.executorWallet",
+        executorMetadataHash: "selector.executorMetadataHash",
+        metadataURI: "selector.metadataURI"
+      }
+    }
+  ]
+};
+
+const resourcePatchAddOnManifest: ParticipantAddOnManifestDTO = {
+  schemaVersion: "participant-addon-manifest.v1",
+  manifestId: "buyer-resource-controller:v1",
+  roleSlotId: "buyer-resource-controller",
+  addOnKind: "stage_resource_patch",
+  title: "补充凭证要求",
+  summary: "为目标阶段发布内容寻址资源清单和访问策略。",
+  stageBindings: ["customs-complete"],
+  pages: [
+    {
+      pageId: "resource-requirements",
+      title: "资源清单",
+      sections: [
+        {
+          sectionId: "resource",
+          title: "补充资源",
+          components: [
+            { componentId: "target-stage", componentKind: "stage_select", inputId: "resourcePatch.targetStageId", label: "目标阶段", required: true },
+            { componentId: "selector-wallet", componentKind: "wallet", inputId: "resourcePatch.selectorWallet", label: "资源配置钱包", required: true },
+            { componentId: "resource-key", componentKind: "text", inputId: "resourcePatch.resourceKey", label: "资源键", required: true },
+            { componentId: "manifest-uri", componentKind: "uri", inputId: "resourcePatch.manifestURI", label: "资源清单 URI", required: true },
+            { componentId: "manifest-hash", componentKind: "hash", inputId: "resourcePatch.manifestHash", label: "清单指纹", required: true },
+            { componentId: "policy-hash", componentKind: "hash", inputId: "resourcePatch.policyHash", label: "权限指纹", required: true },
+            { componentId: "requirements", componentKind: "resource_requirements", label: "有效凭证要求" },
+            { componentId: "proof", componentKind: "proof_rows", label: "证明" }
+          ]
+        }
+      ]
+    }
+  ],
+  actions: [
+    {
+      actionId: "resourcePatch.apply-resource-patch",
+      actionKind: "stage_resource_patch",
+      label: "补充凭证要求",
+      primary: true,
+      inputBindings: {
+        selectorWallet: "resourcePatch.selectorWallet",
+        targetStageId: "resourcePatch.targetStageId",
+        resourceKey: "resourcePatch.resourceKey",
+        manifestURI: "resourcePatch.manifestURI",
+        manifestHash: "resourcePatch.manifestHash",
+        policyHash: "resourcePatch.policyHash"
+      }
+    }
+  ]
+};
+
+const inspectionResourceRequirement: ProductResourceRequirementDTO = {
+  resourceId: "inspection_report",
+  resourceKey: "inspection_report",
+  label: "第三方检验证明",
+  required: true,
+  source: "resource_patch",
+  visibility: "protected",
+  manifestURI: "ipfs://bafyuvp-inspection-manifest",
+  manifestHash: "0x5555555555555555555555555555555555555555555555555555555555555555",
+  accessPolicy: {
+    visibility: "protected",
+    readers: [],
+    writers: [],
+    controllers: [],
+    policyHash: "0x8888888888888888888888888888888888888888888888888888888888888888"
+  }
+};
+
+// BFF 任务契约要求 capabilityPlugin.pluginKind（缺省会使前端 taskCapabilityPluginKind 直接抛错）。
+// 与 product-dto fixtures/customs.ts 的插件形态保持一致。
+const customsDeliveryPlugin = {
+  pluginKind: "delivery_update",
+  source: "explicit",
+  roleSlotId: "delivery",
+  title: "交付进度更新",
+  summary: "报关履约者提交报关、装船、物流凭证并更新交付状态。",
+  primaryActionLabel: "确认报关完成"
+} as const;
+
+const stageSelectorPlugin = {
+  pluginKind: "evidence_submission",
+  source: "explicit",
+  roleSlotId: "buyer-selector",
+  title: "选择履约者",
+  summary: "买家为目标阶段选择、交接或替换履约者。",
+  primaryActionLabel: "选择履约者"
+} as const;
+
+const resourceControllerPlugin = {
+  pluginKind: "evidence_submission",
+  source: "explicit",
+  roleSlotId: "buyer-resource-controller",
+  title: "补充凭证要求",
+  summary: "买家发布内容寻址资源清单和访问策略。",
+  primaryActionLabel: "补充凭证要求"
+} as const;
+
+const inspectionValidationPlugin = {
+  pluginKind: "validation_confirm",
+  source: "explicit",
+  roleSlotId: "validation",
+  title: "检验验收确认",
+  summary: "验收方核对检验凭证并确认验收结果。",
+  primaryActionLabel: "确认验收结果"
+} as const;
+
+const customsBaseTask: ProductTaskWithAddOns = {
+  taskId: "task-customs-submit-001",
+  orderId: stubOrder.orderId,
+  zhixuId: stubOrder.zhixuId,
+  orderTitle: stubOrder.title,
+  title: "确认出口报关完成",
+  subtitle: "你代表 XX 报关行，需要提交本阶段凭证。",
+  assigneeRole: "XX 报关行",
+  stageId: "customs-complete",
+  stageName: "出口报关",
+  deadline: "2026-05-03 18:00",
+  fundingImpact: "进入验收；通过后第 2 阶段付款条件满足",
+  status: "open",
+  addOnKind: "submit_signal",
+  addOnManifest: deliveryAddOnManifest,
+  capabilityPlugin: customsDeliveryPlugin,
+  primaryActionLabel: "确认报关完成",
+  participantRoleLabel: "报关行",
+  responsibilityStatements: [],
+  proofRows: []
+};
+
+export function readinessTask(overrides: Partial<ProductTaskWithAddOns> = {}): ProductTaskDTO {
+  return {
+    ...customsBaseTask,
     assigneeWallet: participantWallet,
     participantWallet,
     canSubmit: true,
@@ -40,34 +338,89 @@ export function readinessTask(overrides: Partial<ProductTaskWithAddOns> = {}): P
   } as ProductTaskDTO;
 }
 
+/**
+ * 无 addOnManifest 的提交任务：EvidencePanel 直渲染路径（evidenceSpec 单轨口径），
+ * 用于必填凭证校验、钱包授权预检与签名提交链路的负向用例。
+ */
+export function customsEvidenceTask(overrides: Partial<ProductTaskWithAddOns> = {}): ProductTaskDTO {
+  return readinessTask({
+    taskId: "task-customs-evidence-001",
+    addOnManifest: undefined,
+    evidenceSpec: [
+      {
+        key: "customs_declaration_pdf",
+        label: "报关单 PDF",
+        required: true,
+        inputKind: "file",
+        accept: ["application/pdf", ".pdf"]
+      }
+    ],
+    ...overrides
+  });
+}
+
+const manifestTasks: Readonly<Record<string, ProductTaskDTO>> = {
+  "task-customs-submit-001": readinessTask(),
+  "task-selector-customs-001": readinessTask({
+    taskId: "task-selector-customs-001",
+    title: "选择或交接履约者",
+    subtitle: "未开始阶段可选择履约者；已开始阶段需走交接或替换证明。",
+    stageId: "order-confirmed",
+    stageName: "订单确认",
+    addOnKind: "stage_executor_patch",
+    addOnManifest: selectorAddOnManifest,
+    capabilityPlugin: stageSelectorPlugin,
+    selectableTargets: [
+      {
+        targetStageId: "customs-complete",
+        targetStageName: "出口报关",
+        allowed: true
+      }
+    ],
+    primaryActionLabel: "选择履约者"
+  }),
+  "task-resource-controller-001": readinessTask({
+    taskId: "task-resource-controller-001",
+    title: "补充报关凭证要求",
+    subtitle: "你可以为目标阶段发布加密内容寻址资源清单和访问策略。",
+    stageId: "order-confirmed",
+    stageName: "订单确认",
+    addOnKind: "stage_resource_patch",
+    addOnManifest: resourcePatchAddOnManifest,
+    capabilityPlugin: resourceControllerPlugin,
+    selectableTargets: [
+      {
+        targetStageId: "customs-complete",
+        targetStageName: "出口报关",
+        allowed: true,
+        resourceRequirements: [inspectionResourceRequirement]
+      }
+    ],
+    resourceRequirements: [inspectionResourceRequirement],
+    primaryActionLabel: "补充凭证要求"
+  })
+};
+
 export function manifestTask(taskId: string, overrides: Partial<ProductTaskWithAddOns> = {}): ProductTaskDTO {
-  const baseTask = demoProductCatalog.tasks.find((task) => task.taskId === taskId) ??
-    demoProductCatalog.tasks[0];
+  const baseTask = manifestTasks[taskId] ?? readinessTask();
   return {
     ...baseTask,
-    assigneeWallet: participantWallet,
-    participantWallet,
-    canSubmit: true,
     ...overrides
   } as ProductTaskDTO;
 }
 
 export function executorManifestTask(overrides: Partial<ProductTaskWithAddOns> = {}): ProductTaskDTO {
-  const manifest = demoProductCatalog.zhixus[0]?.roleSlots.find((slot) => slot.slotId === "validation")?.addOnManifest;
   return readinessTask({
     taskId: "task-executor-manifest-001",
     title: "核对检验凭证",
     subtitle: "核对提交材料并确认验收结果。",
-    assigneeRole: "验收方",
     stageId: "inspection",
     stageName: "检验验收",
-    requiredEvidence: ["检验报告"],
-    requiredInputs: [],
     addOnKind: "submit_signal",
-    performanceSlotId: "validation",
-    performanceSlotLabel: "验收执行者",
+    addOnManifest: validationAddOnManifest,
+    capabilityPlugin: inspectionValidationPlugin,
+    primaryActionLabel: "确认验收结果",
     participantRoleLabel: "验收方",
-    ...(manifest ? { addOnManifest: manifest } : {}),
     ...overrides
   });
 }
@@ -77,19 +430,17 @@ export function selectorTask(overrides: Partial<ProductTaskWithAddOns> = {}): Pr
     taskId: "task-selector-001",
     title: "选择检验履约者",
     subtitle: "为未开始阶段选择履约者。",
-    assigneeRole: "买家",
     stageId: "selector-stage",
     stageName: "检验方选择",
     deadline: "2026-05-02 18:00",
     fundingImpact: "目标阶段履约者更新后继续推进",
-    requiredEvidence: ["第三方检验证明"],
-    requiredInputs: [],
     primaryActionLabel: "选择履约者",
-    performanceSlotId: "selector",
-    performanceSlotLabel: "选择方",
-    businessPersonaLabels: ["买家"],
     participantRoleLabel: "选择方",
     addOnKind: "stage_executor_patch",
+    // 补丁动作走 ExecutorPatchPanel 直渲染：不带 addOnManifest（否则 manifest 流量门控
+    // 会改为渲染 ManifestAddOnPanel，覆盖不到履约者选择表单）。
+    addOnManifest: undefined,
+    capabilityPlugin: stageSelectorPlugin,
     selectableTargets: [
       {
         targetStageId: "inspection",
@@ -121,7 +472,7 @@ export function selectorTask(overrides: Partial<ProductTaskWithAddOns> = {}): Pr
       }
     ],
     ...overrides
-  } as Partial<ProductTaskWithAddOns>);
+  });
 }
 
 export function handoffSelectorTask(overrides: Partial<ProductTaskWithAddOns> = {}): ProductTaskDTO {
@@ -138,9 +489,7 @@ export function handoffSelectorTask(overrides: Partial<ProductTaskWithAddOns> = 
         workStarted: true,
         stageSignalCount: 1,
         currentExecutorWallet: previousExecutorWallet,
-        currentExecutorLabel: "原检验履约者",
         previousExecutor: previousExecutorWallet,
-        previousExecutorWallet,
         previousExecutorLabel: "原检验履约者",
         executorPatchMode: "handoff",
         executorPatchModes: [
@@ -153,7 +502,6 @@ export function handoffSelectorTask(overrides: Partial<ProductTaskWithAddOns> = 
             requiresPreviousExecutorSignature: true,
             requiresApprovalSignal: false,
             previousExecutor: previousExecutorWallet,
-            previousExecutorWallet,
             previousExecutorLabel: "原检验履约者",
             priorAuthorityLabel: "已完成部分不变",
             futureAuthorityLabel: "交接确认后，新履约者只接续后续工作",
@@ -171,60 +519,56 @@ export function handoffSelectorTask(overrides: Partial<ProductTaskWithAddOns> = 
       }
     ],
     ...overrides
-  } as Partial<ProductTaskWithAddOns>);
+  });
 }
 
 export function replacementSelectorTask(overrides: Partial<ProductTaskWithAddOns> = {}): ProductTaskDTO {
+  const replacementTarget: SelectableTargetStageDTO = {
+    targetStageId: "inspection",
+    targetStageName: "检验阶段",
+    allowed: true,
+    workStarted: true,
+    stageSignalCount: 2,
+    currentExecutorWallet: previousExecutorWallet,
+    previousExecutor: previousExecutorWallet,
+    previousExecutorLabel: "原检验履约者",
+    executorPatchMode: "replacement",
+    approvalSourceId,
+    approvalSignalId,
+    approvalSignalLabel: "裁定方替换证明",
+    executorPatchModes: [
+      {
+        mode: "replacement",
+        modeLabel: "申请替换履约者",
+        allowed: true,
+        workStarted: true,
+        requiresSelectorSignature: true,
+        requiresPreviousExecutorSignature: false,
+        requiresApprovalSignal: true,
+        previousExecutor: previousExecutorWallet,
+        previousExecutorLabel: "原检验履约者",
+        approvalSourceId,
+        approvalSignalId,
+        approvalSignalLabel: "裁定方替换证明",
+        approvalSignal: {
+          approvalSourceId,
+          approvalSignalId,
+          label: "裁定方替换证明"
+        },
+        priorAuthorityLabel: "已完成部分不变",
+        futureAuthorityLabel: "替换确认后，新履约者只接续后续工作",
+        guidanceLabel: "需要替换证明"
+      }
+    ],
+    priorAuthorityLabel: "已完成部分不变",
+    futureAuthorityLabel: "替换确认后，新履约者只接续后续工作"
+  };
   return selectorTask({
     taskId: "task-selector-replacement-001",
     title: "申请替换检验履约者",
     subtitle: "已开始阶段缺少原履约者同意时，需要替换证明。",
     primaryActionLabel: "申请替换履约者",
-    selectableTargets: [
-      {
-        targetStageId: "inspection",
-        targetStageName: "检验阶段",
-        allowed: true,
-        workStarted: true,
-        stageSignalCount: 2,
-        currentExecutorWallet: previousExecutorWallet,
-        currentExecutorLabel: "原检验履约者",
-        previousExecutor: previousExecutorWallet,
-        previousExecutorWallet,
-        previousExecutorLabel: "原检验履约者",
-        executorPatchMode: "replacement",
-        approvalSourceId,
-        approvalSignalId,
-        approvalSignalLabel: "裁定方替换证明",
-        executorPatchModes: [
-          {
-            mode: "replacement",
-            modeLabel: "申请替换履约者",
-            allowed: true,
-            workStarted: true,
-            requiresSelectorSignature: true,
-            requiresPreviousExecutorSignature: false,
-            requiresApprovalSignal: true,
-            previousExecutor: previousExecutorWallet,
-            previousExecutorWallet,
-            previousExecutorLabel: "原检验履约者",
-            approvalSourceId,
-            approvalSignalId,
-            approvalSignalLabel: "裁定方替换证明",
-            approvalSignal: {
-              approvalSourceId,
-              approvalSignalId,
-              label: "裁定方替换证明"
-            },
-            priorAuthorityLabel: "已完成部分不变",
-            futureAuthorityLabel: "替换确认后，新履约者只接续后续工作",
-            guidanceLabel: "需要替换证明"
-          }
-        ],
-        priorAuthorityLabel: "已完成部分不变",
-        futureAuthorityLabel: "替换确认后，新履约者只接续后续工作"
-      }
-    ],
+    selectableTargets: [replacementTarget],
     responsibilityStatements: [
       {
         title: "已完成部分不变",
@@ -236,48 +580,31 @@ export function replacementSelectorTask(overrides: Partial<ProductTaskWithAddOns
       }
     ],
     ...overrides
-  } as Partial<ProductTaskWithAddOns>);
+  });
 }
 
 export function resourcePatchTask(overrides: Partial<ProductTaskWithAddOns> = {}): ProductTaskDTO {
   return readinessTask({
-    taskId: "task-resource-controller-001",
+    taskId: "task-resource-controller-001-patch-flow",
     title: "补充检验凭证要求",
     subtitle: "为检验阶段发布加密内容寻址资源清单和访问策略。",
-    assigneeRole: "买家",
     stageId: "resource-controller-stage",
     stageName: "检验凭证要求",
     deadline: "2026-05-02 18:00",
     fundingImpact: "目标阶段凭证清单更新后继续推进",
-    requiredEvidence: ["第三方检验证明"],
-    requiredInputs: [],
     primaryActionLabel: "补充凭证要求",
-    performanceSlotId: "resource-controller",
-    performanceSlotLabel: "资源配置方",
-    businessPersonaLabels: ["买家"],
     participantRoleLabel: "资源配置方",
     addOnKind: "stage_resource_patch",
+    // 资源补充走 ResourcePatchPanel 直渲染：不带 addOnManifest。
+    addOnManifest: undefined,
+    capabilityPlugin: resourceControllerPlugin,
     selectableTargets: [
       {
         targetStageId: "inspection",
         targetStageName: "检验阶段",
         allowed: true,
         description: "为检验阶段发布加密资源清单。",
-        resourceRequirements: {
-          inspection_report: {
-            resourceKey: "inspection_report",
-            label: "第三方检验证明",
-            documentType: "inspection_report",
-            required: true,
-            source: "resource_patch",
-            visibility: "protected",
-            manifestURI: "ipfs://bafyuvp-inspection-manifest",
-            manifestHash: "0x5555555555555555555555555555555555555555555555555555555555555555",
-            accessPolicy: {
-              policyHash: "0x8888888888888888888888888888888888888888888888888888888888888888"
-            }
-          }
-        }
+        resourceRequirements: [inspectionResourceRequirement]
       }
     ],
     responsibilityStatements: [
@@ -287,7 +614,7 @@ export function resourcePatchTask(overrides: Partial<ProductTaskWithAddOns> = {}
       }
     ],
     ...overrides
-  } as Partial<ProductTaskWithAddOns>);
+  });
 }
 
 export async function installProductApiStub(page: Page, options: StubOptions = {}): Promise<void> {
@@ -296,7 +623,7 @@ export async function installProductApiStub(page: Page, options: StubOptions = {
   }
 
   const task = options.task ?? readinessTask();
-  const orders = demoProductCatalog.orders as readonly ProductOrderDTO[];
+  const orders = [stubOrder];
   const tasks = [task];
   const evidenceId = "ev-customs-pdf-001";
   const payloadHash = "0x2222222222222222222222222222222222222222222222222222222222222222";
@@ -334,7 +661,8 @@ export async function installProductApiStub(page: Page, options: StubOptions = {
           orderCount: orders.length,
           openTaskCount: tasks.filter((item) => item.status === "open").length,
           blockedTaskCount: tasks.filter((item) => item.status === "blocked").length,
-          completedTaskCount: tasks.filter((item) => item.status === "done" || item.status === "submitted").length
+          // submitted 是等待索引的中间态，不计入已完成。
+          completedTaskCount: tasks.filter((item) => item.status === "done").length
         }
       });
       return;
@@ -350,7 +678,7 @@ export async function installProductApiStub(page: Page, options: StubOptions = {
       return;
     }
 
-    if (request.method() === "POST" && pathname === "/evidence") {
+    if (request.method() === "POST" && pathname === "/product/evidence") {
       await fulfillJson(route, {
         evidence: {
           evidenceId,
@@ -372,7 +700,7 @@ export async function installProductApiStub(page: Page, options: StubOptions = {
       return;
     }
 
-    if (request.method() === "GET" && pathname === `/evidence/${evidenceId}/proof`) {
+    if (request.method() === "GET" && pathname === `/product/evidence/${evidenceId}/proof`) {
       await fulfillJson(route, {
         proof: {
           evidenceId,
@@ -427,10 +755,7 @@ export async function installProductApiStub(page: Page, options: StubOptions = {
         readonly selectorWallet?: string;
         readonly targetStageId?: string;
         readonly mode?: unknown;
-        readonly previousExecutor?: string;
         readonly previousExecutorWallet?: string;
-        readonly approvalSourceId?: string;
-        readonly approvalSignalId?: string;
         readonly approval?: {
           readonly sourceId?: string;
           readonly signalId?: string;
@@ -441,9 +766,9 @@ export async function installProductApiStub(page: Page, options: StubOptions = {
         readonly metadataURI?: string;
       };
       const mode = isExecutorPatchMode(body.mode) ? body.mode : "assign";
-      const previousExecutor = body.previousExecutorWallet ?? body.previousExecutor;
-      const approvalSource = body.approvalSourceId ?? body.approval?.sourceId;
-      const approvalSignal = body.approvalSignalId ?? body.approval?.signalId;
+      const previousExecutor = body.previousExecutorWallet;
+      const approvalSource = body.approval?.sourceId;
+      const approvalSignal = body.approval?.signalId;
       if (body.selectorWallet?.toLowerCase() !== participantWallet.toLowerCase()) {
         await fulfillJson(route, { message: "unauthorized wallet" }, 403);
         return;
@@ -484,15 +809,12 @@ export async function installProductApiStub(page: Page, options: StubOptions = {
         targetStageId: body.targetStageId,
         mode,
         previousExecutor,
-        previousExecutorWallet: previousExecutor,
-        approvalSourceId: approvalSource,
-        approvalSignalId: approvalSignal,
         patchHash: executorMetadataHash,
         expiresAt: "2026-04-29T13:00:00.000Z",
         typedData: {
           domain: {
-            name: "UVPStagePatchModule",
-            version: "0.1",
+            name: STAGE_EXECUTOR_PATCH_DOMAIN_NAME,
+            version: STAGE_EXECUTOR_PATCH_DOMAIN_VERSION,
             chainId: 31337,
             verifyingContract: "0x8888888888888888888888888888888888888888"
           },
@@ -532,12 +854,11 @@ export async function installProductApiStub(page: Page, options: StubOptions = {
     if (request.method() === "POST" && pathname === `/product/tasks/${task.taskId}/submit-stage-executor-patch`) {
       const body = JSON.parse(request.postData() ?? "{}") as {
         readonly mode?: unknown;
-        readonly previousExecutor?: string;
         readonly previousExecutorWallet?: string;
         readonly previousExecutorSignature?: string;
       };
       const mode = isExecutorPatchMode(body.mode) ? body.mode : "assign";
-      const previousExecutor = body.previousExecutorWallet ?? body.previousExecutor;
+      const previousExecutor = body.previousExecutorWallet;
       if (mode === "handoff" && !body.previousExecutorSignature) {
         await fulfillJson(route, { message: "missing previous executor signature" }, 400);
         return;
@@ -552,7 +873,6 @@ export async function installProductApiStub(page: Page, options: StubOptions = {
         targetStageId: "inspection",
         mode,
         previousExecutor,
-        previousExecutorWallet: previousExecutor,
         approvalSourceId: mode === "replacement" ? approvalSourceId : undefined,
         approvalSignalId: mode === "replacement" ? approvalSignalId : undefined,
         status,
@@ -573,16 +893,13 @@ export async function installProductApiStub(page: Page, options: StubOptions = {
     if (request.method() === "POST" && pathname === `/product/tasks/${task.taskId}/prepare-stage-resource-patch`) {
       const body = JSON.parse(request.postData() ?? "{}") as {
         readonly selectorWallet?: string;
-        readonly writerWallet?: string;
         readonly targetStageId?: string;
         readonly resourceKey?: string;
         readonly manifestURI?: string;
         readonly manifestHash?: string;
         readonly policyHash?: string;
-        readonly visibility?: string;
       };
-      const selectorWallet = body.selectorWallet ?? body.writerWallet;
-      if (selectorWallet?.toLowerCase() !== participantWallet.toLowerCase()) {
+      if (body.selectorWallet?.toLowerCase() !== participantWallet.toLowerCase()) {
         await fulfillJson(route, { message: "unauthorized wallet" }, 403);
         return;
       }
@@ -606,8 +923,8 @@ export async function installProductApiStub(page: Page, options: StubOptions = {
         expiresAt: "2026-04-29T13:00:00.000Z",
         typedData: {
           domain: {
-            name: "UVPStagePatchModule",
-            version: "0.1",
+            name: STAGE_EXECUTOR_PATCH_DOMAIN_NAME,
+            version: STAGE_EXECUTOR_PATCH_DOMAIN_VERSION,
             chainId: 31337,
             verifyingContract: "0x8888888888888888888888888888888888888888"
           },
@@ -631,8 +948,7 @@ export async function installProductApiStub(page: Page, options: StubOptions = {
           purpose: "补充凭证要求",
           taskTitle: task.title,
           targetStage: body.targetStageId,
-          resourceLabel: body.resourceKey,
-          action: body.visibility ?? "protected",
+          action: "protected",
           validUntil: "2026-04-29T13:00:00.000Z"
         }
       });
@@ -692,7 +1008,8 @@ export async function uploadCustomsPdf(page: Page): Promise<void> {
   await page.getByLabel("选择报关单 PDF").setInputFiles({
     name: "customs.pdf",
     mimeType: "application/pdf",
-    buffer: Buffer.from("order app readiness customs pdf")
+    // %PDF- 首字节魔数：evidenceSpec accept=pdf 时前端做快检，伪造 MIME/扩展名在上传前拦截。
+    buffer: Buffer.from("%PDF-1.4\norder app readiness customs pdf")
   });
 }
 

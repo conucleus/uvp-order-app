@@ -20,16 +20,36 @@ interface InviteOnboardingProps {
   readonly onDismiss: () => void;
 }
 
+const PREVIEW_DEBOUNCE_MS = 400;
+
+function isEvmWalletAddress(value: string): boolean {
+  return /^0x[0-9a-fA-F]{40}$/u.test(value);
+}
+
 export function InviteOnboarding({ inviteId, actions, session, onAccepted, onDismiss }: InviteOnboardingProps) {
   const [walletAddress, setWalletAddress] = useState(session.walletAddress ?? "");
   const [displayName, setDisplayName] = useState("");
   const [contact, setContact] = useState("");
   const [loadState, setLoadState] = useState<InviteLoadState>({ status: "loading" });
+  // 受控输入只进防抖值；只有 0x 格式合法的地址才触发服务端 alreadyBound 探测。
+  const [probedWalletAddress, setProbedWalletAddress] = useState(() => {
+    const initial = (session.walletAddress ?? "").trim();
+    return initial && isEvmWalletAddress(initial) ? initial : "";
+  });
+
+  useEffect(() => {
+    const trimmed = walletAddress.trim();
+    if (trimmed && !isEvmWalletAddress(trimmed)) {
+      return undefined;
+    }
+    const timer = window.setTimeout(() => setProbedWalletAddress(trimmed), PREVIEW_DEBOUNCE_MS);
+    return () => window.clearTimeout(timer);
+  }, [walletAddress]);
 
   useEffect(() => {
     let cancelled = false;
     setLoadState({ status: "loading" });
-    void actions.previewInvite(inviteId, walletAddress ? { walletAddress } : {})
+    void actions.previewInvite(inviteId, probedWalletAddress ? { walletAddress: probedWalletAddress } : {})
       .then((invite) => {
         if (cancelled) {
           return;
@@ -49,10 +69,13 @@ export function InviteOnboarding({ inviteId, actions, session, onAccepted, onDis
     return () => {
       cancelled = true;
     };
-  }, [actions, inviteId, walletAddress]);
+  }, [actions, inviteId, probedWalletAddress]);
 
   const invite = loadState.status === "ready" || loadState.status === "accepted" ? loadState.invite : undefined;
-  const canAccept = Boolean(invite?.acceptance?.canAccept && walletAddress.trim() && displayName.trim() && contact.trim());
+  const walletFormatOk = isEvmWalletAddress(walletAddress.trim());
+  const canAccept = Boolean(
+    invite?.acceptance?.canAccept && walletFormatOk && displayName.trim() && contact.trim()
+  );
 
   function handleAccept() {
     if (!invite || !canAccept) {
@@ -144,7 +167,7 @@ export function InviteOnboarding({ inviteId, actions, session, onAccepted, onDis
         </div>
         <dl className="invite-facts">
           <Fact label="职责" value={invite?.role?.duty ?? "待确认"} />
-          <Fact label="凭证" value={(invite?.role?.requiredEvidence ?? []).join(" / ") || "按待办要求提交"} />
+          <Fact label="凭证" value={(invite?.role?.evidenceSpec ?? []).map((slot) => slot.label).join(" / ") || "按待办要求提交"} />
           <Fact label="到期" value={invite ? new Date(invite.invite.expiresAt).toLocaleString() : "待确认"} />
           <Fact label="钱包" value={shortWallet(walletAddress)} />
         </dl>
@@ -167,7 +190,14 @@ export function InviteOnboarding({ inviteId, actions, session, onAccepted, onDis
         </label>
         <label>
           <span>签名钱包</span>
-          <input value={walletAddress} onChange={(event) => setWalletAddress(event.target.value)} />
+          <input
+            aria-label="签名钱包"
+            value={walletAddress}
+            onChange={(event) => setWalletAddress(event.target.value)}
+          />
+          {walletAddress.trim() && !walletFormatOk ? (
+            <small className="blocked-copy">请填写 0x 开头的 42 位钱包地址；格式合法后才会校验绑定状态。</small>
+          ) : null}
         </label>
         <div className="invite-actions">
           <button className="quiet-button" type="button" onClick={handleReject}>拒绝</button>

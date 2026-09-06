@@ -5,7 +5,6 @@ import {
   type ProductParticipantProfileDTO,
   type ProductTaskDTO
 } from "@uvp-eth/product-dto";
-import { demoProductCatalog } from "@uvp-eth/product-dto/fixtures";
 import type { ProductSubmitTypedData } from "@uvp-eth/executor-kit/participant";
 
 type Hex = `0x${string}`;
@@ -17,19 +16,10 @@ export type Eip712TypedDataDTO = Readonly<{
   readonly message: Readonly<Record<string, unknown>>;
 }>;
 
-export type ProductApiSource =
-  | {
-      readonly kind: "real";
-      readonly baseUrl: string;
-    }
-  | {
-      readonly kind: "demo";
-      readonly reason: string;
-    }
-  | {
-      readonly kind: "missing";
-      readonly reason: string;
-    };
+export type ProductApiSource = Readonly<{
+  readonly kind: "real";
+  readonly baseUrl: string;
+}>;
 
 export interface ProductApiSummaryDTO {
   readonly orderCount: number;
@@ -69,9 +59,11 @@ export interface ParticipantQueryInput {
 
 export interface ProductApiClientOptions {
   readonly baseUrl?: string | undefined;
-  readonly demoMode?: boolean | undefined;
   readonly fetcher?: Fetcher | undefined;
-  readonly runtimeEnv?: string | undefined;
+  /** 单个请求的超时毫秒数；默认对齐 store 工作台 6s 口径。 */
+  readonly timeoutMs?: number | undefined;
+  /** 证据上传等大载荷请求的超时毫秒数；默认 60s。 */
+  readonly uploadTimeoutMs?: number | undefined;
 }
 
 export interface AcceptInviteInput {
@@ -121,7 +113,10 @@ export interface ProductInvitePreviewDTO {
     readonly roleSlotId: string;
     readonly label: string;
     readonly duty: string;
-    readonly requiredEvidence: readonly string[];
+    readonly evidenceSpec?: readonly {
+      readonly key: string;
+      readonly label: string;
+    }[];
   };
   readonly walletBinding?: {
     readonly walletAddress: string;
@@ -376,47 +371,37 @@ export class ProductApiError extends Error {
   }
 }
 
-const demoParticipant: ProductParticipantProfileDTO = {
-  participantId: "demo-customs-agent",
-  displayName: "张经理",
-  walletAddress: "0x9d8A62f656a8d1615C1294FD71E9cfB3e4855A4F",
-  roleLabels: ["报关行", "交付方"],
-  source: "mock"
-};
-
-const missingParticipant: ProductParticipantProfileDTO = {
-  participantId: "anonymous",
-  displayName: "未连接参与者",
-  roleLabels: [],
-  source: "anonymous"
-};
-
 export function createProductApiClient(options: ProductApiClientOptions = {}): ProductApiClient {
-  const env = runtimeEnv();
-  const runtime = normalizeRuntimeEnv(options.runtimeEnv ?? env.runtimeEnv);
-  const demoModeRequested = options.demoMode ?? env.demoMode === "1";
-  const config = {
-    baseUrl: normalizeBaseUrl(options.baseUrl ?? env.chainServicesUrl),
-    demoMode: demoModeRequested && !isProductionLikeRuntime(runtime),
-    fetcher: options.fetcher ?? globalThis.fetch.bind(globalThis)
-  };
-  return new BrowserProductApiClient(config);
+  const baseUrl = normalizeBaseUrl(options.baseUrl ?? runtimeEnv());
+  if (!baseUrl) {
+    throw new Error(
+      "参与者服务地址未配置：请设置 VITE_UVP_CHAIN_SERVICES_URL。Order App 只连接真实参与者服务，没有本地样例数据回退。"
+    );
+  }
+  return new BrowserProductApiClient({
+    baseUrl,
+    fetcher: options.fetcher ?? globalThis.fetch.bind(globalThis),
+    timeoutMs: options.timeoutMs ?? runtimeTimeoutMs("VITE_UVP_ORDER_APP_FETCH_TIMEOUT_MS") ?? DEFAULT_FETCH_TIMEOUT_MS,
+    uploadTimeoutMs: options.uploadTimeoutMs ?? runtimeTimeoutMs("VITE_UVP_ORDER_APP_UPLOAD_TIMEOUT_MS") ?? DEFAULT_UPLOAD_TIMEOUT_MS
+  });
 }
+
+/** 与 zhixu-store 工作台同一超时口径：任一请求挂起不得让页面永久 loading。 */
+const DEFAULT_FETCH_TIMEOUT_MS = 6000;
+// 证据上传携带 base64 载荷（上限 10MB），超时单独放宽。
+const DEFAULT_UPLOAD_TIMEOUT_MS = 60_000;
 
 class BrowserProductApiClient implements ProductApiClient {
   constructor(
     private readonly config: {
-      readonly baseUrl?: string | undefined;
-      readonly demoMode: boolean;
+      readonly baseUrl: string;
       readonly fetcher: Fetcher;
+      readonly timeoutMs: number;
+      readonly uploadTimeoutMs: number;
     }
   ) {}
 
   async loadParticipantHome(input: ParticipantQueryInput = {}): Promise<ProductHomeData> {
-    if (!this.config.baseUrl) {
-      return this.config.demoMode ? demoHomeData() : missingHomeData("参与者服务地址未配置。");
-    }
-
     const [meResponse, ordersResponse, tasksResponse] = await Promise.all([
       this.getJson<{ readonly participant: ProductParticipantProfileDTO; readonly summary?: ProductApiSummaryDTO }>(
         participantPath("/product/me", input)
@@ -444,15 +429,6 @@ class BrowserProductApiClient implements ProductApiClient {
   }
 
   async getOrder(orderId: string): Promise<ProductOrderDTO> {
-    if (!this.config.baseUrl) {
-      const order = this.config.demoMode
-        ? demoProductCatalog.orders.find((item) => item.orderId === orderId)
-        : undefined;
-      if (order) {
-        return order;
-      }
-      throw new ProductApiError(0, `/product/orders/${orderId}`, "参与者服务地址未配置。");
-    }
     const response = await this.getJson<{ readonly order: ProductOrderDTO }>(
       `/product/orders/${encodeURIComponent(orderId)}`
     );
@@ -460,15 +436,6 @@ class BrowserProductApiClient implements ProductApiClient {
   }
 
   async getTask(taskId: string, input: ParticipantQueryInput = {}): Promise<ProductTaskDTO> {
-    if (!this.config.baseUrl) {
-      const task = this.config.demoMode
-        ? demoProductCatalog.tasks.find((item) => item.taskId === taskId)
-        : undefined;
-      if (task) {
-        return task;
-      }
-      throw new ProductApiError(0, `/product/me/tasks/${taskId}`, "参与者服务地址未配置。");
-    }
     const response = await this.getJson<{ readonly task: ProductTaskDTO }>(
       participantPath(`/product/me/tasks/${encodeURIComponent(taskId)}`, input)
     );
@@ -541,7 +508,7 @@ class BrowserProductApiClient implements ProductApiClient {
   }
 
   async uploadEvidence(input: CreateEvidenceInput): Promise<EvidenceUploadResponseDTO> {
-    return await this.postJson<EvidenceUploadResponseDTO>("/product/evidence", input);
+    return await this.postJson<EvidenceUploadResponseDTO>("/product/evidence", input, this.config.uploadTimeoutMs);
   }
 
   async getEvidenceProof(evidenceId: string): Promise<EvidenceProofDTO> {
@@ -551,26 +518,32 @@ class BrowserProductApiClient implements ProductApiClient {
     return response.proof;
   }
 
-  private async getJson<TResponse>(pathname: string): Promise<TResponse> {
-    return await this.requestJson<TResponse>("GET", pathname);
+  private async getJson<TResponse>(pathname: string, timeoutMs: number = this.config.timeoutMs): Promise<TResponse> {
+    return await this.requestJson<TResponse>("GET", pathname, undefined, timeoutMs);
   }
 
-  private async postJson<TResponse>(pathname: string, body: unknown): Promise<TResponse> {
-    return await this.requestJson<TResponse>("POST", pathname, body);
+  private async postJson<TResponse>(pathname: string, body: unknown, timeoutMs: number = this.config.timeoutMs): Promise<TResponse> {
+    return await this.requestJson<TResponse>("POST", pathname, body, timeoutMs);
   }
 
-  private async requestJson<TResponse>(method: string, pathname: string, body?: unknown): Promise<TResponse> {
-    if (!this.config.baseUrl) {
-      throw new ProductApiError(0, pathname, "参与者服务地址未配置。");
+  private async requestJson<TResponse>(method: string, pathname: string, body: unknown, timeoutMs: number): Promise<TResponse> {
+    const signal = AbortSignal.timeout(timeoutMs);
+    let response: Response;
+    try {
+      response = await withTimeout(this.config.fetcher(joinUrl(this.config.baseUrl, pathname), {
+        method,
+        headers: {
+          "content-type": "application/json"
+        },
+        ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+        signal
+      }), signal);
+    } catch (error) {
+      if (signal.aborted || (error instanceof DOMException && error.name === "TimeoutError")) {
+        throw new ProductApiError(0, pathname, `请求超时（${timeoutMs} 毫秒），请稍后重试。`);
+      }
+      throw error;
     }
-
-    const response = await this.config.fetcher(joinUrl(this.config.baseUrl, pathname), {
-      method,
-      headers: {
-        "content-type": "application/json"
-      },
-      ...(body === undefined ? {} : { body: JSON.stringify(body) })
-    });
     if (!response.ok) {
       throw new ProductApiError(response.status, pathname, await responseText(response));
     }
@@ -578,32 +551,29 @@ class BrowserProductApiClient implements ProductApiClient {
   }
 }
 
-function demoHomeData(): ProductHomeData {
-  const orders = sortOrders(demoProductCatalog.orders);
-  const tasks = sortTasks(demoProductCatalog.tasks);
-  return {
-    participant: demoParticipant,
-    summary: summarizeParticipantHome(orders, tasks),
-    orders,
-    tasks,
-    source: {
-      kind: "demo",
-      reason: "VITE_UVP_ORDER_APP_DEMO=1 is set; using checked-in Product DTO fixtures."
+/**
+ * 真实 fetch 会随 signal 拒绝；注入的 fetcher 可能忽略 signal，
+ * 因此以 signal 为准再兜一层超时，保证超时口径不依赖 fetcher 实现。
+ */
+function withTimeout(promise: Promise<Response>, signal: AbortSignal): Promise<Response> {
+  return new Promise<Response>((resolve, reject) => {
+    const onAbort = () => reject(signal.reason ?? new DOMException("signal aborted", "TimeoutError"));
+    if (signal.aborted) {
+      onAbort();
+      return;
     }
-  };
-}
-
-function missingHomeData(reason: string): ProductHomeData {
-  return {
-    participant: missingParticipant,
-    summary: summarizeParticipantHome([], []),
-    orders: [],
-    tasks: [],
-    source: {
-      kind: "missing",
-      reason
-    }
-  };
+    signal.addEventListener("abort", onAbort);
+    promise.then(
+      (value) => {
+        signal.removeEventListener("abort", onAbort);
+        resolve(value);
+      },
+      (error) => {
+        signal.removeEventListener("abort", onAbort);
+        reject(error);
+      }
+    );
+  });
 }
 
 function summarizeParticipantHome(
@@ -614,7 +584,8 @@ function summarizeParticipantHome(
     orderCount: orders.length,
     openTaskCount: tasks.filter((task) => task.status === "open").length,
     blockedTaskCount: tasks.filter((task) => task.status === "blocked").length,
-    completedTaskCount: tasks.filter((task) => task.status === "done" || task.status === "submitted").length
+    // submitted 是等待索引的中间态，不计入已完成（与 taskStatus 口径一致）。
+    completedTaskCount: tasks.filter((task) => task.status === "done").length
   };
 }
 
@@ -659,26 +630,16 @@ function normalizeBaseUrl(baseUrl: string | undefined): string | undefined {
   return trimmed && trimmed.length > 0 ? trimmed : undefined;
 }
 
-function runtimeEnv(): {
-  readonly chainServicesUrl?: string | undefined;
-  readonly demoMode?: string | undefined;
-  readonly runtimeEnv?: string | undefined;
-} {
+function runtimeEnv(): string | undefined {
   const env = import.meta.env as Readonly<Record<string, string | undefined>> | undefined;
-  return {
-    chainServicesUrl: env?.VITE_UVP_CHAIN_SERVICES_URL,
-    demoMode: env?.VITE_UVP_ORDER_APP_DEMO,
-    runtimeEnv: env?.VITE_UVP_RUNTIME_ENV
-  };
+  return env?.VITE_UVP_CHAIN_SERVICES_URL;
 }
 
-function normalizeRuntimeEnv(value: string | undefined): string | undefined {
-  const normalized = value?.trim().toLowerCase();
-  return normalized ? normalized : undefined;
-}
-
-function isProductionLikeRuntime(runtime: string | undefined): boolean {
-  return runtime === "production" || runtime === "staging" || runtime === "testnet";
+function runtimeTimeoutMs(name: string): number | undefined {
+  const env = import.meta.env as Readonly<Record<string, string | undefined>> | undefined;
+  const raw = env?.[name];
+  const parsed = raw ? Number(raw) : Number.NaN;
+  return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : undefined;
 }
 
 async function responseText(response: Response): Promise<string> {

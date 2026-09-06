@@ -1,40 +1,73 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { demoProductCatalog } from "@uvp-eth/product-dto/fixtures";
+import type { ProductOrderDTO, ProductTaskDTO } from "@uvp-eth/product-dto";
 import {
+  ProductApiError,
   createProductApiClient,
   type ProductApiClientOptions
 } from "./productApi.js";
 
+const stubOrders: readonly ProductOrderDTO[] = [
+  {
+    orderId: "order-1",
+    zhixuId: "zhixu-1",
+    title: "订单 A",
+    status: "registered",
+    statusLabel: "已登记",
+    totalAmount: { amount: "10000", currency: "USDC", display: "10,000 USDC" },
+    fundingStatus: "funded",
+    currentStageId: "customs",
+    currentStageName: "报关",
+    currentTaskId: "task-1",
+    currentTaskTitle: "提交报关单",
+    currentTaskSummary: "上传并确认报关凭证。",
+    stages: [],
+    participants: [],
+    recentEvents: [],
+    proofRows: []
+  }
+];
+
+const stubTasks: readonly ProductTaskDTO[] = [
+  {
+    taskId: "task-1",
+    orderId: "order-1",
+    zhixuId: "zhixu-1",
+    orderTitle: "订单 A",
+    title: "提交报关单",
+    subtitle: "上传报关单 PDF 并确认。",
+    assigneeRole: "报关行",
+    stageId: "customs",
+    stageName: "报关",
+    deadline: "2026-05-01 18:00",
+    fundingImpact: "不影响资金",
+    status: "open",
+    responsibilityStatements: [],
+    proofRows: []
+  }
+];
+
 describe("order app Product API boundary", () => {
-  it("does not silently fall back to fixture data when the API is not configured", async () => {
-    const client = createProductApiClient({ baseUrl: undefined, demoMode: false });
-
-    const home = await client.loadParticipantHome();
-
-    assert.equal(home.source.kind, "missing");
-    assert.equal(home.orders.length, 0);
-    assert.equal(home.tasks.length, 0);
+  it("fails closed when no participant service base URL is configured", () => {
+    assert.throws(
+      () => createProductApiClient({ baseUrl: undefined }),
+      /VITE_UVP_CHAIN_SERVICES_URL/u
+    );
   });
 
-  it("uses explicit demo mode for local participant data", async () => {
-    const client = createProductApiClient({ baseUrl: undefined, demoMode: true });
+  it("times out hanging requests instead of loading forever", async () => {
+    // 注入的 fetcher 永不 settle：超时必须独立于 fetcher 是否消费 signal。
+    const hangingFetcher: ProductApiClientOptions["fetcher"] = () => new Promise<Response>(() => {});
+    const client = createProductApiClient({
+      baseUrl: "http://service.local",
+      fetcher: hangingFetcher,
+      timeoutMs: 25
+    });
 
-    const home = await client.loadParticipantHome();
-
-    assert.equal(home.source.kind, "demo");
-    assert.equal(home.orders[0]?.orderId, demoProductCatalog.orders[0]?.orderId);
-    assert.equal(home.tasks.some((task) => task.status === "open"), true);
-  });
-
-  it("disables demo fixtures in production-like runtimes", async () => {
-    const client = createProductApiClient({ baseUrl: undefined, demoMode: true, runtimeEnv: "testnet" });
-
-    const home = await client.loadParticipantHome();
-
-    assert.equal(home.source.kind, "missing");
-    assert.equal(home.orders.length, 0);
-    assert.equal(home.tasks.length, 0);
+    await assert.rejects(
+      client.getTask("task-1"),
+      (error) => error instanceof ProductApiError && error.status === 0 && /请求超时/u.test(error.message)
+    );
   });
 
   it("loads the participant home from /product/me routes", async () => {
@@ -43,10 +76,10 @@ describe("order app Product API boundary", () => {
       const url = String(input);
       requested.push(url);
       if (url.includes("/product/me/orders")) {
-        return jsonResponse({ orders: demoProductCatalog.orders });
+        return jsonResponse({ orders: stubOrders });
       }
       if (url.includes("/product/me/tasks")) {
-        return jsonResponse({ tasks: demoProductCatalog.tasks });
+        return jsonResponse({ tasks: stubTasks });
       }
       if (url.includes("/product/me")) {
         return jsonResponse({
@@ -69,7 +102,6 @@ describe("order app Product API boundary", () => {
     };
     const client = createProductApiClient({
       baseUrl: "http://service.local/",
-      demoMode: false,
       fetcher
     });
 
@@ -115,7 +147,7 @@ describe("order app Product API boundary", () => {
             roleSlotId: "delivery",
             label: "物流/报关",
             duty: "提交物流凭证",
-            requiredEvidence: ["报关单"]
+            evidenceSpec: [{ key: "customs_declaration", label: "报关单" }]
           },
           acceptance: {
             canAccept: true,
@@ -130,7 +162,6 @@ describe("order app Product API boundary", () => {
     };
     const client = createProductApiClient({
       baseUrl: "http://service.local/",
-      demoMode: false,
       fetcher
     });
 
@@ -229,7 +260,6 @@ describe("order app Product API boundary", () => {
     };
     const client = createProductApiClient({
       baseUrl: "http://service.local",
-      demoMode: false,
       fetcher
     });
 

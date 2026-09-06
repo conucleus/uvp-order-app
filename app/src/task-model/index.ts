@@ -1,8 +1,6 @@
 export type {
   CapturedEvidence,
-  EvidenceCaptureSource,
   EvidenceCaptureStatus,
-  EvidencePanelContext,
   EvidenceRequirement,
   EvidenceVerificationStatus,
   TaskSubmissionProof,
@@ -20,10 +18,11 @@ export {
   taskCapabilityPluginKind,
   taskExecutorDisplay,
   taskPrimaryActionLabel,
-  taskRequiredEvidenceLabels,
   taskRequiredInputsFromCapability,
   taskResourceRequirementInputs,
-  type TaskExecutorDisplay
+  taskSubmitIntent,
+  type TaskExecutorDisplay,
+  type TaskSubmitIntent
 } from "../tasks/taskPresentation";
 export {
   resourceRequirementDisplays,

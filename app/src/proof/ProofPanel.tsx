@@ -25,7 +25,10 @@ type ProofMatchStatus = "matched" | "unbound" | "missing" | "mismatched";
 export function ProofPanel({ order, task, submissionProof }: ProofPanelProps) {
   const [open, setOpen] = useState(false);
   const taskIsIndexing = task?.status === "submitted" && !task.proofSummary?.txHash;
-  const taskFailed = (task as (ProductTaskDTO & { readonly errorCode?: string }) | undefined)?.errorCode;
+  // done 是链上最终态：早先失败尝试残留的 errorCode 不再显示为"提交失败"。
+  const taskFailed = task && task.status !== "done"
+    ? (task as ProductTaskDTO & { readonly errorCode?: string }).errorCode
+    : undefined;
   const signalContainer = useMemo(() => task ? signalContainerForTask(task) : undefined, [task]);
   const fallbackRows = useMemo(() => uniqueRows([
     ...proofSummaryRowsForTask(task),

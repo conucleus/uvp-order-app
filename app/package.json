@@ -6,7 +6,6 @@
   "license": "Apache-2.0",
   "scripts": {
     "dev": "vite",
-    "dev:demo": "VITE_UVP_ORDER_APP_DEMO=1 vite",
     "typecheck": "tsc --noEmit",
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview",

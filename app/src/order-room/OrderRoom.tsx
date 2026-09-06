@@ -58,7 +58,7 @@ interface OrderTimelineEvent {
 
 interface SlaRow {
   readonly task: ProductTaskDTO;
-  readonly status: "ready" | "near_deadline" | "overdue" | "blocked" | "confirmed";
+  readonly status: "ready" | "near_deadline" | "overdue" | "blocked" | "indexing" | "confirmed";
   readonly label: string;
   readonly tone: "info" | "warn" | "danger" | "ok";
   readonly blockedBy: string;
@@ -339,8 +339,13 @@ function buildSlaRows(tasks: readonly ProductTaskDTO[]): readonly SlaRow[] {
 }
 
 function slaStatus(task: ProductTaskDTO): SlaRow["status"] {
-  if (task.status === "done" || task.status === "submitted") {
+  // submitted 只是等待索引的中间态，不再落入 confirmed 绿勾；
+  // 只有链上 done 才按已确认呈现（与 taskStatus/ProofPanel 口径一致）。
+  if (task.status === "done") {
     return "confirmed";
+  }
+  if (task.status === "submitted") {
+    return "indexing";
   }
   if (task.status === "blocked") {
     return "blocked";
@@ -365,6 +370,8 @@ function slaLabel(status: SlaRow["status"]): string {
       return "Overdue";
     case "blocked":
       return "Blocked";
+    case "indexing":
+      return "等待索引确认";
     case "confirmed":
       return "Confirmed";
   }
@@ -376,6 +383,7 @@ function slaTone(status: SlaRow["status"]): SlaRow["tone"] {
     case "blocked":
       return "danger";
     case "near_deadline":
+    case "indexing":
       return "warn";
     case "confirmed":
       return "ok";
@@ -392,6 +400,8 @@ function escalationHint(status: SlaRow["status"]): string {
       return "先处理依赖或失败原因，不能用通知代替提交";
     case "near_deadline":
       return "优先完成当前责任，必要时联系订单运营";
+    case "indexing":
+      return "已提交，等待链上索引确认；确认前不会显示为完成";
     case "confirmed":
       return "等待后续阶段或链上索引更新";
     case "ready":
@@ -407,7 +417,8 @@ function slaIcon(status: SlaRow["status"]) {
     case "overdue":
       return <XCircle aria-hidden="true" />;
     case "near_deadline":
-      return <AlertTriangle aria-hidden="true" />;
+    case "indexing":
+      return <Clock3 aria-hidden="true" />;
     case "ready":
       return <Clock3 aria-hidden="true" />;
   }
@@ -428,12 +439,20 @@ function findParticipantTask(role: string, tasks: readonly ProductTaskDTO[]): Pr
       task.assigneeRole,
       task.participantRoleLabel
     ].filter((label): label is string => Boolean(label));
-    return labels.some((label) => role.includes(label) || label.includes(role));
+    return labels.some((label) => roleLabelEquals(role, label));
   });
 }
 
+// 0404 UI-8：参与方↔任务角色只认 trim 后全等。双向 includes 会把
+// "买家"沾到"老买家"、"报关行"沾到"XX 报关行"，参与方卡片挂上别人的
+// 待办；DTO 里没有 slot/participant 维度的结构化关联可回退，宁可显示
+// 暂无当前待办也不冒认（纯展示层，不影响提交与链上数据）。
+function roleLabelEquals(participantRole: string, label: string): boolean {
+  return label.trim() === participantRole.trim();
+}
+
 function nextResponsibilityForParticipant(role: string, order: ProductOrderDTO): string {
-  const stage = order.stages.find((item) => item.ownerRole && (role.includes(item.ownerRole) || item.ownerRole.includes(role)));
+  const stage = order.stages.find((item) => item.ownerRole && roleLabelEquals(role, item.ownerRole));
   return stage ? `${stage.name}：${stageLabel[stage.status]}` : "暂无当前待办";
 }
 

@@ -8,10 +8,10 @@ import {
   RefreshCw,
   ShieldCheck
 } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { ReactElement } from "react";
 import type { ProductOrderDTO, ProductTaskDTO } from "@uvp-eth/product-dto";
-import { createProductApiClient, type ProductApiSource, type ProductHomeData } from "./api/productApi";
+import { createProductApiClient, type ProductApiClient, type ProductHomeData } from "./api/productApi";
 import { createOrderAppActions } from "./actions/orderAppActions";
 import { participantQueryFromSession, readParticipantSession, shortWallet } from "./auth/participant";
 import { NotificationCenter, useOrderAppNotifications } from "./notifications/NotificationCenter";
@@ -28,13 +28,58 @@ type LoadState =
   | { readonly status: "error"; readonly message: string };
 
 export default function App() {
-  const api = useMemo(() => createProductApiClient(), []);
+  const clientState = useMemo<{ readonly api?: ProductApiClient; readonly message?: string }>(() => {
+    try {
+      return { api: createProductApiClient() };
+    } catch (error) {
+      return {
+        message: error instanceof Error ? error.message : "参与者服务地址未配置。"
+      };
+    }
+  }, []);
+
+  if (!clientState.api) {
+    return <UnconfiguredShell message={clientState.message ?? "参与者服务地址未配置。"} />;
+  }
+  return <AppShell api={clientState.api} />;
+}
+
+function UnconfiguredShell({ message }: { readonly message: string }) {
+  return (
+    <main className="app-shell">
+      <header className="topbar">
+        <div className="brand-block">
+          <span className="brand-mark" aria-hidden="true">
+            <ClipboardList />
+          </span>
+          <div>
+            <p>UVP Signal Console</p>
+            <h1>我的待办</h1>
+          </div>
+        </div>
+        <div className="topbar-actions">
+          <span className="source-badge source-missing">未连接</span>
+        </div>
+      </header>
+      <SystemBanner tone="warn" title="参与者服务未配置" text={message} />
+      <section className="empty-state" aria-label="我的待办">
+        <FileCheck2 aria-hidden="true" />
+        <h2>暂无待办</h2>
+        <p>连接参与者服务后，这里会显示与你的钱包或邀请身份匹配的订单任务。</p>
+      </section>
+    </main>
+  );
+}
+
+function AppShell({ api }: { readonly api: ProductApiClient }) {
   const actions = useMemo(() => createOrderAppActions(api), [api]);
   const [session] = useState(() => readParticipantSession());
   const [loadState, setLoadState] = useState<LoadState>({ status: "loading" });
   const [route, setRoute] = useState<OrderAppRoute>(() => readOrderAppRoute());
   const [submissionProofs, setSubmissionProofs] = useState<Readonly<Record<string, TaskSubmissionProof>>>({});
   const [notificationsOpen, setNotificationsOpen] = useState(false);
+  // 慢网下旧响应不得覆盖新响应：所有 loadParticipantHome 调用共用单调序号。
+  const loadSequenceRef = useRef(0);
 
   useEffect(() => {
     function handleHashChange() {
@@ -45,26 +90,28 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    let cancelled = false;
+    loadParticipantHome();
+  }, [api, session]);
+
+  function loadParticipantHome() {
+    const sequence = loadSequenceRef.current + 1;
+    loadSequenceRef.current = sequence;
     setLoadState({ status: "loading" });
     void api.loadParticipantHome(participantQueryFromSession(session))
       .then((data) => {
-        if (!cancelled) {
+        if (loadSequenceRef.current === sequence) {
           setLoadState({ status: "ready", data });
         }
       })
       .catch((error) => {
-        if (!cancelled) {
+        if (loadSequenceRef.current === sequence) {
           setLoadState({
             status: "error",
             message: error instanceof Error ? error.message : "参与者服务加载失败"
           });
         }
       });
-    return () => {
-      cancelled = true;
-    };
-  }, [api, session]);
+  }
 
   const data = loadState.status === "ready" ? loadState.data : undefined;
   const selectedTask = useMemo(() => selectTask(data?.tasks ?? [], route.taskId), [data?.tasks, route.taskId]);
@@ -81,13 +128,7 @@ export default function App() {
   }
 
   function handleRefresh() {
-    setLoadState({ status: "loading" });
-    void api.loadParticipantHome(participantQueryFromSession(session))
-      .then((nextData) => setLoadState({ status: "ready", data: nextData }))
-      .catch((error) => setLoadState({
-        status: "error",
-        message: error instanceof Error ? error.message : "参与者服务加载失败"
-      }));
+    loadParticipantHome();
   }
 
   function handleOpenNotification(notification: OrderAppNotificationDTO) {
@@ -123,20 +164,6 @@ export default function App() {
       {loadState.status === "error" ? (
         <SystemBanner tone="error" title="参与者服务加载失败" text={loadState.message} />
       ) : null}
-      {data?.source.kind === "missing" ? (
-        <SystemBanner
-          tone="warn"
-          title="参与者服务未配置"
-          text="请设置 VITE_UVP_CHAIN_SERVICES_URL；本应用不会自动伪造真实订单。"
-        />
-      ) : null}
-      {data?.source.kind === "demo" ? (
-        <SystemBanner
-          tone="info"
-          title="开发样例模式"
-          text="当前数据来自 @uvp-eth/product-dto 样例，仅用于本地验证人机待办界面，不代表真实订单。"
-        />
-      ) : null}
 
       {route.inviteId ? (
         <InviteOnboarding
@@ -158,7 +185,7 @@ export default function App() {
               <span className="overline">钱包</span>
               <strong>{shortWallet(data?.participant.walletAddress ?? session.walletAddress)}</strong>
               <small>
-                {data?.source.kind === "real"
+                {data
                   ? data.tasks.length > 0
                     ? `匹配 ${data.tasks.length} 个待办`
                     : "已连接但暂无分配任务"
@@ -276,15 +303,12 @@ function SectionButton({
   );
 }
 
-function SourceBadge({ source, loading }: { readonly source?: ProductApiSource | undefined; readonly loading: boolean }) {
+function SourceBadge({ source, loading }: { readonly source?: ProductHomeData["source"] | undefined; readonly loading: boolean }) {
   if (loading) {
     return <span className="source-badge source-loading">加载中</span>;
   }
-  if (!source || source.kind === "missing") {
+  if (!source) {
     return <span className="source-badge source-missing">未连接</span>;
-  }
-  if (source.kind === "demo") {
-    return <span className="source-badge source-demo">开发样例模式</span>;
   }
   return <span className="source-badge source-real">已连接</span>;
 }

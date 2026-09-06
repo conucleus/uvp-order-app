@@ -69,6 +69,21 @@ export function taskPrimaryActionLabel(task: ProductTaskDTO, fallback?: string):
     taskAddOnLabel(taskAddOnKind(task));
 }
 
+export type TaskSubmitIntent = "confirm_stage" | "reject_stage" | "raise_dispute" | "resolve_dispute";
+
+/** 提交意图单一来源：按能力插件类型推导，争议任务不得以 confirm_stage 提交。 */
+const submitIntentByPluginKind: Readonly<Record<FulfillmentPluginKind, TaskSubmitIntent>> = {
+  payment_placeholder: "confirm_stage",
+  evidence_submission: "confirm_stage",
+  delivery_update: "confirm_stage",
+  validation_confirm: "confirm_stage",
+  dispute_material: "raise_dispute"
+};
+
+export function taskSubmitIntent(task: ProductTaskDTO): TaskSubmitIntent {
+  return submitIntentByPluginKind[taskCapabilityPluginKind(task)];
+}
+
 export function taskRequiredInputsFromCapability(
   task: ProductTaskDTO
 ): readonly FulfillmentRequiredInputDTO[] | undefined {
@@ -85,12 +100,6 @@ export function taskResourceRequirementInputs(task: ProductTaskDTO): readonly Fu
     required: resource.required,
     completed: false
   }));
-}
-
-export function taskRequiredEvidenceLabels(task: ProductTaskDTO): readonly string[] {
-  return task.capabilityPlugin?.requiredEvidence && task.capabilityPlugin.requiredEvidence.length > 0
-    ? task.capabilityPlugin.requiredEvidence
-    : task.requiredEvidence;
 }
 
 export function taskExecutorDisplay(task: ProductTaskDTO): TaskExecutorDisplay {

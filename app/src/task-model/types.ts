@@ -1,7 +1,6 @@
-import type { ChainProofRowDTO, ProductOrderDTO, ProductTaskDTO } from "@uvp-eth/product-dto";
+import type { ChainProofRowDTO, TaskEvidenceInputKind } from "@uvp-eth/product-dto";
 
 export type EvidenceCaptureStatus = "empty" | "uploading" | "uploaded" | "failed" | "quarantined";
-export type EvidenceCaptureSource = "api" | "demo";
 export type EvidenceVerificationStatus = "unbound" | "matched" | "mismatch" | "missing_file";
 
 export type TaskSubmissionStatus =
@@ -13,20 +12,23 @@ export type TaskSubmissionStatus =
   | "confirmed"
   | "failed"
   | "expired"
-  | "replaced"
-  | "demo_confirmed";
+  | "replaced";
 
 export interface EvidenceRequirement {
   readonly slotId: string;
   readonly label: string;
   readonly documentType: string;
   readonly required: boolean;
+  /** 槽位收集方式；缺省视为 file。 */
+  readonly inputKind?: TaskEvidenceInputKind | undefined;
+  /** 文件槽位的格式约束（MIME 或扩展名）；空数组表示不限制。 */
+  readonly accept?: readonly string[] | undefined;
+  readonly description?: string | undefined;
 }
 
 export interface CapturedEvidence {
   readonly requirement: EvidenceRequirement;
   readonly status: EvidenceCaptureStatus;
-  readonly source?: EvidenceCaptureSource | undefined;
   readonly evidenceId?: string | undefined;
   readonly fileName?: string | undefined;
   readonly mimeType?: string | undefined;
@@ -56,13 +58,4 @@ export interface TaskSubmissionProof {
   readonly stateMachineAddress?: string | undefined;
   readonly evidence: readonly CapturedEvidence[];
   readonly proofRows: readonly ChainProofRowDTO[];
-}
-
-export interface EvidencePanelContext {
-  readonly task: ProductTaskDTO;
-  readonly order?: ProductOrderDTO | undefined;
-  readonly participantWallet?: string | undefined;
-  readonly source?: {
-    readonly kind: "real" | "demo" | "missing";
-  } | undefined;
 }

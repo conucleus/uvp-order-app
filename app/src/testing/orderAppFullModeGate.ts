@@ -14,7 +14,6 @@ export interface OrderAppFullModeEnv {
   readonly UVP_ORDER_APP_API_STUB?: string;
   readonly UVP_ORDER_APP_FULL_FLOW_SUMMARY?: string;
   readonly VITE_UVP_CHAIN_SERVICES_URL?: string;
-  readonly VITE_UVP_ORDER_APP_DEMO?: string;
   readonly VITE_UVP_RUNTIME_ENV?: string;
 }
 
@@ -55,13 +54,10 @@ export function validateOrderAppFullModeGate(env: OrderAppFullModeEnv): OrderApp
   if (!productApiBaseUrl) {
     errors.push("full mode requires VITE_UVP_CHAIN_SERVICES_URL");
   } else if (isStubProductApiUrl(productApiBaseUrl)) {
-    errors.push(`full mode cannot use demo/API-stub Product API URL: ${productApiBaseUrl}`);
+    errors.push(`full mode cannot use an API-stub Product API URL: ${productApiBaseUrl}`);
   }
   if (!flowSummaryPath) {
     errors.push("full mode requires UVP_ORDER_APP_FULL_FLOW_SUMMARY");
-  }
-  if (env.VITE_UVP_ORDER_APP_DEMO === "1") {
-    errors.push("full mode cannot run with VITE_UVP_ORDER_APP_DEMO=1");
   }
   const stubFlags = [
     "UVP_ORDER_APP_E2E_INSTALL_API_STUB",
@@ -111,7 +107,7 @@ export function isStubProductApiUrl(value: string): boolean {
   if (hostname === "product-api.test" || hostname.endsWith(".product-api.test")) {
     return true;
   }
-  return /\b(api-stub|stub|fixture|demo)\b/u.test(hostname);
+  return /\b(api-stub|stub)\b/u.test(hostname);
 }
 
 function firstConfigured(...values: readonly (string | undefined)[]): string | undefined {

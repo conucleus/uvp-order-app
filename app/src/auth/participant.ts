@@ -13,7 +13,7 @@ export interface ParticipantSessionReadInput {
 
 export const walletOverrideSessionKey = "uvp-order-app:participant-wallet-override";
 const walletOverrideQueryKeys = ["participantWallet", "uvpParticipantWallet", "uvpOrderAppWallet"];
-const allowedOverrideRuntimes = new Set(["local", "localhost", "development", "dev", "test", "testnet", "base-sepolia", "base_sepolia", "anvil"]);
+const allowedOverrideRuntimes = new Set(["local", "localhost", "development", "dev"]);
 
 export function readParticipantSession(input: ParticipantSessionReadInput = {}): ParticipantSession {
   const env = input.env ?? readImportMetaEnv();

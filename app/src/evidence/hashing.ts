@@ -28,11 +28,33 @@ function sortJsonValue(value: unknown): unknown {
   if (value && typeof value === "object") {
     return Object.fromEntries(
       Object.entries(value as Record<string, unknown>)
-        .sort(([left], [right]) => left.localeCompare(right))
+        .sort(([left], [right]) => compareByCodePoint(left, right))
         .map(([key, nested]) => [key, sortJsonValue(nested)])
     );
   }
   return value;
+}
+
+// 码点序等价 UTF-8 字节序，与 uvp-core/uvp-protocol/zhixu-store 的 canonical
+// 口径一致；localeCompare 依赖 ICU/locale，同一份证据在不同环境会哈希出
+// 不同指纹（0216 O26）。按码点而非 UTF-16 码元比较：增补平面字符的代理对
+// 在码元序里会排到 U+E000..U+FFFF 之前，偏离字节序。
+function compareByCodePoint(left: string, right: string): number {
+  if (left === right) {
+    return 0;
+  }
+  let leftIndex = 0;
+  let rightIndex = 0;
+  while (leftIndex < left.length && rightIndex < right.length) {
+    const leftCode = left.codePointAt(leftIndex)!;
+    const rightCode = right.codePointAt(rightIndex)!;
+    if (leftCode !== rightCode) {
+      return leftCode < rightCode ? -1 : 1;
+    }
+    leftIndex += leftCode > 0xffff ? 2 : 1;
+    rightIndex += rightCode > 0xffff ? 2 : 1;
+  }
+  return leftIndex < left.length ? 1 : rightIndex < right.length ? -1 : 0;
 }
 
 function bytesToArrayBuffer(bytes: Uint8Array<ArrayBufferLike>): ArrayBuffer {

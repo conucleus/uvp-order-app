@@ -1,6 +1,7 @@
 import { expect, test } from "@playwright/test";
 import {
   installProductApiStub,
+  customsEvidenceTask,
   executorMetadataHash,
   handoffSelectorTask,
   manifestTask,
@@ -37,17 +38,19 @@ test.describe("UVP Order App production readiness negatives", () => {
   });
 
   test("negative: missing evidence blocks submission", async ({ page }) => {
-    await installProductApiStub(page);
+    // evidenceSpec 单轨口径：无 manifest 的提交任务走 EvidencePanel 直渲染，
+    // spec 槽位未上传时必填校验阻断准备提交。
+    await installProductApiStub(page, { task: customsEvidenceTask() });
     await page.goto("/");
 
     await expect(page.getByText("已连接")).toBeVisible();
     await expect(page.getByRole("heading", { name: "凭证提交" })).toBeVisible();
-    await expect(page.getByText("缺少必填凭证：报关单 PDF")).toBeVisible();
+    await expect(page.getByText("缺少必填项：报关单 PDF")).toBeVisible();
     await expect(page.getByRole("button", { name: "准备提交" })).toBeDisabled();
   });
 
   test("negative: unauthorized wallet is rejected", async ({ page }) => {
-    await installProductApiStub(page);
+    await installProductApiStub(page, { task: customsEvidenceTask() });
     await page.goto("/");
 
     await page.getByLabel("签名钱包").fill(unauthorizedWallet);
@@ -57,7 +60,7 @@ test.describe("UVP Order App production readiness negatives", () => {
   });
 
   test("negative: wallet rejected can be retried", async ({ page }) => {
-    await installProductApiStub(page, { walletMode: "reject" });
+    await installProductApiStub(page, { task: customsEvidenceTask(), walletMode: "reject" });
     await page.goto("/");
 
     await page.getByLabel("签名钱包").fill(participantWallet);
@@ -73,7 +76,7 @@ test.describe("UVP Order App production readiness negatives", () => {
   });
 
   test("negative: missing injected wallet fails closed", async ({ page }) => {
-    await installProductApiStub(page, { walletMode: "missing" });
+    await installProductApiStub(page, { task: customsEvidenceTask(), walletMode: "missing" });
     await page.goto("/");
 
     await page.getByLabel("签名钱包").fill(participantWallet);
@@ -84,7 +87,7 @@ test.describe("UVP Order App production readiness negatives", () => {
   });
 
   test("negative: indexer syncing state remains visible", async ({ page }) => {
-    await installProductApiStub(page, { submitStatus: "indexing" });
+    await installProductApiStub(page, { task: customsEvidenceTask(), submitStatus: "indexing" });
     await page.goto("/");
 
     await page.getByLabel("签名钱包").fill(participantWallet);
@@ -100,14 +103,18 @@ test.describe("UVP Order App production readiness negatives", () => {
     await installProductApiStub(page, {
       task: readinessTask({
         addOnKind: "submit_signal",
-        requiredEvidence: [],
+        // 资源要求与访问状态由提交信号插件的直渲染路径呈现：无 manifest 时
+        // PluginFields 渲染有效凭证要求/资源权限/履约者证明，EvidencePanel
+        // 渲染资源要求对应的文件槽位。
+        addOnManifest: undefined,
         requiredInputs: [],
-        resourceRequirements: {
-          inspection_report: {
+        resourceRequirements: [
+          {
+            resourceId: "inspection_report",
+            resourceKey: "inspection_report",
             label: "第三方检验证明",
-            documentType: "inspection_report",
             required: true,
-            sourceLabel: "来自资源补充",
+            source: "resource_patch",
             visibility: "protected",
             manifestURI: "ipfs://bafyuvp-inspection-manifest",
             ciphertextHash: "0x1111111111111111111111111111111111111111111111111111111111111111",
@@ -117,7 +124,7 @@ test.describe("UVP Order App production readiness negatives", () => {
               canRead: false
             }
           }
-        },
+        ],
         executorOverlay: {
           targetStageId: "inspection",
           activeExecutorWallet: participantWallet,
@@ -162,7 +169,7 @@ test.describe("UVP Order App production readiness negatives", () => {
 
     await expect(page.getByRole("heading", { name: "补充凭证要求" })).toBeVisible();
     await expect(page.getByLabel("资源清单 URI")).toBeVisible();
-    await expect(page.getByLabel("有效凭证要求").getByText("报关单 PDF")).toBeVisible();
+    await expect(page.getByLabel("有效凭证要求").getByText("第三方检验证明")).toBeVisible();
 
     await page.getByLabel("资源键").fill("inspection_report");
     await page.getByLabel("资源清单 URI").fill("ipfs://manifest/resource-patch");

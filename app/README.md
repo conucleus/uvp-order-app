@@ -22,11 +22,10 @@ pnpm --filter @uvp-eth/order-app test:e2e
 
 当前环境变量：
 
-- `VITE_UVP_CHAIN_SERVICES_URL`: Product API 地址。
-- `VITE_UVP_ORDER_APP_DEMO=1`: 本地演示数据开关。
+- `VITE_UVP_CHAIN_SERVICES_URL`: Product API 地址（必填，缺失时启动即报错）。
 - `VITE_UVP_ORDER_APP_WALLET_ADDRESS`: 参与者钱包过滤条件。
 
-没有 Product API 且未启用演示模式时，应用显示空壳和服务缺失提示，不生成任务或证明。
+未配置 `VITE_UVP_CHAIN_SERVICES_URL` 时启动即报错，错误信息包含该变量名；应用只显示未配置错误提示，不生成任务或证明。
 
 ## 通用任务动作
 

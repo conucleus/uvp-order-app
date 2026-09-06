@@ -5,6 +5,7 @@ import type {
   ProductExecutorPatchMode,
   ProductExecutorPatchRequirementDTO,
   ProductResourceAccessState,
+  ProductResourceRequirementDTO,
   ProductResourceVisibility,
   StageExecutorActionKind,
   ProductTaskDTO
@@ -13,67 +14,17 @@ import { cleanString } from "./taskUtils";
 
 export type ParticipantAddOnKind = StageExecutorActionKind;
 
-export type FileResourceHandleDTO =
-  | string
-  | {
-      readonly resourceId?: string;
-      readonly resourceKey?: string;
-      readonly label?: string;
-      readonly title?: string;
-      readonly name?: string;
-      readonly documentType?: string;
-      readonly description?: string;
-      readonly required?: boolean;
-      readonly source?: string;
-      readonly sourceLabel?: string;
-      readonly resourceType?: string;
-      readonly fileType?: string;
-      readonly handle?: string;
-      readonly handleType?: string;
-      readonly visibility?: ProductResourceVisibility | string;
-      readonly metadataURI?: string;
-      readonly manifestURI?: string;
-      readonly manifestHash?: string;
-      readonly uri?: string;
-      readonly cid?: string;
-      readonly storageCID?: string;
-      readonly payloadRef?: string;
-      readonly contentHash?: string;
-      readonly ciphertextHash?: string;
-      readonly metadataHash?: string;
-      readonly payloadHash?: string;
-      readonly accessPolicy?: {
-        readonly policyHash?: string;
-      };
-      readonly accessStatus?: {
-        readonly state?: ProductResourceAccessState | string;
-        readonly label?: string;
-        readonly canRead?: boolean;
-        readonly canWrite?: boolean;
-        readonly reason?: string;
-      };
-    };
-
-export type FileResourcesBundleDTO =
-  | Readonly<Record<string, FileResourceHandleDTO | null | undefined>>
-  | readonly Exclude<FileResourceHandleDTO, string>[];
-
 export interface SelectableTargetStageDTO {
   readonly targetStageId?: string;
-  readonly stageId?: string;
   readonly targetStageName?: string;
-  readonly stageName?: string;
-  readonly label?: string;
-  readonly name?: string;
   readonly description?: string;
   readonly allowed?: boolean;
   readonly disabledReason?: string;
   readonly workStarted?: boolean;
-  readonly stageSignalCount?: number | string;
+  readonly stageSignalCount?: number;
   readonly currentExecutorWallet?: string;
   readonly currentExecutorLabel?: string;
   readonly previousExecutor?: string;
-  readonly previousExecutorWallet?: string;
   readonly previousExecutorLabel?: string;
   readonly executorPatchMode?: ProductExecutorPatchMode;
   readonly executorPatchModes?: readonly ExecutorPatchModeOptionDTO[];
@@ -85,11 +36,8 @@ export interface SelectableTargetStageDTO {
   readonly futureAuthorityLabel?: string;
   readonly selected?: boolean;
   readonly executorOverlay?: ExecutorOverlayProjectionDTO;
-  readonly resourceRequirements?: FileResourcesBundleDTO;
+  readonly resourceRequirements?: readonly ProductResourceRequirementDTO[];
   readonly resourceOverlays?: readonly ResourceOverlayProjectionDTO[];
-  readonly effectiveResourceRequirements?: FileResourcesBundleDTO;
-  readonly effectiveFileResources?: FileResourcesBundleDTO;
-  readonly fileResources?: FileResourcesBundleDTO;
   readonly requiredInputs?: readonly FulfillmentRequiredInputDTO[];
   readonly proofRows?: readonly ChainProofRowDTO[];
 }
@@ -102,7 +50,6 @@ export interface ExecutorOverlayProjectionDTO {
   readonly modeLabel?: string;
   readonly selectorWallet?: string;
   readonly previousExecutor?: string;
-  readonly previousExecutorWallet?: string;
   readonly previousExecutorLabel?: string;
   readonly activeExecutorWallet?: string;
   readonly activeExecutorLabel?: string;
@@ -118,10 +65,9 @@ export interface ExecutorOverlayProjectionDTO {
   readonly futureAuthorityLabel?: string;
   readonly authorityNotice?: string;
   readonly patchHash?: string;
-  readonly patchNonce?: string | number;
+  readonly patchNonce?: string;
   readonly metadataURI?: string;
   readonly sourceLabel?: string;
-  readonly proof?: readonly ChainProofRowDTO[];
   readonly proofRows?: readonly ChainProofRowDTO[];
 }
 
@@ -130,7 +76,6 @@ export interface ExecutorPatchModeOptionDTO extends Omit<
   | "stageSignalCount"
   | "targetStageId"
   | "previousExecutor"
-  | "previousExecutorWallet"
   | "previousExecutorLabel"
   | "approvalSourceId"
   | "approvalSignalId"
@@ -145,7 +90,6 @@ export interface ExecutorPatchModeOptionDTO extends Omit<
   readonly mode: ProductExecutorPatchMode;
   readonly targetStageId?: string | undefined;
   readonly previousExecutor?: string | undefined;
-  readonly previousExecutorWallet?: string | undefined;
   readonly previousExecutorLabel?: string | undefined;
   readonly approvalSourceId?: string | undefined;
   readonly approvalSignalId?: string | undefined;
@@ -168,9 +112,8 @@ export interface ResourceOverlayProjectionDTO {
   readonly manifestHash?: string;
   readonly policyHash?: string;
   readonly patchHash?: string;
-  readonly patchNonce?: string | number;
+  readonly patchNonce?: string;
   readonly visibility?: ProductResourceVisibility | string;
-  readonly proof?: readonly ChainProofRowDTO[];
   readonly proofRows?: readonly ChainProofRowDTO[];
 }
 
@@ -178,28 +121,19 @@ export type ProductTaskWithAddOns = Omit<
   ProductTaskDTO,
   | "addOnKind"
   | "selectableTargets"
-  | "selectedStages"
   | "executorPatchModes"
   | "executorOverlay"
   | "resourceOverlays"
-  | "resourceRequirements"
-  | "effectiveResourceRequirements"
-  | "effectiveFileResources"
   | "capabilityPlugin"
   | "addOnManifest"
 > & {
   readonly addOnKind?: ParticipantAddOnKind | undefined;
   readonly selectableTargets?: readonly SelectableTargetStageDTO[] | undefined;
-  readonly selectedStages?: readonly string[] | undefined;
   readonly executorPatchModes?: readonly ExecutorPatchModeOptionDTO[] | undefined;
   readonly executorOverlay?: ExecutorOverlayProjectionDTO | undefined;
   readonly resourceOverlays?: readonly ResourceOverlayProjectionDTO[] | undefined;
-  readonly resourceRequirements?: FileResourcesBundleDTO | undefined;
-  readonly effectiveResourceRequirements?: FileResourcesBundleDTO | undefined;
-  readonly effectiveFileResources?: FileResourcesBundleDTO | undefined;
   readonly capabilityPlugin?: (ProductTaskDTO["capabilityPlugin"] & {
     readonly addOnKind?: ParticipantAddOnKind | undefined;
-    readonly selectedStages?: readonly string[] | undefined;
   }) | undefined;
   readonly addOnManifest?: ProductTaskDTO["addOnManifest"] | undefined;
 };
@@ -237,23 +171,16 @@ export function addOnManifestForTask(task: ProductTaskDTO): ProductTaskDTO["addO
 }
 
 export function targetStageId(target: SelectableTargetStageDTO): string {
-  return target.targetStageId ?? target.stageId ?? "";
+  return target.targetStageId ?? "";
 }
 
 export function targetStageLabel(target: SelectableTargetStageDTO): string {
-  return target.label ?? target.targetStageName ?? target.stageName ?? target.name ?? targetStageId(target);
+  return target.targetStageName ?? targetStageId(target);
 }
 
 export function selectableTargetsForTask(task: ProductTaskDTO): readonly SelectableTargetStageDTO[] {
   const candidate = taskWithAddOns(task);
-  if (candidate.selectableTargets && candidate.selectableTargets.length > 0) {
-    return candidate.selectableTargets.filter((target) => targetStageId(target).length > 0);
-  }
-  const selectedStages = candidate.selectedStages ?? candidate.capabilityPlugin?.selectedStages ?? [];
-  return selectedStages.map((stageId) => ({
-    targetStageId: stageId,
-    label: stageId
-  }));
+  return candidate.selectableTargets?.filter((target) => targetStageId(target).length > 0) ?? [];
 }
 
 export function executorPatchModeOptionsForTarget(target: SelectableTargetStageDTO | undefined): readonly ExecutorPatchModeOptionDTO[] {
@@ -326,10 +253,7 @@ export function executorPatchWorkStarted(target: SelectableTargetStageDTO | unde
   if (typeof target.workStarted === "boolean") {
     return target.workStarted;
   }
-  const signalCount = typeof target.stageSignalCount === "number"
-    ? target.stageSignalCount
-    : Number.parseInt(String(target.stageSignalCount ?? "0"), 10);
-  return Number.isFinite(signalCount) && signalCount > 0;
+  return typeof target.stageSignalCount === "number" && target.stageSignalCount > 0;
 }
 
 function normalizeExecutorPatchModeOption(
@@ -337,37 +261,19 @@ function normalizeExecutorPatchModeOption(
   mode: ExecutorPatchModeOptionDTO
 ): ExecutorPatchModeOptionDTO {
   const previousExecutor = cleanString(mode.previousExecutor) ??
-    cleanString(mode.previousExecutorWallet) ??
-    cleanString(target.previousExecutor) ??
-    cleanString(target.previousExecutorWallet) ??
-    cleanString(target.currentExecutorWallet) ??
-    cleanString(target.executorOverlay?.previousExecutor) ??
-    cleanString(target.executorOverlay?.previousExecutorWallet) ??
-    cleanString(target.executorOverlay?.activeExecutorWallet);
-  const approvalSourceId = cleanString(mode.approvalSourceId) ??
-    cleanString(mode.approvalSignal?.approvalSourceId) ??
-    cleanString(target.approvalSourceId) ??
-    cleanString(target.approvalSignal?.approvalSourceId);
-  const approvalSignalId = cleanString(mode.approvalSignalId) ??
-    cleanString(mode.approvalSignal?.approvalSignalId) ??
-    cleanString(target.approvalSignalId) ??
-    cleanString(target.approvalSignal?.approvalSignalId);
+    cleanString(target.previousExecutor);
+  const approvalSourceId = cleanString(mode.approvalSourceId) ?? cleanString(target.approvalSourceId);
+  const approvalSignalId = cleanString(mode.approvalSignalId) ?? cleanString(target.approvalSignalId);
   return {
     ...mode,
     modeLabel: cleanString(mode.modeLabel) ?? executorPatchModeLabel(mode.mode),
     workStarted: mode.workStarted || executorPatchWorkStarted(target),
     allowed: mode.allowed && target.allowed !== false,
-    previousExecutor,
-    previousExecutorWallet: previousExecutor,
-    previousExecutorLabel: cleanString(mode.previousExecutorLabel) ??
-      cleanString(target.previousExecutorLabel) ??
-      cleanString(target.currentExecutorLabel),
-    approvalSourceId,
-    approvalSignalId,
-    approvalSignalLabel: cleanString(mode.approvalSignalLabel) ??
-      cleanString(mode.approvalSignal?.label) ??
-      cleanString(target.approvalSignalLabel) ??
-      cleanString(target.approvalSignal?.label),
+    ...(previousExecutor ? { previousExecutor } : {}),
+    previousExecutorLabel: cleanString(mode.previousExecutorLabel) ?? cleanString(target.previousExecutorLabel),
+    ...(approvalSourceId ? { approvalSourceId } : {}),
+    ...(approvalSignalId ? { approvalSignalId } : {}),
+    approvalSignalLabel: cleanString(mode.approvalSignalLabel) ?? cleanString(target.approvalSignalLabel),
     approvalSignal: mode.approvalSignal ?? target.approvalSignal,
     priorAuthorityLabel: cleanString(mode.priorAuthorityLabel) ??
       cleanString(target.priorAuthorityLabel) ??
@@ -389,94 +295,48 @@ export function resourceOverlaysForTask(task: ProductTaskDTO): readonly Resource
   return taskWithAddOns(task).resourceOverlays ?? [];
 }
 
-export function resourceRequirementsForTask(task: ProductTaskDTO): FileResourcesBundleDTO | undefined {
-  const taskWithResources = taskWithAddOns(task);
-  return taskWithResources.resourceRequirements ??
-    taskWithResources.effectiveResourceRequirements ??
-    taskWithResources.effectiveFileResources;
+export function resourceRequirementsForTask(task: ProductTaskDTO): readonly ProductResourceRequirementDTO[] {
+  return taskWithAddOns(task).resourceRequirements ?? [];
 }
 
 export function resourceRequirementDisplays(task: ProductTaskDTO): readonly EffectiveFileResourceDisplay[] {
-  const resources = resourceRequirementsForTask(task);
-  if (!resources) {
-    return [];
-  }
-
-  return fileResourceEntries(resources)
-    .filter(([, value]) => value !== null && value !== undefined)
-    .map(([resourceId, value]) => {
-      const objectValue = value && typeof value === "object" ? value : undefined;
-      const label = cleanString(objectValue?.label) ??
-        cleanString(objectValue?.title) ??
-        cleanString(objectValue?.name) ??
-        resourceId;
-      const documentType = cleanString(objectValue?.documentType) ??
-        cleanString(objectValue?.resourceType) ??
-        cleanString(objectValue?.fileType) ??
-        resourceId;
-      const access = resourceAccessDisplay(objectValue);
-      return {
-        resourceId: cleanString(objectValue?.resourceId) ?? resourceId,
-        label,
-        documentType,
-        required: objectValue?.required !== false,
-        ...(cleanString(objectValue?.description) ? { description: cleanString(objectValue?.description) } : {}),
-        ...(cleanString(objectValue?.sourceLabel) || cleanString(objectValue?.source)
-          ? { sourceLabel: cleanString(objectValue?.sourceLabel) ?? sourceLabel(cleanString(objectValue?.source)) }
-          : {}),
-        handleSummary: resourceHandleSummary(value),
-        visibility: access.visibility,
-        accessLabel: access.label,
-        accessState: access.state,
-        canRead: access.canRead
-      };
-    });
+  return resourceRequirementsForTask(task).map((resource) => {
+    const access = resourceAccessDisplay(resource);
+    return {
+      resourceId: resource.resourceId,
+      label: cleanString(resource.label) ?? resource.resourceId,
+      documentType: cleanString(resource.resourceType) ?? resource.resourceId,
+      required: resource.required,
+      ...(cleanString(resource.description) ? { description: cleanString(resource.description) } : {}),
+      sourceLabel: sourceLabel(resource.source),
+      handleSummary: resourceHandleSummary(resource),
+      visibility: access.visibility,
+      accessLabel: access.label,
+      accessState: access.state,
+      canRead: access.canRead
+    };
+  });
 }
 
-export function resourceHandleSummary(value: FileResourceHandleDTO | null | undefined): string {
-  if (typeof value === "string") {
-    if (isDisallowedProductionReference(value)) {
-      return "需使用加密内容寻址清单";
-    }
-    return compactReference(value);
-  }
-  if (!value || typeof value !== "object") {
-    return "资源清单待补充";
-  }
-  const hash = cleanString(value.payloadHash) ?? cleanString(value.contentHash) ?? cleanString(value.metadataHash);
+function resourceHandleSummary(resource: ProductResourceRequirementDTO): string {
+  const hash = cleanString(resource.manifestHash) ?? cleanString(resource.contentHash);
   if (hash) {
     return `指纹 ${compactReference(hash)}`;
   }
-  const encryptedHash = cleanString(value.ciphertextHash);
+  const encryptedHash = cleanString(resource.ciphertextHash);
   if (encryptedHash) {
     return `加密内容 ${compactReference(encryptedHash)}`;
   }
-  const reference = cleanString(value.manifestURI) ??
-    cleanString(value.storageCID) ??
-    cleanString(value.cid) ??
-    cleanString(value.metadataURI) ??
-    cleanString(value.payloadRef) ??
-    cleanString(value.handle) ??
-    cleanString(value.uri);
+  const reference = cleanString(resource.manifestURI) ??
+    cleanString(resource.storageCID) ??
+    cleanString(resource.metadataURI);
   if (reference) {
-    return isDisallowedProductionReference(reference) || isDisallowedHandleType(value)
+    return isDisallowedProductionReference(reference)
       ? "需使用加密内容寻址清单"
       : `资源清单 ${compactReference(reference)}`;
   }
-  const fileType = cleanString(value.fileType);
-  return fileType ? `资源类型 ${fileType}` : "资源清单已配置";
-}
-
-function fileResourceEntries(
-  resources: FileResourcesBundleDTO
-): readonly (readonly [string, FileResourceHandleDTO | null | undefined])[] {
-  if (Array.isArray(resources)) {
-    return resources.map((resource, index) => [
-      cleanString(resource.resourceId) ?? `resource_${index + 1}`,
-      resource
-    ] as const);
-  }
-  return Object.entries(resources);
+  const resourceType = cleanString(resource.resourceType);
+  return resourceType ? `资源类型 ${resourceType}` : "资源清单已配置";
 }
 
 function compactReference(value: string): string {
@@ -487,28 +347,24 @@ function compactReference(value: string): string {
   return `${trimmed.slice(0, 18)}...${trimmed.slice(-10)}`;
 }
 
-function sourceLabel(source: string | undefined): string | undefined {
-  switch (source) {
-    case "plan_default":
-      return "来自默认要求";
-    case "resource_patch":
-    case "stage_patch":
-      return "来自资源补充";
-    case "participant_input":
-      return "来自参与方提交";
-    default:
-      return source;
-  }
+const requirementSourceLabels: Readonly<Record<ProductResourceRequirementDTO["source"], string>> = {
+  plan_default: "来自默认要求",
+  resource_patch: "来自资源补充",
+  participant_input: "来自参与方提交"
+};
+
+function sourceLabel(source: ProductResourceRequirementDTO["source"]): string {
+  return requirementSourceLabels[source];
 }
 
-function resourceAccessDisplay(value: Exclude<FileResourceHandleDTO, string> | undefined): {
+function resourceAccessDisplay(resource: ProductResourceRequirementDTO): {
   readonly visibility: ProductResourceVisibility | "unknown";
   readonly state: ProductResourceAccessState | "unknown";
   readonly label: string;
   readonly canRead: boolean;
 } {
-  const visibility = normalizedVisibility(value?.visibility);
-  const status = value?.accessStatus;
+  const visibility = normalizedVisibility(resource.visibility ?? resource.accessPolicy?.visibility);
+  const status = resource.accessStatus;
   const state = normalizedAccessState(status?.state);
   const label = cleanString(status?.label) ?? defaultAccessLabel(visibility, state, status?.canRead);
   return {
@@ -551,16 +407,6 @@ function defaultAccessLabel(
     return "需要授权后查看加密文件";
   }
   return "访问状态待同步";
-}
-
-function isDisallowedHandleType(value: Exclude<FileResourceHandleDTO, string>): boolean {
-  const tokens = [
-    cleanString(value.handleType),
-    cleanString(value.source),
-    cleanString(value.resourceType),
-    cleanString(value.fileType)
-  ].filter((token): token is string => Boolean(token)).map((token) => token.toLowerCase());
-  return tokens.some((token) => token.includes("plain_text") || token.includes("txcloud"));
 }
 
 function isDisallowedProductionReference(value: string): boolean {

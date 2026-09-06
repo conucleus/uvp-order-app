@@ -102,6 +102,18 @@ export function taskDisplay(task: ProductTaskDTO, now: Date = new Date()): Parti
   const rawStatus = extension.submissionStatus ?? extension.chainStatus;
   const isOverdue = task.status === "open" && isDeadlineOverdue(task.deadline, now);
 
+  // done/confirmed 是链上最终态：早先失败尝试残留的 errorCode 不再把
+  // 已完成任务展示为"提交失败"。
+  if (task.status === "done" || rawStatus === "confirmed") {
+    return {
+      state: "confirmed",
+      label: "已确认",
+      bucketLabel: "最近完成",
+      rank: 5,
+      isOverdue: false
+    };
+  }
+
   if (rawStatus === "failed" || extension.errorCode) {
     return {
       state: "failed",
@@ -129,16 +141,6 @@ export function taskDisplay(task: ProductTaskDTO, now: Date = new Date()): Parti
       bucketLabel: "等待链上确认",
       rank: 3,
       isOverdue
-    };
-  }
-
-  if (task.status === "done" || rawStatus === "confirmed") {
-    return {
-      state: "confirmed",
-      label: "已确认",
-      bucketLabel: "最近完成",
-      rank: 5,
-      isOverdue: false
     };
   }
 

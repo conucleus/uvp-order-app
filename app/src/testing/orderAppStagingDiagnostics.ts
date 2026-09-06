@@ -41,7 +41,7 @@ export interface StagingDiagnosticReport {
  *  - filtered out K
  *  - what wallet hint should be used next
  *
- * The helper never falls back to demo. It requires real Product API data
+ * The helper never falls back to fixture data. It requires real Product API data
  * (or full‑mode fixture tasks) and a wallet address to produce a meaningful
  * diagnosis.
  */

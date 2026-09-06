@@ -27,10 +27,11 @@ export async function loadOrderAppNotifications(
   fetcher: Fetcher = globalThis.fetch.bind(globalThis)
 ): Promise<OrderAppNotificationList> {
   if (data.source.kind !== "real") {
-    return derivedNotificationList(data, session);
+    throw new Error("通知中心仅在参与者服务连接后可用。");
   }
 
   try {
+    await syncPendingNotificationReads(data, session, fetcher);
     const response = await fetcher(joinUrl(data.source.baseUrl, participantPath("/product/me/activity-feed", session)), {
       method: "GET",
       headers: {
@@ -41,7 +42,19 @@ export async function loadOrderAppNotifications(
       throw new Error(await responseText(response));
     }
     const body = await response.json() as ApiNotificationResponse;
-    const notifications = (body.notifications ?? []).map(normalizeApiNotification);
+    const notifications: OrderAppNotificationDTO[] = [];
+    let skippedNotificationCount = 0;
+    for (const entry of body.notifications ?? []) {
+      const normalized = normalizeApiNotification(entry);
+      if (normalized) {
+        notifications.push(normalized);
+      } else {
+        skippedNotificationCount += 1;
+      }
+    }
+    if (skippedNotificationCount > 0) {
+      console.warn(`activity-feed returned ${skippedNotificationCount} invalid notification entries; skipped`);
+    }
     return {
       notifications,
       unreadCount: body.unreadCount ?? notifications.filter((notification) => notification.readStatus === "unread").length,
@@ -49,10 +62,7 @@ export async function loadOrderAppNotifications(
       sourceOfTruth: body.sourceOfTruth ?? "product-projection-and-notification-read-state"
     };
   } catch (error) {
-    return {
-      ...derivedNotificationList(data, session),
-      error: error instanceof Error ? error.message : "通知服务暂不可用"
-    };
+    throw new Error(error instanceof Error ? error.message : "通知服务暂不可用");
   }
 }
 
@@ -70,43 +80,70 @@ export async function markOrderAppNotificationRead(
   }
 
   try {
-    const response = await fetcher(
-      joinUrl(data.source.baseUrl, `/product/me/activity-feed/${encodeURIComponent(notification.notificationId)}/read`),
-      {
-        method: "POST",
-        headers: {
-          "content-type": "application/json"
-        },
-        body: JSON.stringify({
-          ...(session.walletAddress ? { walletAddress: session.walletAddress } : {})
-        })
-      }
-    );
+    const response = await postReadReceipt(data.source.baseUrl, session, notification.notificationId, fetcher);
     if (!response.ok) {
       throw new Error(await responseText(response));
     }
+    clearPendingRead(session, notification.notificationId);
     const body = await response.json() as ApiNotificationReadResponse;
-    return body.notification
-      ? normalizeApiNotification(body.notification)
-      : { ...notification, readStatus: "read", readAt };
-  } catch {
-    return { ...notification, readStatus: "read", readAt };
+    const acknowledged = body.notification ? normalizeApiNotification(body.notification) : undefined;
+    return acknowledged ?? { ...notification, readStatus: "read", readAt };
+  } catch (error) {
+    enqueuePendingRead(session, notification.notificationId, readAt);
+    console.warn(`read receipt not persisted; queued for retry: ${notification.notificationId}`, error);
+    return { ...notification, readStatus: "read", readAt, syncPending: true };
   }
 }
 
-export function derivedNotificationList(data: ProductHomeData, session: ParticipantSession): OrderAppNotificationList {
-  const readIds = readNotificationIds(session);
-  const notifications = deriveOrderAppNotifications({
-    orders: data.orders,
-    tasks: data.tasks,
-    now: new Date()
-  }).map((notification) => applyLocalReadState(notification, readIds));
-  return {
-    notifications,
-    unreadCount: notifications.filter((notification) => notification.readStatus === "unread").length,
-    source: "derived",
-    sourceOfTruth: "local-product-projection"
-  };
+/**
+ * Replays read receipts that failed to reach the server earlier. Kept
+ * entries stay queued until a POST succeeds; the local read state is never
+ * rolled back.
+ */
+export async function syncPendingNotificationReads(
+  data: ProductHomeData,
+  session: ParticipantSession,
+  fetcher: Fetcher = globalThis.fetch.bind(globalThis)
+): Promise<{ readonly synced: number; readonly remaining: number }> {
+  const pending = pendingReadEntries(session);
+  if (data.source.kind !== "real" || pending.length === 0) {
+    return { synced: 0, remaining: pending.length };
+  }
+
+  let synced = 0;
+  for (const [notificationId] of pending) {
+    try {
+      const response = await postReadReceipt(data.source.baseUrl, session, notificationId, fetcher);
+      if (!response.ok) {
+        continue;
+      }
+      clearPendingRead(session, notificationId);
+      synced += 1;
+    } catch {
+      // keep queued for the next sync pass
+    }
+  }
+  return { synced, remaining: pending.length - synced };
+}
+
+function postReadReceipt(
+  baseUrl: string,
+  session: ParticipantSession,
+  notificationId: string,
+  fetcher: Fetcher
+): Promise<Response> {
+  return fetcher(
+    joinUrl(baseUrl, `/product/me/activity-feed/${encodeURIComponent(notificationId)}/read`),
+    {
+      method: "POST",
+      headers: {
+        "content-type": "application/json"
+      },
+      body: JSON.stringify({
+        ...(session.walletAddress ? { walletAddress: session.walletAddress } : {})
+      })
+    }
+  );
 }
 
 export function deriveOrderAppNotifications(input: {
@@ -122,14 +159,28 @@ export function deriveOrderAppNotifications(input: {
     const sla = slaStateForTask(task, input.now);
     const base = baseNotification(task, order);
 
-    if (task.status === "done" || task.status === "submitted") {
+    // done 才是链上确认的完成态；submitted 仍是等待索引的中间态，
+    // 通知口径与 taskStatus/ProofPanel 一致，不提前宣布"提交已确认"。
+    if (task.status === "done") {
       notifications.push({
         ...base,
         notificationId: localNotificationId("submission_confirmed", task.taskId),
         kind: "submission_confirmed",
         severity: "success",
         eventLabel: "提交已确认",
-        message: `${task.stageName} 已完成或已提交，继续关注后续订单状态。`
+        message: `${task.stageName} 已确认完成，继续关注后续订单状态。`
+      });
+      continue;
+    }
+
+    if (task.status === "submitted") {
+      notifications.push({
+        ...base,
+        notificationId: localNotificationId("signal_submitted", task.taskId),
+        kind: "signal_submitted",
+        severity: "info",
+        eventLabel: "等待索引确认",
+        message: `${task.stageName} 已提交，等待链上索引确认；确认前不会显示为完成。`
       });
       continue;
     }
@@ -206,29 +257,45 @@ function baseNotification(
   };
 }
 
-function normalizeApiNotification(input: Partial<OrderAppNotificationDTO>): OrderAppNotificationDTO {
+function normalizeApiNotification(input: Partial<OrderAppNotificationDTO>): OrderAppNotificationDTO | undefined {
   const kind = notificationKind(input.kind);
+  if (
+    !kind ||
+    !isNonEmptyString(input.notificationId) ||
+    !isNonEmptyString(input.orderId) ||
+    !isNonEmptyString(input.orderTitle) ||
+    !isNonEmptyString(input.eventLabel) ||
+    !isNonEmptyString(input.message) ||
+    !isNonEmptyString(input.actionHref) ||
+    !isNonEmptyString(input.createdAt)
+  ) {
+    return undefined;
+  }
   return {
-    notificationId: typeof input.notificationId === "string" ? input.notificationId : localNotificationId(kind, input.orderId ?? "unknown"),
+    notificationId: input.notificationId,
     kind,
     severity: notificationSeverity(input.severity),
     readStatus: input.readStatus === "read" ? "read" : "unread",
-    orderId: input.orderId ?? "unknown",
-    orderTitle: input.orderTitle ?? "链上订单",
+    orderId: input.orderId,
+    orderTitle: input.orderTitle,
     ...(typeof input.taskId === "string" ? { taskId: input.taskId } : {}),
     ...(typeof input.taskTitle === "string" ? { taskTitle: input.taskTitle } : {}),
     ...(typeof input.stageId === "string" ? { stageId: input.stageId } : {}),
     ...(typeof input.stageLabel === "string" ? { stageLabel: input.stageLabel } : {}),
     ...(typeof input.participantRole === "string" ? { participantRole: input.participantRole } : {}),
-    eventLabel: input.eventLabel ?? labelForKind(kind),
-    message: input.message ?? "通知来自 Product projection；不会改变任务或链上状态。",
-    actionHref: input.actionHref ?? routeHash("orders", input.orderId ?? "unknown"),
+    eventLabel: input.eventLabel,
+    message: input.message,
+    actionHref: input.actionHref,
     ...(typeof input.proofHref === "string" ? { proofHref: input.proofHref } : {}),
-    createdAt: input.createdAt ?? "",
+    createdAt: input.createdAt,
     ...(typeof input.readAt === "string" ? { readAt: input.readAt } : {}),
     source: input.source === "notification_delivery" ? "notification_delivery" : "api",
     privacy: "participant_only"
   };
+}
+
+function isNonEmptyString(value: unknown): value is string {
+  return typeof value === "string" && value.trim().length > 0;
 }
 
 function slaStateForTask(task: ProductTaskDTO, now: Date): { readonly status: "none" | "ready" | "near_deadline" | "overdue" } {
@@ -289,7 +356,7 @@ function severityRank(severity: OrderAppNotificationSeverity): number {
   }
 }
 
-function notificationKind(value: unknown): OrderAppNotificationKind {
+function notificationKind(value: unknown): OrderAppNotificationKind | undefined {
   switch (value) {
     case "task_ready":
     case "task_near_deadline":
@@ -300,7 +367,7 @@ function notificationKind(value: unknown): OrderAppNotificationKind {
     case "task_revoked":
       return value;
     default:
-      return "task_ready";
+      return undefined;
   }
 }
 
@@ -317,33 +384,6 @@ function notificationSeverity(value: unknown): OrderAppNotificationSeverity {
   }
 }
 
-function labelForKind(kind: OrderAppNotificationKind): string {
-  switch (kind) {
-    case "task_ready":
-      return "任务已就绪";
-    case "task_near_deadline":
-      return "即将到期";
-    case "task_overdue":
-      return "任务已逾期";
-    case "signal_submitted":
-      return "链上信号已提交";
-    case "submission_confirmed":
-      return "提交已确认";
-    case "submission_failed":
-      return "处理失败";
-    case "task_revoked":
-      return "任务已撤销";
-  }
-}
-
-function applyLocalReadState(
-  notification: OrderAppNotificationDTO,
-  readIds: ReadonlyMap<string, string>
-): OrderAppNotificationDTO {
-  const readAt = readIds.get(notification.notificationId);
-  return readAt ? { ...notification, readStatus: "read", readAt } : notification;
-}
-
 function rememberReadNotification(session: ParticipantSession, notificationId: string, readAt: string): void {
   if (typeof window === "undefined") {
     return;
@@ -358,11 +398,14 @@ function readNotificationIds(session: ParticipantSession): ReadonlyMap<string, s
   if (typeof window === "undefined") {
     return new Map();
   }
+  const key = localReadStateKey(session);
   try {
-    const raw = window.localStorage.getItem(localReadStateKey(session));
+    const raw = window.localStorage.getItem(key);
     const parsed = raw ? JSON.parse(raw) as Record<string, unknown> : {};
     return new Map(Object.entries(parsed).filter((entry): entry is [string, string] => typeof entry[1] === "string"));
-  } catch {
+  } catch (error) {
+    console.error(`notification read state is corrupted; clearing ${key}`, error);
+    window.localStorage.removeItem(key);
     return new Map();
   }
 }
@@ -371,8 +414,154 @@ function localReadStateKey(session: ParticipantSession): string {
   return `uvp-order-app:notification-read:${session.walletAddress?.toLowerCase() ?? "anonymous"}`;
 }
 
+function pendingReadEntries(session: ParticipantSession): readonly (readonly [string, string])[] {
+  if (typeof window === "undefined") {
+    return [];
+  }
+  const key = pendingReadStateKey(session);
+  try {
+    const raw = window.localStorage.getItem(key);
+    const parsed = raw ? JSON.parse(raw) as Record<string, unknown> : {};
+    return Object.entries(parsed).filter((entry): entry is [string, string] => typeof entry[1] === "string");
+  } catch (error) {
+    console.error(`pending notification read queue is corrupted; clearing ${key}`, error);
+    window.localStorage.removeItem(key);
+    return [];
+  }
+}
+
+function enqueuePendingRead(session: ParticipantSession, notificationId: string, readAt: string): void {
+  if (typeof window === "undefined") {
+    return;
+  }
+  const next = Object.fromEntries(pendingReadEntries(session));
+  next[notificationId] = readAt;
+  window.localStorage.setItem(pendingReadStateKey(session), JSON.stringify(next));
+}
+
+function clearPendingRead(session: ParticipantSession, notificationId: string): void {
+  if (typeof window === "undefined") {
+    return;
+  }
+  const entries = pendingReadEntries(session);
+  if (!entries.some(([id]) => id === notificationId)) {
+    return;
+  }
+  const next = Object.fromEntries(entries.filter(([id]) => id !== notificationId));
+  window.localStorage.setItem(pendingReadStateKey(session), JSON.stringify(next));
+}
+
+function pendingReadStateKey(session: ParticipantSession): string {
+  return `uvp-order-app:notification-read-pending:${session.walletAddress?.toLowerCase() ?? "anonymous"}`;
+}
+
 function localNotificationId(kind: OrderAppNotificationKind, ...parts: readonly string[]): string {
-  return ["local", kind, ...parts].map((part) => encodeURIComponent(part)).join(":");
+  // 服务端 read 回执端点按 bytes32 校验 notificationId（uvp-chain-services
+  // normalizeBytes32），非 0x+64hex 形态一律 400——本地派生 ID 若保留
+  // `local:kind:task` 可读形态，接线后已读回执永远发不上去（0216 S26）。
+  // 派生是同步投影（deriveOrderAppNotifications 无 await），crypto.subtle
+  // 不可用，这里用内置同步 SHA-256 得到 32 字节 hex；\0 分隔避免 parts
+  // 含 ":" 时产生歧义碰撞。
+  const payload = new TextEncoder().encode(["local", kind, ...parts].join("\u0000"));
+  return `0x${hexOf(sha256Sync(payload))}`;
+}
+
+const SHA256_ROUND_CONSTANTS = new Uint32Array([
+  0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5, 0x3956c25b, 0x59f111f1, 0x923f82a4, 0xab1c5ed5,
+  0xd807aa98, 0x12835b01, 0x243185be, 0x550c7dc3, 0x72be5d74, 0x80deb1fe, 0x9bdc06a7, 0xc19bf174,
+  0xe49b69c1, 0xefbe4786, 0x0fc19dc6, 0x240ca1cc, 0x2de92c6f, 0x4a7484aa, 0x5cb0a9dc, 0x76f988da,
+  0x983e5152, 0xa831c66d, 0xb00327c8, 0xbf597fc7, 0xc6e00bf3, 0xd5a79147, 0x06ca6351, 0x14292967,
+  0x27b70a85, 0x2e1b2138, 0x4d2c6dfc, 0x53380d13, 0x650a7354, 0x766a0abb, 0x81c2c92e, 0x92722c85,
+  0xa2bfe8a1, 0xa81a664b, 0xc24b8b70, 0xc76c51a3, 0xd192e819, 0xd6990624, 0xf40e3585, 0x106aa070,
+  0x19a4c116, 0x1e376c08, 0x2748774c, 0x34b0bcb5, 0x391c0cb3, 0x4ed8aa4a, 0x5b9cca4f, 0x682e6ff3,
+  0x748f82ee, 0x78a5636f, 0x84c87814, 0x8cc70208, 0x90befffa, 0xa4506ceb, 0xbef9a3f7, 0xc67178f2
+]);
+
+function sha256Sync(input: Uint8Array): Uint8Array {
+  const state = new Uint32Array([
+    0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a, 0x510e527f, 0x9b05688c, 0x1f83d9ab, 0x5be0cd19
+  ]);
+  const blockCount = (input.length + 9 + 63) >> 6;
+  const paddedLength = blockCount * 64;
+  const padded = new Uint8Array(paddedLength);
+  padded.set(input);
+  padded[input.length] = 0x80;
+  const bitLength = input.length * 8;
+  const high = Math.floor(bitLength / 0x100000000);
+  const low = bitLength >>> 0;
+  padded[paddedLength - 8] = high >>> 24;
+  padded[paddedLength - 7] = (high >>> 16) & 0xff;
+  padded[paddedLength - 6] = (high >>> 8) & 0xff;
+  padded[paddedLength - 5] = high & 0xff;
+  padded[paddedLength - 4] = low >>> 24;
+  padded[paddedLength - 3] = (low >>> 16) & 0xff;
+  padded[paddedLength - 2] = (low >>> 8) & 0xff;
+  padded[paddedLength - 1] = low & 0xff;
+
+  const words = new Uint32Array(64);
+  const view = new DataView(padded.buffer, padded.byteOffset, padded.byteLength);
+  for (let offset = 0; offset < paddedLength; offset += 64) {
+    for (let index = 0; index < 16; index += 1) {
+      words[index] = view.getUint32(offset + index * 4);
+    }
+    for (let index = 16; index < 64; index += 1) {
+      const fifteen = words[index - 15]!;
+      const two = words[index - 2]!;
+      const sigma0 = rotateRight(fifteen, 7) ^ rotateRight(fifteen, 18) ^ (fifteen >>> 3);
+      const sigma1 = rotateRight(two, 17) ^ rotateRight(two, 19) ^ (two >>> 10);
+      words[index] = (words[index - 16]! + sigma0 + words[index - 7]! + sigma1) >>> 0;
+    }
+    let a = state[0]!;
+    let b = state[1]!;
+    let c = state[2]!;
+    let d = state[3]!;
+    let e = state[4]!;
+    let f = state[5]!;
+    let g = state[6]!;
+    let h = state[7]!;
+    for (let index = 0; index < 64; index += 1) {
+      const bigSigma1 = rotateRight(e, 6) ^ rotateRight(e, 11) ^ rotateRight(e, 25);
+      const choice = (e & f) ^ (~e & g);
+      const temp1 = (h + bigSigma1 + choice + SHA256_ROUND_CONSTANTS[index]! + words[index]!) >>> 0;
+      const bigSigma0 = rotateRight(a, 2) ^ rotateRight(a, 13) ^ rotateRight(a, 22);
+      const majority = (a & b) ^ (a & c) ^ (b & c);
+      const temp2 = (bigSigma0 + majority) >>> 0;
+      h = g;
+      g = f;
+      f = e;
+      e = (d + temp1) >>> 0;
+      d = c;
+      c = b;
+      b = a;
+      a = (temp1 + temp2) >>> 0;
+    }
+    state[0] = (state[0]! + a) >>> 0;
+    state[1] = (state[1]! + b) >>> 0;
+    state[2] = (state[2]! + c) >>> 0;
+    state[3] = (state[3]! + d) >>> 0;
+    state[4] = (state[4]! + e) >>> 0;
+    state[5] = (state[5]! + f) >>> 0;
+    state[6] = (state[6]! + g) >>> 0;
+    state[7] = (state[7]! + h) >>> 0;
+  }
+
+  const digest = new Uint8Array(32);
+  for (let index = 0; index < 8; index += 1) {
+    const word = state[index]!;
+    digest[index * 4] = word >>> 24;
+    digest[index * 4 + 1] = (word >>> 16) & 0xff;
+    digest[index * 4 + 2] = (word >>> 8) & 0xff;
+    digest[index * 4 + 3] = word & 0xff;
+  }
+  return digest;
+}
+
+function rotateRight(value: number, bits: number): number {
+  return ((value >>> bits) | (value << (32 - bits))) >>> 0;
+}
+
+function hexOf(bytes: Uint8Array): string {
+  return [...bytes].map((byte) => byte.toString(16).padStart(2, "0")).join("");
 }
 
 function routeHash(section: "tasks" | "orders" | "proof", orderId: string, taskId?: string): string {

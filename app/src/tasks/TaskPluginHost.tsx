@@ -10,7 +10,7 @@ import {
   UserRound,
   WalletCards
 } from "lucide-react";
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import type {
   ChainProofRowDTO,
   ParticipantAddOnManifestComponentDTO,
@@ -37,10 +37,10 @@ import {
   executorPatchWorkStarted,
   selectableTargetsForTask,
   resourceRequirementDisplays,
+  resourceRequirementsForTask,
   targetStageId as selectableTargetStageId,
   targetStageLabel,
   type ExecutorPatchModeOptionDTO,
-  type FileResourceHandleDTO,
   type SelectableTargetStageDTO
 } from "./addOnTypes";
 import {
@@ -87,6 +87,7 @@ export interface ProductSubmission {
   readonly status: string;
   readonly txHash?: string;
   readonly blockNumber?: string;
+  readonly errorCode?: string;
   readonly proofRows: readonly ChainProofRowDTO[];
 }
 
@@ -159,6 +160,48 @@ type ManifestPreparedState =
       readonly prepared: PreparedStageResourcePatchDTO;
     };
 
+/**
+ * 任务作用域守卫（与 zhixu-store useTaskSubmissionFlow 同款）：
+ * 慢网下切换任务后，在途请求的续作不得把 A 任务的 prepareId/提交结果
+ * 写进 B 任务的界面，更不得以 B 的 taskId 提交 A 的 prepareId。
+ */
+function useTaskScopeGuard(task: ProductTaskDTO): {
+  readonly scopeKey: string;
+  readonly taskScopeRef: Readonly<{ readonly current: string }>;
+} {
+  const scopeKey = `${task.orderId}:${task.taskId}:${task.stageId}`;
+  const taskScopeRef = useRef(scopeKey);
+  useLayoutEffect(() => {
+    taskScopeRef.current = scopeKey;
+  }, [scopeKey]);
+  return { scopeKey, taskScopeRef };
+}
+
+/**
+ * 提交响应信封状态如实展示：HTTP 200 不等于提交成功，
+ * status=failed 按失败呈现；expired/replaced 是服务端记录的中间态，
+ * 不宣判失败也不诱导重投（与 zhixu-store 轮询口径一致）。
+ */
+function submissionFailureText(status: string, errorCode?: string): string | undefined {
+  if (status !== "failed") {
+    return undefined;
+  }
+  return `提交失败${errorCode ? `（${errorCode}）` : ""}，请核对阻断原因后重试。`;
+}
+
+function submissionPendingText(status: string): string {
+  if (status === "confirmed") {
+    return "提交已确认。";
+  }
+  if (status === "expired") {
+    return "提交记录已过期：仍在索引核对中，请勿重复提交，稍后刷新查看最终状态。";
+  }
+  if (status === "replaced") {
+    return "本次提交已被后续提交取代：仍在索引核对中，请勿重复提交。";
+  }
+  return "已提交，等待链上确认。";
+}
+
 export function TaskPluginHost({
   actions,
   task,
@@ -176,10 +219,12 @@ export function TaskPluginHost({
   const addOnManifest = addOnManifestForTask(task);
   const executorDisplay = taskExecutorDisplay(task);
   const signalContainer = signalContainerForTask(task);
+  const { taskScopeRef } = useTaskScopeGuard(task);
   const [state, setState] = useState<TaskPluginState>(() => createInitialTaskPluginState(task, participantWallet));
   const [phase, setPhase] = useState<RuntimePhase>("idle");
   const [prepared, setPrepared] = useState<PreparedTaskSubmit | undefined>();
   const [submission, setSubmission] = useState<ProductSubmission | undefined>();
+  const [submittedNotice, setSubmittedNotice] = useState<string | undefined>();
   const [error, setError] = useState<string | undefined>();
 
   useEffect(() => {
@@ -187,6 +232,7 @@ export function TaskPluginHost({
     setPhase("idle");
     setPrepared(undefined);
     setSubmission(undefined);
+    setSubmittedNotice(undefined);
     setError(undefined);
   }, [participantWallet, task]);
 
@@ -232,13 +278,20 @@ export function TaskPluginHost({
   }
 
   async function prepareSubmit() {
+    const requestScopeKey = taskScopeRef.current;
     setPhase("preparing");
     setError(undefined);
     try {
       const result = await onPrepareSubmit(task.taskId, plugin.buildPrepareSubmit(runtimeState));
+      if (taskScopeRef.current !== requestScopeKey) {
+        return;
+      }
       setPrepared(result);
       setPhase("prepared");
     } catch (caught) {
+      if (taskScopeRef.current !== requestScopeKey) {
+        return;
+      }
       setError(caught instanceof Error ? caught.message : "提交准备失败");
       setPhase("error");
     }
@@ -248,6 +301,7 @@ export function TaskPluginHost({
     if (!prepared) {
       return;
     }
+    const requestScopeKey = taskScopeRef.current;
     setPhase("submitting");
     setError(undefined);
     try {
@@ -255,11 +309,17 @@ export function TaskPluginHost({
         typedData: prepared.typedData,
         walletAddress: participantWallet ?? ""
       });
+      if (taskScopeRef.current !== requestScopeKey) {
+        return;
+      }
       const result = await onSubmitPrepared(task.taskId, {
         prepareId: prepared.prepareId,
         signature,
         walletAddress: participantWallet ?? ""
       });
+      if (taskScopeRef.current !== requestScopeKey) {
+        return;
+      }
       setSubmission(result);
       onProofReady({
         taskId: task.taskId,
@@ -275,9 +335,19 @@ export function TaskPluginHost({
         evidence: [],
         proofRows: result.proofRows
       });
+      const failure = submissionFailureText(result.status, result.errorCode);
+      if (failure) {
+        setError(failure);
+        setPhase("error");
+        return;
+      }
+      setSubmittedNotice(submissionPendingText(result.status));
       setPhase("submitted");
       onSubmitted?.();
     } catch (caught) {
+      if (taskScopeRef.current !== requestScopeKey) {
+        return;
+      }
       setError(caught instanceof Error ? caught.message : "签名提交失败");
       setPhase("error");
     }
@@ -439,7 +509,7 @@ export function TaskPluginHost({
           {phase === "submitted" ? (
             <p className="notice-line">
               <CheckCircle2 aria-hidden="true" />
-              <span>已提交，等待链上确认。</span>
+              <span>{submittedNotice ?? "已提交，等待链上确认。"}</span>
             </p>
           ) : null}
           {error ? (
@@ -506,14 +576,17 @@ function ManifestAddOnPanel({
   readonly onSubmitPrepared: (taskId: string, input: SubmitPreparedInput) => Promise<ProductSubmission>;
 }) {
   const [state, setState] = useState<AddOnManifestRuntimeState>(() => createInitialAddOnManifestState(task, participantWallet));
+  const { taskScopeRef } = useTaskScopeGuard(task);
   const [phase, setPhase] = useState<RuntimePhase>("idle");
   const [prepared, setPrepared] = useState<ManifestPreparedState | undefined>();
+  const [submittedNotice, setSubmittedNotice] = useState<string | undefined>();
   const [error, setError] = useState<string | undefined>();
 
   useEffect(() => {
     setState(createInitialAddOnManifestState(task, participantWallet));
     setPhase("idle");
     setPrepared(undefined);
+    setSubmittedNotice(undefined);
     setError(undefined);
   }, [manifest, participantWallet, task]);
 
@@ -562,20 +635,33 @@ function ManifestAddOnPanel({
     }
     setPhase("preparing");
     setError(undefined);
+    const requestScopeKey = taskScopeRef.current;
     try {
       const prepare = buildAddOnManifestPrepareInput(action, state);
       if (prepare.actionKind === "submit_signal") {
         const nextPrepared = await onPrepareSubmit(task.taskId, prepare.input);
+        if (taskScopeRef.current !== requestScopeKey) {
+          return;
+        }
         setPrepared({ actionKind: "submit_signal", actionId, actionLabel: action.label, input: prepare.input, prepared: nextPrepared });
       } else if (prepare.actionKind === "stage_executor_patch") {
         const nextPrepared = await actions.prepareStageExecutorPatch(task.taskId, prepare.input);
+        if (taskScopeRef.current !== requestScopeKey) {
+          return;
+        }
         setPrepared({ actionKind: "stage_executor_patch", actionId, actionLabel: action.label, input: prepare.input, prepared: nextPrepared });
       } else {
         const nextPrepared = await actions.prepareStageResourcePatch(task.taskId, prepare.input);
+        if (taskScopeRef.current !== requestScopeKey) {
+          return;
+        }
         setPrepared({ actionKind: "stage_resource_patch", actionId, actionLabel: action.label, input: prepare.input, prepared: nextPrepared });
       }
       setPhase("prepared");
     } catch (caught) {
+      if (taskScopeRef.current !== requestScopeKey) {
+        return;
+      }
       setError(caught instanceof Error ? caught.message : "附加能力准备失败");
       setPhase("error");
     }
@@ -585,19 +671,27 @@ function ManifestAddOnPanel({
     if (!prepared) {
       return;
     }
+    const requestScopeKey = taskScopeRef.current;
     setPhase("submitting");
     setError(undefined);
     try {
+      let result: ProductSubmission | StageExecutorPatchSubmissionDTO | StageResourcePatchSubmissionDTO;
       if (prepared.actionKind === "submit_signal") {
         const signature = await actions.signProductSubmit({
           typedData: prepared.prepared.typedData,
           walletAddress: prepared.input.walletAddress
         });
-        const result = await onSubmitPrepared(task.taskId, {
+        if (taskScopeRef.current !== requestScopeKey) {
+          return;
+        }
+        result = await onSubmitPrepared(task.taskId, {
           prepareId: prepared.prepared.prepareId,
           signature,
           walletAddress: prepared.input.walletAddress
         });
+        if (taskScopeRef.current !== requestScopeKey) {
+          return;
+        }
         onProofReady(manifestSubmissionProof({
           task,
           order,
@@ -611,7 +705,10 @@ function ManifestAddOnPanel({
           typedData: prepared.prepared.typedData,
           walletAddress: prepared.input.selectorWallet
         });
-        const result = await actions.submitStageExecutorPatch(task.taskId, {
+        if (taskScopeRef.current !== requestScopeKey) {
+          return;
+        }
+        result = await actions.submitStageExecutorPatch(task.taskId, {
           prepareId: prepared.prepared.prepareId,
           selectorWallet: prepared.input.selectorWallet,
           typedData: prepared.prepared.typedData,
@@ -620,6 +717,9 @@ function ManifestAddOnPanel({
           ...(prepared.input.mode ? { mode: prepared.input.mode } : {}),
           ...(prepared.input.previousExecutorWallet ? { previousExecutorWallet: prepared.input.previousExecutorWallet } : {})
         });
+        if (taskScopeRef.current !== requestScopeKey) {
+          return;
+        }
         onProofReady(manifestSubmissionProof({
           task,
           order,
@@ -633,13 +733,19 @@ function ManifestAddOnPanel({
           typedData: prepared.prepared.typedData,
           walletAddress: prepared.input.selectorWallet
         });
-        const result = await actions.submitStageResourcePatch(task.taskId, {
+        if (taskScopeRef.current !== requestScopeKey) {
+          return;
+        }
+        result = await actions.submitStageResourcePatch(task.taskId, {
           prepareId: prepared.prepared.prepareId,
           selectorWallet: prepared.input.selectorWallet,
           typedData: prepared.prepared.typedData,
           signature,
           patch: prepared.prepared
         });
+        if (taskScopeRef.current !== requestScopeKey) {
+          return;
+        }
         onProofReady(manifestSubmissionProof({
           task,
           order,
@@ -649,9 +755,19 @@ function ManifestAddOnPanel({
           result
         }));
       }
+      const failure = submissionFailureText(result.status, result.errorCode);
+      if (failure) {
+        setError(failure);
+        setPhase("error");
+        return;
+      }
+      setSubmittedNotice(submissionPendingText(result.status));
       setPhase("submitted");
       onSubmitted?.();
     } catch (caught) {
+      if (taskScopeRef.current !== requestScopeKey) {
+        return;
+      }
       setError(caught instanceof Error ? caught.message : "签名提交失败");
       setPhase("error");
     }
@@ -755,7 +871,7 @@ function ManifestAddOnPanel({
       {phase === "submitted" ? (
         <p className="notice-line">
           <CheckCircle2 aria-hidden="true" />
-          <span>已提交，等待链上确认。</span>
+          <span>{submittedNotice ?? "已提交，等待链上确认。"}</span>
         </p>
       ) : null}
       {error ? <p className="blocked-copy" role="alert">{error}</p> : null}
@@ -1004,6 +1120,7 @@ function ExecutorPatchPanel({
   readonly onSubmitted?: (() => void) | undefined;
 }) {
   const [draft, setDraft] = useState<ExecutorPatchDraftState>(() => initialExecutorPatchDraft(task, targets, participantWallet));
+  const { taskScopeRef } = useTaskScopeGuard(task);
   const [phase, setPhase] = useState<PatchPhase>("idle");
   const [prepared, setPrepared] = useState<PreparedStageExecutorPatchDTO | undefined>();
   const [submission, setSubmission] = useState<StageExecutorPatchSubmissionDTO | undefined>();
@@ -1079,6 +1196,7 @@ function ExecutorPatchPanel({
     if (!canPrepare) {
       return;
     }
+    const requestScopeKey = taskScopeRef.current;
     setPhase("preparing");
     setError(undefined);
     try {
@@ -1095,9 +1213,15 @@ function ExecutorPatchPanel({
         ...(draft.executorReference.trim() ? { executorReference: draft.executorReference.trim() } : {}),
         metadataURI: draft.metadataURI.trim()
       });
+      if (taskScopeRef.current !== requestScopeKey) {
+        return;
+      }
       setPrepared(nextPrepared);
       setPhase("prepared");
     } catch (caught) {
+      if (taskScopeRef.current !== requestScopeKey) {
+        return;
+      }
       setError(caught instanceof Error ? caught.message : "履约者选择准备失败");
       setPhase("error");
     }
@@ -1107,6 +1231,7 @@ function ExecutorPatchPanel({
     if (!prepared) {
       return;
     }
+    const requestScopeKey = taskScopeRef.current;
     setPhase("submitting");
     setError(undefined);
     try {
@@ -1114,6 +1239,9 @@ function ExecutorPatchPanel({
         typedData: prepared.typedData,
         walletAddress: draft.selectorWallet.trim()
       });
+      if (taskScopeRef.current !== requestScopeKey) {
+        return;
+      }
       const result = await actions.submitStageExecutorPatch(task.taskId, {
         prepareId: prepared.prepareId,
         selectorWallet: draft.selectorWallet.trim(),
@@ -1124,6 +1252,9 @@ function ExecutorPatchPanel({
         ...(draft.previousExecutor.trim() ? { previousExecutorWallet: draft.previousExecutor.trim() } : {}),
         ...(draft.previousExecutorSignature.trim() ? { previousExecutorSignature: draft.previousExecutorSignature.trim() } : {})
       });
+      if (taskScopeRef.current !== requestScopeKey) {
+        return;
+      }
       setSubmission(result);
       onProofReady({
         taskId: task.taskId,
@@ -1140,9 +1271,18 @@ function ExecutorPatchPanel({
         evidence: [],
         proofRows: result.proofRows
       });
+      const failure = submissionFailureText(result.status, result.errorCode);
+      if (failure) {
+        setError(failure);
+        setPhase("error");
+        return;
+      }
       setPhase("submitted");
       onSubmitted?.();
     } catch (caught) {
+      if (taskScopeRef.current !== requestScopeKey) {
+        return;
+      }
       setError(caught instanceof Error ? caught.message : "签名提交失败");
       setPhase("error");
     }
@@ -1428,6 +1568,7 @@ function ResourcePatchPanel({
   readonly onSubmitted?: (() => void) | undefined;
 }) {
   const [draft, setDraft] = useState<ResourcePatchDraftState>(() => initialResourcePatchDraft(task, targets, participantWallet));
+  const { taskScopeRef } = useTaskScopeGuard(task);
   const [phase, setPhase] = useState<PatchPhase>("idle");
   const [prepared, setPrepared] = useState<PreparedStageResourcePatchDTO | undefined>();
   const [submission, setSubmission] = useState<StageResourcePatchSubmissionDTO | undefined>();
@@ -1491,6 +1632,7 @@ function ResourcePatchPanel({
     if (!canPrepare) {
       return;
     }
+    const requestScopeKey = taskScopeRef.current;
     setPhase("preparing");
     setError(undefined);
     try {
@@ -1502,9 +1644,15 @@ function ResourcePatchPanel({
         manifestHash: draft.manifestHash.trim(),
         policyHash: draft.policyHash.trim()
       });
+      if (taskScopeRef.current !== requestScopeKey) {
+        return;
+      }
       setPrepared(nextPrepared);
       setPhase("prepared");
     } catch (caught) {
+      if (taskScopeRef.current !== requestScopeKey) {
+        return;
+      }
       setError(caught instanceof Error ? caught.message : "资源补充准备失败");
       setPhase("error");
     }
@@ -1514,6 +1662,7 @@ function ResourcePatchPanel({
     if (!prepared) {
       return;
     }
+    const requestScopeKey = taskScopeRef.current;
     setPhase("submitting");
     setError(undefined);
     try {
@@ -1521,6 +1670,9 @@ function ResourcePatchPanel({
         typedData: prepared.typedData,
         walletAddress: draft.selectorWallet.trim()
       });
+      if (taskScopeRef.current !== requestScopeKey) {
+        return;
+      }
       const result = await actions.submitStageResourcePatch(task.taskId, {
         prepareId: prepared.prepareId,
         selectorWallet: draft.selectorWallet.trim(),
@@ -1528,6 +1680,9 @@ function ResourcePatchPanel({
         signature,
         patch: prepared
       });
+      if (taskScopeRef.current !== requestScopeKey) {
+        return;
+      }
       setSubmission(result);
       onProofReady({
         taskId: task.taskId,
@@ -1544,9 +1699,18 @@ function ResourcePatchPanel({
         evidence: [],
         proofRows: result.proofRows
       });
+      const failure = submissionFailureText(result.status, result.errorCode);
+      if (failure) {
+        setError(failure);
+        setPhase("error");
+        return;
+      }
       setPhase("submitted");
       onSubmitted?.();
     } catch (caught) {
+      if (taskScopeRef.current !== requestScopeKey) {
+        return;
+      }
       setError(caught instanceof Error ? caught.message : "签名提交失败");
       setPhase("error");
     }
@@ -1790,7 +1954,7 @@ function initialResourcePatchDraft(
   return {
     selectorWallet: task.participantWallet ?? task.assigneeWallet ?? participantWallet ?? "",
     targetStageId: firstTarget ? selectableTargetStageId(firstTarget) : "",
-    resourceKey: resource?.resourceKey ?? "resource_1",
+    resourceKey: resource?.resourceKey ?? "",
     manifestURI: resource?.manifestURI ?? "",
     manifestHash: resource?.manifestHash ?? "",
     policyHash: resource?.policyHash ?? "",
@@ -1808,61 +1972,27 @@ interface TargetResourceOption {
 }
 
 function targetResourceOptions(task: ProductTaskDTO, target: SelectableTargetStageDTO | undefined): readonly TargetResourceOption[] {
-  const resources = target?.resourceRequirements ??
-    target?.effectiveResourceRequirements ??
-    target?.effectiveFileResources ??
-    target?.fileResources;
-  const entries = resourceEntries(resources);
-  if (entries.length > 0) {
-    return entries.map(([resourceKey, value]) => {
-      const objectValue = typeof value === "object" && value !== null ? value : undefined;
-      const key = cleanString(objectValue?.resourceKey) ?? cleanString(objectValue?.resourceId) ?? resourceKey;
+  const resources = target?.resourceRequirements ?? resourceRequirementsForTask(task);
+  if (resources.length > 0) {
+    return resources.map((resource) => {
+      const visibility = normalizeVisibility(resource.visibility ?? resource.accessPolicy?.visibility);
       return {
-        resourceKey: key,
-        label: cleanString(objectValue?.label) ?? cleanString(objectValue?.title) ?? cleanString(objectValue?.name) ?? key,
-        ...(cleanString(objectValue?.manifestURI) ? { manifestURI: cleanString(objectValue?.manifestURI) } : {}),
-        ...(cleanString(objectValue?.manifestHash) ? { manifestHash: cleanString(objectValue?.manifestHash) } : {}),
-        ...(cleanString(objectValue?.accessPolicy?.policyHash) ? { policyHash: cleanString(objectValue?.accessPolicy?.policyHash) } : {}),
-        ...(normalizeVisibility(objectValue?.visibility) ? { visibility: normalizeVisibility(objectValue?.visibility) } : {})
+        resourceKey: cleanString(resource.resourceKey) ?? resource.resourceId,
+        label: cleanString(resource.label) ?? resource.resourceId,
+        ...(cleanString(resource.manifestURI) ? { manifestURI: cleanString(resource.manifestURI) } : {}),
+        ...(cleanString(resource.manifestHash) ? { manifestHash: cleanString(resource.manifestHash) } : {}),
+        ...(cleanString(resource.accessPolicy?.policyHash)
+          ? { policyHash: cleanString(resource.accessPolicy?.policyHash) }
+          : {}),
+        ...(visibility ? { visibility } : {})
       };
     });
   }
-  const taskResources = resourceRequirementDisplays(task);
-  if (taskResources.length > 0) {
-    return taskResources.map((resource) => ({
-      resourceKey: resource.resourceId,
-      label: resource.label,
-      visibility: resource.visibility === "unknown" ? "protected" : resource.visibility
-    }));
-  }
-  return task.requiredEvidence.map((label, index) => ({
-    resourceKey: `resource_${index + 1}`,
-    label,
-    visibility: "protected"
+  return resourceRequirementDisplays(task).map((resource) => ({
+    resourceKey: resource.resourceId,
+    label: resource.label,
+    visibility: resource.visibility === "unknown" ? "protected" : resource.visibility
   }));
-}
-
-function resourceEntries(
-  resources: SelectableTargetStageDTO["resourceRequirements"] |
-    SelectableTargetStageDTO["effectiveResourceRequirements"] |
-    SelectableTargetStageDTO["effectiveFileResources"] |
-    SelectableTargetStageDTO["fileResources"] |
-    undefined
-): readonly (readonly [string, FileResourceHandleDTO | null | undefined])[] {
-  if (!resources) {
-    return [];
-  }
-  if (Array.isArray(resources)) {
-    return resources.map((resource, index) => [
-      typeof resource.resourceKey === "string" && resource.resourceKey.trim()
-        ? resource.resourceKey
-        : typeof resource.resourceId === "string" && resource.resourceId.trim()
-          ? resource.resourceId
-          : `resource_${index + 1}`,
-      resource
-    ] as const);
-  }
-  return Object.entries(resources);
 }
 
 function executorPatchPreviousExecutor(
@@ -1870,13 +2000,7 @@ function executorPatchPreviousExecutor(
   target: SelectableTargetStageDTO | undefined
 ): string {
   return cleanString(mode?.previousExecutor) ??
-    cleanString(mode?.previousExecutorWallet) ??
     cleanString(target?.previousExecutor) ??
-    cleanString(target?.previousExecutorWallet) ??
-    cleanString(target?.currentExecutorWallet) ??
-    cleanString(target?.executorOverlay?.previousExecutor) ??
-    cleanString(target?.executorOverlay?.previousExecutorWallet) ??
-    cleanString(target?.executorOverlay?.activeExecutorWallet) ??
     "";
 }
 
@@ -2022,8 +2146,12 @@ function executorPatchStatusText(
   if (submission?.status === "confirmed") {
     return `${label}已确认。`;
   }
-  if (submission?.status === "indexing") {
-    return "已提交，等待链上确认。";
+  // expired/replaced 是服务端记录的中间态：不宣判失败，也不诱导重投。
+  if (submission?.status === "expired") {
+    return `${label}提交记录已过期，仍在索引核对中；请勿重复提交，稍后刷新查看最终状态。`;
+  }
+  if (submission?.status === "replaced") {
+    return `${label}提交已被后续提交取代，仍在索引核对中；请勿重复提交。`;
   }
   return "已提交，等待链上确认。";
 }
@@ -2032,8 +2160,11 @@ function resourcePatchStatusText(submission: StageResourcePatchSubmissionDTO | u
   if (submission?.status === "confirmed") {
     return "资源补充已确认。";
   }
-  if (submission?.status === "indexing") {
-    return "已提交，等待链上确认。";
+  if (submission?.status === "expired") {
+    return "资源补充提交记录已过期，仍在索引核对中；请勿重复提交，稍后刷新查看最终状态。";
+  }
+  if (submission?.status === "replaced") {
+    return "资源补充提交已被后续提交取代，仍在索引核对中；请勿重复提交。";
   }
   return "已提交，等待链上确认。";
 }

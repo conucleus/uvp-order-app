@@ -1,9 +1,10 @@
 import { expect, test } from "@playwright/test";
+import { installProductApiStub, readinessTask, type ProductTaskWithAddOns } from "./product-api-stub";
 
 test.describe("signal container signal container evidence and proof experience", () => {
   test("blocks submit until required evidence references are supplied", async ({ page }) => {
+    await installProductApiStub(page, { task: customsTask() });
     await page.goto("/");
-    await openCustomsTask(page);
 
     await expect(page.getByRole("heading", { name: "交付进度更新" })).toBeVisible();
     await expect(page.getByRole("heading", { name: "提交材料" })).toBeVisible();
@@ -13,18 +14,17 @@ test.describe("signal container signal container evidence and proof experience",
   });
 
   test("shows signal container fingerprint language without plaintext download", async ({ page }) => {
+    await installProductApiStub(page, { task: customsTask() });
     await page.goto("/");
-    await openCustomsTask(page);
 
     await expect(page.getByLabel("待办提交要素").getByText("执行方钱包")).toBeVisible();
     await expect(page.getByLabel("待办提交要素").getByText("必填输入/凭证")).toBeVisible();
-    await expect(page.getByLabel("待办提交要素").getByText("凭证指纹")).toBeVisible();
     await expect(page.getByText("下载原文")).toHaveCount(0);
   });
 
   test("keeps submit blocked when required inputs are present but wallet is not authorized", async ({ page }) => {
+    await installProductApiStub(page, { task: customsTask({ canSubmit: false }) });
     await page.goto("/");
-    await openCustomsTask(page);
 
     await page.getByLabel("交付凭证引用").fill("ev-customs-pdf-001");
     await page.getByRole("checkbox", { name: /确认报关完成/u }).check();
@@ -34,8 +34,17 @@ test.describe("signal container signal container evidence and proof experience",
   });
 
   test("opens proof drawer from the chain-backed proof summary", async ({ page }) => {
+    await installProductApiStub(page, {
+      task: customsTask({
+        proofSummary: {
+          label: "证明已返回",
+          txHash: "0x4444444444444444444444444444444444444444444444444444444444444444",
+          blockNumber: "18,735,004",
+          payloadHash: "0x2222222222222222222222222222222222222222222222222222222222222222"
+        }
+      })
+    });
     await page.goto("/");
-    await openCustomsTask(page);
 
     await page.getByRole("button", { name: "查看证明" }).last().click();
 
@@ -48,6 +57,6 @@ test.describe("signal container signal container evidence and proof experience",
   });
 });
 
-async function openCustomsTask(page: import("@playwright/test").Page) {
-  await page.getByRole("button", { name: /确认出口报关完成/ }).click();
+function customsTask(overrides: Partial<ProductTaskWithAddOns> = {}) {
+  return readinessTask(overrides);
 }

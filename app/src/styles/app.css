@@ -160,11 +160,6 @@
   background: var(--app-green-soft);
 }
 
-.source-demo {
-  color: var(--app-amber);
-  background: var(--app-amber-soft);
-}
-
 .source-missing,
 .source-loading {
   color: var(--app-muted);

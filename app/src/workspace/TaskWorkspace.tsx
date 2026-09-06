@@ -69,7 +69,7 @@ export function TaskWorkspace({
                 order={selectedOrder}
                 participantWallet={participantWallet}
                 source={source}
-                task={source?.kind === "demo" ? demoEvidenceTask(selectedTask) : selectedTask}
+                task={selectedTask}
                 onProofReady={onProofReady}
               />
             )}
@@ -89,9 +89,4 @@ export function TaskWorkspace({
       </aside>
     </div>
   );
-}
-
-function demoEvidenceTask(task: ProductTaskDTO): ProductTaskDTO {
-  const { canSubmit: _canSubmit, ...rest } = task;
-  return rest;
 }
