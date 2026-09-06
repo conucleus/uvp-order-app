@@ -8,7 +8,7 @@ import {
   RefreshCw,
   ShieldCheck
 } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { ReactElement } from "react";
 import type { ProductOrderDTO, ProductTaskDTO } from "@uvp-eth/product-dto";
 import { createProductApiClient, type ProductApiClient, type ProductHomeData } from "./api/productApi";
@@ -78,6 +78,8 @@ function AppShell({ api }: { readonly api: ProductApiClient }) {
   const [route, setRoute] = useState<OrderAppRoute>(() => readOrderAppRoute());
   const [submissionProofs, setSubmissionProofs] = useState<Readonly<Record<string, TaskSubmissionProof>>>({});
   const [notificationsOpen, setNotificationsOpen] = useState(false);
+  // 慢网下旧响应不得覆盖新响应：所有 loadParticipantHome 调用共用单调序号。
+  const loadSequenceRef = useRef(0);
 
   useEffect(() => {
     function handleHashChange() {
@@ -88,26 +90,28 @@ function AppShell({ api }: { readonly api: ProductApiClient }) {
   }, []);
 
   useEffect(() => {
-    let cancelled = false;
+    loadParticipantHome();
+  }, [api, session]);
+
+  function loadParticipantHome() {
+    const sequence = loadSequenceRef.current + 1;
+    loadSequenceRef.current = sequence;
     setLoadState({ status: "loading" });
     void api.loadParticipantHome(participantQueryFromSession(session))
       .then((data) => {
-        if (!cancelled) {
+        if (loadSequenceRef.current === sequence) {
           setLoadState({ status: "ready", data });
         }
       })
       .catch((error) => {
-        if (!cancelled) {
+        if (loadSequenceRef.current === sequence) {
           setLoadState({
             status: "error",
             message: error instanceof Error ? error.message : "参与者服务加载失败"
           });
         }
       });
-    return () => {
-      cancelled = true;
-    };
-  }, [api, session]);
+  }
 
   const data = loadState.status === "ready" ? loadState.data : undefined;
   const selectedTask = useMemo(() => selectTask(data?.tasks ?? [], route.taskId), [data?.tasks, route.taskId]);
@@ -124,13 +128,7 @@ function AppShell({ api }: { readonly api: ProductApiClient }) {
   }
 
   function handleRefresh() {
-    setLoadState({ status: "loading" });
-    void api.loadParticipantHome(participantQueryFromSession(session))
-      .then((nextData) => setLoadState({ status: "ready", data: nextData }))
-      .catch((error) => setLoadState({
-        status: "error",
-        message: error instanceof Error ? error.message : "参与者服务加载失败"
-      }));
+    loadParticipantHome();
   }
 
   function handleOpenNotification(notification: OrderAppNotificationDTO) {

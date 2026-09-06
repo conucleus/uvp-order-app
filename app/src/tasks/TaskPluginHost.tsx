@@ -10,7 +10,7 @@ import {
   UserRound,
   WalletCards
 } from "lucide-react";
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import type {
   ChainProofRowDTO,
   ParticipantAddOnManifestComponentDTO,
@@ -159,6 +159,23 @@ type ManifestPreparedState =
       readonly prepared: PreparedStageResourcePatchDTO;
     };
 
+/**
+ * 任务作用域守卫（与 zhixu-store useTaskSubmissionFlow 同款）：
+ * 慢网下切换任务后，在途请求的续作不得把 A 任务的 prepareId/提交结果
+ * 写进 B 任务的界面，更不得以 B 的 taskId 提交 A 的 prepareId。
+ */
+function useTaskScopeGuard(task: ProductTaskDTO): {
+  readonly scopeKey: string;
+  readonly taskScopeRef: Readonly<{ readonly current: string }>;
+} {
+  const scopeKey = `${task.orderId}:${task.taskId}:${task.stageId}`;
+  const taskScopeRef = useRef(scopeKey);
+  useLayoutEffect(() => {
+    taskScopeRef.current = scopeKey;
+  }, [scopeKey]);
+  return { scopeKey, taskScopeRef };
+}
+
 export function TaskPluginHost({
   actions,
   task,
@@ -176,6 +193,7 @@ export function TaskPluginHost({
   const addOnManifest = addOnManifestForTask(task);
   const executorDisplay = taskExecutorDisplay(task);
   const signalContainer = signalContainerForTask(task);
+  const { taskScopeRef } = useTaskScopeGuard(task);
   const [state, setState] = useState<TaskPluginState>(() => createInitialTaskPluginState(task, participantWallet));
   const [phase, setPhase] = useState<RuntimePhase>("idle");
   const [prepared, setPrepared] = useState<PreparedTaskSubmit | undefined>();
@@ -232,13 +250,20 @@ export function TaskPluginHost({
   }
 
   async function prepareSubmit() {
+    const requestScopeKey = taskScopeRef.current;
     setPhase("preparing");
     setError(undefined);
     try {
       const result = await onPrepareSubmit(task.taskId, plugin.buildPrepareSubmit(runtimeState));
+      if (taskScopeRef.current !== requestScopeKey) {
+        return;
+      }
       setPrepared(result);
       setPhase("prepared");
     } catch (caught) {
+      if (taskScopeRef.current !== requestScopeKey) {
+        return;
+      }
       setError(caught instanceof Error ? caught.message : "提交准备失败");
       setPhase("error");
     }
@@ -248,6 +273,7 @@ export function TaskPluginHost({
     if (!prepared) {
       return;
     }
+    const requestScopeKey = taskScopeRef.current;
     setPhase("submitting");
     setError(undefined);
     try {
@@ -255,11 +281,17 @@ export function TaskPluginHost({
         typedData: prepared.typedData,
         walletAddress: participantWallet ?? ""
       });
+      if (taskScopeRef.current !== requestScopeKey) {
+        return;
+      }
       const result = await onSubmitPrepared(task.taskId, {
         prepareId: prepared.prepareId,
         signature,
         walletAddress: participantWallet ?? ""
       });
+      if (taskScopeRef.current !== requestScopeKey) {
+        return;
+      }
       setSubmission(result);
       onProofReady({
         taskId: task.taskId,
@@ -278,6 +310,9 @@ export function TaskPluginHost({
       setPhase("submitted");
       onSubmitted?.();
     } catch (caught) {
+      if (taskScopeRef.current !== requestScopeKey) {
+        return;
+      }
       setError(caught instanceof Error ? caught.message : "签名提交失败");
       setPhase("error");
     }
@@ -506,6 +541,7 @@ function ManifestAddOnPanel({
   readonly onSubmitPrepared: (taskId: string, input: SubmitPreparedInput) => Promise<ProductSubmission>;
 }) {
   const [state, setState] = useState<AddOnManifestRuntimeState>(() => createInitialAddOnManifestState(task, participantWallet));
+  const { taskScopeRef } = useTaskScopeGuard(task);
   const [phase, setPhase] = useState<RuntimePhase>("idle");
   const [prepared, setPrepared] = useState<ManifestPreparedState | undefined>();
   const [error, setError] = useState<string | undefined>();
@@ -562,20 +598,33 @@ function ManifestAddOnPanel({
     }
     setPhase("preparing");
     setError(undefined);
+    const requestScopeKey = taskScopeRef.current;
     try {
       const prepare = buildAddOnManifestPrepareInput(action, state);
       if (prepare.actionKind === "submit_signal") {
         const nextPrepared = await onPrepareSubmit(task.taskId, prepare.input);
+        if (taskScopeRef.current !== requestScopeKey) {
+          return;
+        }
         setPrepared({ actionKind: "submit_signal", actionId, actionLabel: action.label, input: prepare.input, prepared: nextPrepared });
       } else if (prepare.actionKind === "stage_executor_patch") {
         const nextPrepared = await actions.prepareStageExecutorPatch(task.taskId, prepare.input);
+        if (taskScopeRef.current !== requestScopeKey) {
+          return;
+        }
         setPrepared({ actionKind: "stage_executor_patch", actionId, actionLabel: action.label, input: prepare.input, prepared: nextPrepared });
       } else {
         const nextPrepared = await actions.prepareStageResourcePatch(task.taskId, prepare.input);
+        if (taskScopeRef.current !== requestScopeKey) {
+          return;
+        }
         setPrepared({ actionKind: "stage_resource_patch", actionId, actionLabel: action.label, input: prepare.input, prepared: nextPrepared });
       }
       setPhase("prepared");
     } catch (caught) {
+      if (taskScopeRef.current !== requestScopeKey) {
+        return;
+      }
       setError(caught instanceof Error ? caught.message : "附加能力准备失败");
       setPhase("error");
     }
@@ -585,6 +634,7 @@ function ManifestAddOnPanel({
     if (!prepared) {
       return;
     }
+    const requestScopeKey = taskScopeRef.current;
     setPhase("submitting");
     setError(undefined);
     try {
@@ -593,11 +643,17 @@ function ManifestAddOnPanel({
           typedData: prepared.prepared.typedData,
           walletAddress: prepared.input.walletAddress
         });
+        if (taskScopeRef.current !== requestScopeKey) {
+          return;
+        }
         const result = await onSubmitPrepared(task.taskId, {
           prepareId: prepared.prepared.prepareId,
           signature,
           walletAddress: prepared.input.walletAddress
         });
+        if (taskScopeRef.current !== requestScopeKey) {
+          return;
+        }
         onProofReady(manifestSubmissionProof({
           task,
           order,
@@ -611,6 +667,9 @@ function ManifestAddOnPanel({
           typedData: prepared.prepared.typedData,
           walletAddress: prepared.input.selectorWallet
         });
+        if (taskScopeRef.current !== requestScopeKey) {
+          return;
+        }
         const result = await actions.submitStageExecutorPatch(task.taskId, {
           prepareId: prepared.prepared.prepareId,
           selectorWallet: prepared.input.selectorWallet,
@@ -620,6 +679,9 @@ function ManifestAddOnPanel({
           ...(prepared.input.mode ? { mode: prepared.input.mode } : {}),
           ...(prepared.input.previousExecutorWallet ? { previousExecutorWallet: prepared.input.previousExecutorWallet } : {})
         });
+        if (taskScopeRef.current !== requestScopeKey) {
+          return;
+        }
         onProofReady(manifestSubmissionProof({
           task,
           order,
@@ -633,6 +695,9 @@ function ManifestAddOnPanel({
           typedData: prepared.prepared.typedData,
           walletAddress: prepared.input.selectorWallet
         });
+        if (taskScopeRef.current !== requestScopeKey) {
+          return;
+        }
         const result = await actions.submitStageResourcePatch(task.taskId, {
           prepareId: prepared.prepared.prepareId,
           selectorWallet: prepared.input.selectorWallet,
@@ -640,6 +705,9 @@ function ManifestAddOnPanel({
           signature,
           patch: prepared.prepared
         });
+        if (taskScopeRef.current !== requestScopeKey) {
+          return;
+        }
         onProofReady(manifestSubmissionProof({
           task,
           order,
@@ -652,6 +720,9 @@ function ManifestAddOnPanel({
       setPhase("submitted");
       onSubmitted?.();
     } catch (caught) {
+      if (taskScopeRef.current !== requestScopeKey) {
+        return;
+      }
       setError(caught instanceof Error ? caught.message : "签名提交失败");
       setPhase("error");
     }
@@ -1004,6 +1075,7 @@ function ExecutorPatchPanel({
   readonly onSubmitted?: (() => void) | undefined;
 }) {
   const [draft, setDraft] = useState<ExecutorPatchDraftState>(() => initialExecutorPatchDraft(task, targets, participantWallet));
+  const { taskScopeRef } = useTaskScopeGuard(task);
   const [phase, setPhase] = useState<PatchPhase>("idle");
   const [prepared, setPrepared] = useState<PreparedStageExecutorPatchDTO | undefined>();
   const [submission, setSubmission] = useState<StageExecutorPatchSubmissionDTO | undefined>();
@@ -1079,6 +1151,7 @@ function ExecutorPatchPanel({
     if (!canPrepare) {
       return;
     }
+    const requestScopeKey = taskScopeRef.current;
     setPhase("preparing");
     setError(undefined);
     try {
@@ -1095,9 +1168,15 @@ function ExecutorPatchPanel({
         ...(draft.executorReference.trim() ? { executorReference: draft.executorReference.trim() } : {}),
         metadataURI: draft.metadataURI.trim()
       });
+      if (taskScopeRef.current !== requestScopeKey) {
+        return;
+      }
       setPrepared(nextPrepared);
       setPhase("prepared");
     } catch (caught) {
+      if (taskScopeRef.current !== requestScopeKey) {
+        return;
+      }
       setError(caught instanceof Error ? caught.message : "履约者选择准备失败");
       setPhase("error");
     }
@@ -1107,6 +1186,7 @@ function ExecutorPatchPanel({
     if (!prepared) {
       return;
     }
+    const requestScopeKey = taskScopeRef.current;
     setPhase("submitting");
     setError(undefined);
     try {
@@ -1114,6 +1194,9 @@ function ExecutorPatchPanel({
         typedData: prepared.typedData,
         walletAddress: draft.selectorWallet.trim()
       });
+      if (taskScopeRef.current !== requestScopeKey) {
+        return;
+      }
       const result = await actions.submitStageExecutorPatch(task.taskId, {
         prepareId: prepared.prepareId,
         selectorWallet: draft.selectorWallet.trim(),
@@ -1124,6 +1207,9 @@ function ExecutorPatchPanel({
         ...(draft.previousExecutor.trim() ? { previousExecutorWallet: draft.previousExecutor.trim() } : {}),
         ...(draft.previousExecutorSignature.trim() ? { previousExecutorSignature: draft.previousExecutorSignature.trim() } : {})
       });
+      if (taskScopeRef.current !== requestScopeKey) {
+        return;
+      }
       setSubmission(result);
       onProofReady({
         taskId: task.taskId,
@@ -1143,6 +1229,9 @@ function ExecutorPatchPanel({
       setPhase("submitted");
       onSubmitted?.();
     } catch (caught) {
+      if (taskScopeRef.current !== requestScopeKey) {
+        return;
+      }
       setError(caught instanceof Error ? caught.message : "签名提交失败");
       setPhase("error");
     }
@@ -1428,6 +1517,7 @@ function ResourcePatchPanel({
   readonly onSubmitted?: (() => void) | undefined;
 }) {
   const [draft, setDraft] = useState<ResourcePatchDraftState>(() => initialResourcePatchDraft(task, targets, participantWallet));
+  const { taskScopeRef } = useTaskScopeGuard(task);
   const [phase, setPhase] = useState<PatchPhase>("idle");
   const [prepared, setPrepared] = useState<PreparedStageResourcePatchDTO | undefined>();
   const [submission, setSubmission] = useState<StageResourcePatchSubmissionDTO | undefined>();
@@ -1491,6 +1581,7 @@ function ResourcePatchPanel({
     if (!canPrepare) {
       return;
     }
+    const requestScopeKey = taskScopeRef.current;
     setPhase("preparing");
     setError(undefined);
     try {
@@ -1502,9 +1593,15 @@ function ResourcePatchPanel({
         manifestHash: draft.manifestHash.trim(),
         policyHash: draft.policyHash.trim()
       });
+      if (taskScopeRef.current !== requestScopeKey) {
+        return;
+      }
       setPrepared(nextPrepared);
       setPhase("prepared");
     } catch (caught) {
+      if (taskScopeRef.current !== requestScopeKey) {
+        return;
+      }
       setError(caught instanceof Error ? caught.message : "资源补充准备失败");
       setPhase("error");
     }
@@ -1514,6 +1611,7 @@ function ResourcePatchPanel({
     if (!prepared) {
       return;
     }
+    const requestScopeKey = taskScopeRef.current;
     setPhase("submitting");
     setError(undefined);
     try {
@@ -1521,6 +1619,9 @@ function ResourcePatchPanel({
         typedData: prepared.typedData,
         walletAddress: draft.selectorWallet.trim()
       });
+      if (taskScopeRef.current !== requestScopeKey) {
+        return;
+      }
       const result = await actions.submitStageResourcePatch(task.taskId, {
         prepareId: prepared.prepareId,
         selectorWallet: draft.selectorWallet.trim(),
@@ -1528,6 +1629,9 @@ function ResourcePatchPanel({
         signature,
         patch: prepared
       });
+      if (taskScopeRef.current !== requestScopeKey) {
+        return;
+      }
       setSubmission(result);
       onProofReady({
         taskId: task.taskId,
@@ -1547,6 +1651,9 @@ function ResourcePatchPanel({
       setPhase("submitted");
       onSubmitted?.();
     } catch (caught) {
+      if (taskScopeRef.current !== requestScopeKey) {
+        return;
+      }
       setError(caught instanceof Error ? caught.message : "签名提交失败");
       setPhase("error");
     }
