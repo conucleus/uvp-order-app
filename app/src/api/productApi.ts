@@ -60,6 +60,10 @@ export interface ParticipantQueryInput {
 export interface ProductApiClientOptions {
   readonly baseUrl?: string | undefined;
   readonly fetcher?: Fetcher | undefined;
+  /** 单个请求的超时毫秒数；默认对齐 store 工作台 6s 口径。 */
+  readonly timeoutMs?: number | undefined;
+  /** 证据上传等大载荷请求的超时毫秒数；默认 60s。 */
+  readonly uploadTimeoutMs?: number | undefined;
 }
 
 export interface AcceptInviteInput {
@@ -373,15 +377,24 @@ export function createProductApiClient(options: ProductApiClientOptions = {}): P
   }
   return new BrowserProductApiClient({
     baseUrl,
-    fetcher: options.fetcher ?? globalThis.fetch.bind(globalThis)
+    fetcher: options.fetcher ?? globalThis.fetch.bind(globalThis),
+    timeoutMs: options.timeoutMs ?? runtimeTimeoutMs("VITE_UVP_ORDER_APP_FETCH_TIMEOUT_MS") ?? DEFAULT_FETCH_TIMEOUT_MS,
+    uploadTimeoutMs: options.uploadTimeoutMs ?? runtimeTimeoutMs("VITE_UVP_ORDER_APP_UPLOAD_TIMEOUT_MS") ?? DEFAULT_UPLOAD_TIMEOUT_MS
   });
 }
+
+/** 与 zhixu-store 工作台同一超时口径：任一请求挂起不得让页面永久 loading。 */
+const DEFAULT_FETCH_TIMEOUT_MS = 6000;
+// 证据上传携带 base64 载荷（上限 10MB），超时单独放宽。
+const DEFAULT_UPLOAD_TIMEOUT_MS = 60_000;
 
 class BrowserProductApiClient implements ProductApiClient {
   constructor(
     private readonly config: {
       readonly baseUrl: string;
       readonly fetcher: Fetcher;
+      readonly timeoutMs: number;
+      readonly uploadTimeoutMs: number;
     }
   ) {}
 
@@ -492,7 +505,7 @@ class BrowserProductApiClient implements ProductApiClient {
   }
 
   async uploadEvidence(input: CreateEvidenceInput): Promise<EvidenceUploadResponseDTO> {
-    return await this.postJson<EvidenceUploadResponseDTO>("/product/evidence", input);
+    return await this.postJson<EvidenceUploadResponseDTO>("/product/evidence", input, this.config.uploadTimeoutMs);
   }
 
   async getEvidenceProof(evidenceId: string): Promise<EvidenceProofDTO> {
@@ -502,27 +515,62 @@ class BrowserProductApiClient implements ProductApiClient {
     return response.proof;
   }
 
-  private async getJson<TResponse>(pathname: string): Promise<TResponse> {
-    return await this.requestJson<TResponse>("GET", pathname);
+  private async getJson<TResponse>(pathname: string, timeoutMs: number = this.config.timeoutMs): Promise<TResponse> {
+    return await this.requestJson<TResponse>("GET", pathname, undefined, timeoutMs);
   }
 
-  private async postJson<TResponse>(pathname: string, body: unknown): Promise<TResponse> {
-    return await this.requestJson<TResponse>("POST", pathname, body);
+  private async postJson<TResponse>(pathname: string, body: unknown, timeoutMs: number = this.config.timeoutMs): Promise<TResponse> {
+    return await this.requestJson<TResponse>("POST", pathname, body, timeoutMs);
   }
 
-  private async requestJson<TResponse>(method: string, pathname: string, body?: unknown): Promise<TResponse> {
-    const response = await this.config.fetcher(joinUrl(this.config.baseUrl, pathname), {
-      method,
-      headers: {
-        "content-type": "application/json"
-      },
-      ...(body === undefined ? {} : { body: JSON.stringify(body) })
-    });
+  private async requestJson<TResponse>(method: string, pathname: string, body: unknown, timeoutMs: number): Promise<TResponse> {
+    const signal = AbortSignal.timeout(timeoutMs);
+    let response: Response;
+    try {
+      response = await withTimeout(this.config.fetcher(joinUrl(this.config.baseUrl, pathname), {
+        method,
+        headers: {
+          "content-type": "application/json"
+        },
+        ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+        signal
+      }), signal);
+    } catch (error) {
+      if (signal.aborted || (error instanceof DOMException && error.name === "TimeoutError")) {
+        throw new ProductApiError(0, pathname, `请求超时（${timeoutMs} 毫秒），请稍后重试。`);
+      }
+      throw error;
+    }
     if (!response.ok) {
       throw new ProductApiError(response.status, pathname, await responseText(response));
     }
     return await response.json() as TResponse;
   }
+}
+
+/**
+ * 真实 fetch 会随 signal 拒绝；注入的 fetcher 可能忽略 signal，
+ * 因此以 signal 为准再兜一层超时，保证超时口径不依赖 fetcher 实现。
+ */
+function withTimeout(promise: Promise<Response>, signal: AbortSignal): Promise<Response> {
+  return new Promise<Response>((resolve, reject) => {
+    const onAbort = () => reject(signal.reason ?? new DOMException("signal aborted", "TimeoutError"));
+    if (signal.aborted) {
+      onAbort();
+      return;
+    }
+    signal.addEventListener("abort", onAbort);
+    promise.then(
+      (value) => {
+        signal.removeEventListener("abort", onAbort);
+        resolve(value);
+      },
+      (error) => {
+        signal.removeEventListener("abort", onAbort);
+        reject(error);
+      }
+    );
+  });
 }
 
 function summarizeParticipantHome(
@@ -581,6 +629,13 @@ function normalizeBaseUrl(baseUrl: string | undefined): string | undefined {
 function runtimeEnv(): string | undefined {
   const env = import.meta.env as Readonly<Record<string, string | undefined>> | undefined;
   return env?.VITE_UVP_CHAIN_SERVICES_URL;
+}
+
+function runtimeTimeoutMs(name: string): number | undefined {
+  const env = import.meta.env as Readonly<Record<string, string | undefined>> | undefined;
+  const raw = env?.[name];
+  const parsed = raw ? Number(raw) : Number.NaN;
+  return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : undefined;
 }
 
 async function responseText(response: Response): Promise<string> {

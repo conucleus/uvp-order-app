@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import type { ProductOrderDTO, ProductTaskDTO } from "@uvp-eth/product-dto";
 import {
+  ProductApiError,
   createProductApiClient,
   type ProductApiClientOptions
 } from "./productApi.js";
@@ -52,6 +53,21 @@ describe("order app Product API boundary", () => {
     assert.throws(
       () => createProductApiClient({ baseUrl: undefined }),
       /VITE_UVP_CHAIN_SERVICES_URL/u
+    );
+  });
+
+  it("times out hanging requests instead of loading forever", async () => {
+    // 注入的 fetcher 永不 settle：超时必须独立于 fetcher 是否消费 signal。
+    const hangingFetcher: ProductApiClientOptions["fetcher"] = () => new Promise<Response>(() => {});
+    const client = createProductApiClient({
+      baseUrl: "http://service.local",
+      fetcher: hangingFetcher,
+      timeoutMs: 25
+    });
+
+    await assert.rejects(
+      client.getTask("task-1"),
+      (error) => error instanceof ProductApiError && error.status === 0 && /请求超时/u.test(error.message)
     );
   });
 
