@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { describe, it } from "node:test";
 import type { ProductOrderDTO, ProductTaskDTO } from "@uvp-eth/product-dto";
 import { demoOrder, demoTask } from "@uvp-eth/product-dto/fixtures";
@@ -336,13 +337,51 @@ describe("order app notification projection", () => {
 
     assert.ok(kinds.includes("submission_confirmed"));
     // submitted 只能产生等待索引的中间态通知，不得提前宣布"提交已确认"。
-    const submittedNotification = notifications.find((notification) => notification.notificationId.includes("submitted-task"));
-    assert.equal(submittedNotification?.kind, "signal_submitted");
+    const submittedNotification = notifications.find((notification) => notification.kind === "signal_submitted");
+    assert.equal(submittedNotification?.taskId, "submitted-task");
     assert.equal(submittedNotification?.severity, "info");
     assert.equal(submittedNotification?.eventLabel, "等待索引确认");
     assert.equal(kinds.filter((kind) => kind === "submission_confirmed").length, 1);
     assert.ok(kinds.includes("submission_failed"));
     assert.ok(kinds.includes("task_revoked"));
     assert.equal(notifications.every((notification) => notification.source === "local_projection"), true);
+  });
+
+  it("derives local notification ids in server-compatible bytes32 hex form", () => {
+    const readyTask = {
+      ...demoTask,
+      taskId: "ready-task",
+      status: "open"
+    } satisfies ProductTaskDTO;
+
+    const notifications = deriveOrderAppNotifications({
+      orders: [demoOrder],
+      tasks: [readyTask, { ...readyTask, taskId: "other-task" }],
+      now: new Date("2026-04-29T12:00:00.000Z")
+    });
+
+    // 服务端 read 回执端点按 bytes32 校验：本地 ID 必须是 0x+64hex，
+    // 否则接线即全 400（0216 S26）。
+    assert.equal(notifications.length, 2);
+    for (const notification of notifications) {
+      assert.match(notification.notificationId, /^0x[0-9a-f]{64}$/u);
+    }
+    // 派生格式钉死：sha256(["local", kind, ...parts].join("\0"))，
+    // 本地已读状态以该 ID 落 localStorage，格式漂移会让已读记录失配。
+    const expected = `0x${createHash("sha256")
+      .update(new TextEncoder().encode(["local", "task_ready", "ready-task"].join("\u0000")))
+      .digest("hex")}`;
+    assert.equal(notifications.find((notification) => notification.taskId === "ready-task")?.notificationId, expected);
+    assert.notEqual(
+      notifications[0]?.notificationId,
+      notifications[1]?.notificationId
+    );
+    // 同一任务重复派生保持确定性（dedupe/已读判定依赖稳定性）。
+    const rerun = deriveOrderAppNotifications({
+      orders: [demoOrder],
+      tasks: [readyTask],
+      now: new Date("2026-04-29T12:00:00.000Z")
+    });
+    assert.equal(rerun[0]?.notificationId, expected);
   });
 });
