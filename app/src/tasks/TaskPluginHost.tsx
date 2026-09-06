@@ -87,6 +87,7 @@ export interface ProductSubmission {
   readonly status: string;
   readonly txHash?: string;
   readonly blockNumber?: string;
+  readonly errorCode?: string;
   readonly proofRows: readonly ChainProofRowDTO[];
 }
 
@@ -176,6 +177,31 @@ function useTaskScopeGuard(task: ProductTaskDTO): {
   return { scopeKey, taskScopeRef };
 }
 
+/**
+ * 提交响应信封状态如实展示：HTTP 200 不等于提交成功，
+ * status=failed 按失败呈现；expired/replaced 是服务端记录的中间态，
+ * 不宣判失败也不诱导重投（与 zhixu-store 轮询口径一致）。
+ */
+function submissionFailureText(status: string, errorCode?: string): string | undefined {
+  if (status !== "failed") {
+    return undefined;
+  }
+  return `提交失败${errorCode ? `（${errorCode}）` : ""}，请核对阻断原因后重试。`;
+}
+
+function submissionPendingText(status: string): string {
+  if (status === "confirmed") {
+    return "提交已确认。";
+  }
+  if (status === "expired") {
+    return "提交记录已过期：仍在索引核对中，请勿重复提交，稍后刷新查看最终状态。";
+  }
+  if (status === "replaced") {
+    return "本次提交已被后续提交取代：仍在索引核对中，请勿重复提交。";
+  }
+  return "已提交，等待链上确认。";
+}
+
 export function TaskPluginHost({
   actions,
   task,
@@ -198,6 +224,7 @@ export function TaskPluginHost({
   const [phase, setPhase] = useState<RuntimePhase>("idle");
   const [prepared, setPrepared] = useState<PreparedTaskSubmit | undefined>();
   const [submission, setSubmission] = useState<ProductSubmission | undefined>();
+  const [submittedNotice, setSubmittedNotice] = useState<string | undefined>();
   const [error, setError] = useState<string | undefined>();
 
   useEffect(() => {
@@ -205,6 +232,7 @@ export function TaskPluginHost({
     setPhase("idle");
     setPrepared(undefined);
     setSubmission(undefined);
+    setSubmittedNotice(undefined);
     setError(undefined);
   }, [participantWallet, task]);
 
@@ -307,6 +335,13 @@ export function TaskPluginHost({
         evidence: [],
         proofRows: result.proofRows
       });
+      const failure = submissionFailureText(result.status, result.errorCode);
+      if (failure) {
+        setError(failure);
+        setPhase("error");
+        return;
+      }
+      setSubmittedNotice(submissionPendingText(result.status));
       setPhase("submitted");
       onSubmitted?.();
     } catch (caught) {
@@ -474,7 +509,7 @@ export function TaskPluginHost({
           {phase === "submitted" ? (
             <p className="notice-line">
               <CheckCircle2 aria-hidden="true" />
-              <span>已提交，等待链上确认。</span>
+              <span>{submittedNotice ?? "已提交，等待链上确认。"}</span>
             </p>
           ) : null}
           {error ? (
@@ -544,12 +579,14 @@ function ManifestAddOnPanel({
   const { taskScopeRef } = useTaskScopeGuard(task);
   const [phase, setPhase] = useState<RuntimePhase>("idle");
   const [prepared, setPrepared] = useState<ManifestPreparedState | undefined>();
+  const [submittedNotice, setSubmittedNotice] = useState<string | undefined>();
   const [error, setError] = useState<string | undefined>();
 
   useEffect(() => {
     setState(createInitialAddOnManifestState(task, participantWallet));
     setPhase("idle");
     setPrepared(undefined);
+    setSubmittedNotice(undefined);
     setError(undefined);
   }, [manifest, participantWallet, task]);
 
@@ -638,6 +675,7 @@ function ManifestAddOnPanel({
     setPhase("submitting");
     setError(undefined);
     try {
+      let result: ProductSubmission | StageExecutorPatchSubmissionDTO | StageResourcePatchSubmissionDTO;
       if (prepared.actionKind === "submit_signal") {
         const signature = await actions.signProductSubmit({
           typedData: prepared.prepared.typedData,
@@ -646,7 +684,7 @@ function ManifestAddOnPanel({
         if (taskScopeRef.current !== requestScopeKey) {
           return;
         }
-        const result = await onSubmitPrepared(task.taskId, {
+        result = await onSubmitPrepared(task.taskId, {
           prepareId: prepared.prepared.prepareId,
           signature,
           walletAddress: prepared.input.walletAddress
@@ -670,7 +708,7 @@ function ManifestAddOnPanel({
         if (taskScopeRef.current !== requestScopeKey) {
           return;
         }
-        const result = await actions.submitStageExecutorPatch(task.taskId, {
+        result = await actions.submitStageExecutorPatch(task.taskId, {
           prepareId: prepared.prepared.prepareId,
           selectorWallet: prepared.input.selectorWallet,
           typedData: prepared.prepared.typedData,
@@ -698,7 +736,7 @@ function ManifestAddOnPanel({
         if (taskScopeRef.current !== requestScopeKey) {
           return;
         }
-        const result = await actions.submitStageResourcePatch(task.taskId, {
+        result = await actions.submitStageResourcePatch(task.taskId, {
           prepareId: prepared.prepared.prepareId,
           selectorWallet: prepared.input.selectorWallet,
           typedData: prepared.prepared.typedData,
@@ -717,6 +755,13 @@ function ManifestAddOnPanel({
           result
         }));
       }
+      const failure = submissionFailureText(result.status, result.errorCode);
+      if (failure) {
+        setError(failure);
+        setPhase("error");
+        return;
+      }
+      setSubmittedNotice(submissionPendingText(result.status));
       setPhase("submitted");
       onSubmitted?.();
     } catch (caught) {
@@ -826,7 +871,7 @@ function ManifestAddOnPanel({
       {phase === "submitted" ? (
         <p className="notice-line">
           <CheckCircle2 aria-hidden="true" />
-          <span>已提交，等待链上确认。</span>
+          <span>{submittedNotice ?? "已提交，等待链上确认。"}</span>
         </p>
       ) : null}
       {error ? <p className="blocked-copy" role="alert">{error}</p> : null}
@@ -1226,6 +1271,12 @@ function ExecutorPatchPanel({
         evidence: [],
         proofRows: result.proofRows
       });
+      const failure = submissionFailureText(result.status, result.errorCode);
+      if (failure) {
+        setError(failure);
+        setPhase("error");
+        return;
+      }
       setPhase("submitted");
       onSubmitted?.();
     } catch (caught) {
@@ -1648,6 +1699,12 @@ function ResourcePatchPanel({
         evidence: [],
         proofRows: result.proofRows
       });
+      const failure = submissionFailureText(result.status, result.errorCode);
+      if (failure) {
+        setError(failure);
+        setPhase("error");
+        return;
+      }
       setPhase("submitted");
       onSubmitted?.();
     } catch (caught) {
@@ -2089,8 +2146,12 @@ function executorPatchStatusText(
   if (submission?.status === "confirmed") {
     return `${label}已确认。`;
   }
-  if (submission?.status === "indexing") {
-    return "已提交，等待链上确认。";
+  // expired/replaced 是服务端记录的中间态：不宣判失败，也不诱导重投。
+  if (submission?.status === "expired") {
+    return `${label}提交记录已过期，仍在索引核对中；请勿重复提交，稍后刷新查看最终状态。`;
+  }
+  if (submission?.status === "replaced") {
+    return `${label}提交已被后续提交取代，仍在索引核对中；请勿重复提交。`;
   }
   return "已提交，等待链上确认。";
 }
@@ -2099,8 +2160,11 @@ function resourcePatchStatusText(submission: StageResourcePatchSubmissionDTO | u
   if (submission?.status === "confirmed") {
     return "资源补充已确认。";
   }
-  if (submission?.status === "indexing") {
-    return "已提交，等待链上确认。";
+  if (submission?.status === "expired") {
+    return "资源补充提交记录已过期，仍在索引核对中；请勿重复提交，稍后刷新查看最终状态。";
+  }
+  if (submission?.status === "replaced") {
+    return "资源补充提交已被后续提交取代，仍在索引核对中；请勿重复提交。";
   }
   return "已提交，等待链上确认。";
 }
