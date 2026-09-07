@@ -41,8 +41,14 @@ export interface ProductApiClient {
   getOrder(orderId: string): Promise<ProductOrderDTO>;
   getTask(taskId: string, input?: ParticipantQueryInput): Promise<ProductTaskDTO>;
   previewInvite(inviteId: string, input?: ParticipantQueryInput): Promise<ProductInvitePreviewDTO>;
-  acceptInvite(inviteId: string, input: AcceptInviteInput): Promise<ProductInviteAcceptanceDTO>;
+  acceptInvite(inviteId: string, input: AcceptInviteInput, options?: InviteRequestOptions): Promise<ProductInviteAcceptanceDTO>;
   rejectInvite(inviteId: string, input?: RejectInviteInput): Promise<ProductInviteAcceptanceDTO>;
+  /**
+   * 服务端认可的钱包控制证明：/store/auth challenge → 钱包 personal_sign →
+   * verify 换取会话 token（x-uvp-store-session）。accept 邀请在非 local
+   * 运行时必须携带该会话；签名者由调用方注入。
+   */
+  proveWalletControl(input: { readonly address: string }): Promise<WalletSessionProof>;
   prepareTaskSubmit(taskId: string, input: PrepareTaskSubmitInput): Promise<PreparedTaskSubmitDTO>;
   submitTask(taskId: string, input: SubmitTaskInput): Promise<ProductSubmissionDTO>;
   prepareStageExecutorPatch(taskId: string, input: PrepareStageExecutorPatchInput): Promise<PreparedStageExecutorPatchDTO>;
@@ -57,6 +63,19 @@ export interface ParticipantQueryInput {
   readonly walletAddress?: string | undefined;
 }
 
+/** 钱包消息签名器：与会话 challenge 报文配套（personal_sign 口径）。 */
+export type PersonalSigner = (address: string, message: string) => Promise<string>;
+
+export interface WalletSessionProof {
+  readonly sessionToken: string;
+  readonly anchoredAddress: string;
+}
+
+export interface InviteRequestOptions {
+  /** 已证明控制的钱包会话 token；服务端以其锚定 accept 身份。 */
+  readonly sessionToken?: string | undefined;
+}
+
 export interface ProductApiClientOptions {
   readonly baseUrl?: string | undefined;
   readonly fetcher?: Fetcher | undefined;
@@ -64,15 +83,21 @@ export interface ProductApiClientOptions {
   readonly timeoutMs?: number | undefined;
   /** 证据上传等大载荷请求的超时毫秒数；默认 60s。 */
   readonly uploadTimeoutMs?: number | undefined;
+  /** proveWalletControl 用的钱包签名器；缺省直接抛错而不是静默走自报身份。 */
+  readonly personalSign?: PersonalSigner | undefined;
 }
 
 export interface AcceptInviteInput {
   readonly displayName: string;
   readonly walletAddress: string;
   readonly contact: string;
+  /** 一次性邀请令牌（创建邀请时下发，随邀请链接送达）；服务端做哈希比对。 */
+  readonly token: string;
 }
 
 export interface RejectInviteInput {
+  /** 一次性邀请令牌；reject 同样强制回呈。 */
+  readonly token: string;
   readonly displayName?: string | undefined;
   readonly contact?: string | undefined;
 }
@@ -382,7 +407,8 @@ export function createProductApiClient(options: ProductApiClientOptions = {}): P
     baseUrl,
     fetcher: options.fetcher ?? globalThis.fetch.bind(globalThis),
     timeoutMs: options.timeoutMs ?? runtimeTimeoutMs("VITE_UVP_ORDER_APP_FETCH_TIMEOUT_MS") ?? DEFAULT_FETCH_TIMEOUT_MS,
-    uploadTimeoutMs: options.uploadTimeoutMs ?? runtimeTimeoutMs("VITE_UVP_ORDER_APP_UPLOAD_TIMEOUT_MS") ?? DEFAULT_UPLOAD_TIMEOUT_MS
+    uploadTimeoutMs: options.uploadTimeoutMs ?? runtimeTimeoutMs("VITE_UVP_ORDER_APP_UPLOAD_TIMEOUT_MS") ?? DEFAULT_UPLOAD_TIMEOUT_MS,
+    personalSign: options.personalSign
   });
 }
 
@@ -398,6 +424,7 @@ class BrowserProductApiClient implements ProductApiClient {
       readonly fetcher: Fetcher;
       readonly timeoutMs: number;
       readonly uploadTimeoutMs: number;
+      readonly personalSign?: PersonalSigner | undefined;
     }
   ) {}
 
@@ -448,12 +475,52 @@ class BrowserProductApiClient implements ProductApiClient {
     );
   }
 
-  async acceptInvite(inviteId: string, input: AcceptInviteInput): Promise<ProductInviteAcceptanceDTO> {
-    return await this.postJson<ProductInviteAcceptanceDTO>(`/product/invites/${encodeURIComponent(inviteId)}/accept`, input);
+  async acceptInvite(
+    inviteId: string,
+    input: AcceptInviteInput,
+    options: InviteRequestOptions = {}
+  ): Promise<ProductInviteAcceptanceDTO> {
+    // 身份双通道（服务端 participant-identity 契约）：x-uvp-store-session
+    // 是锚定身份；query walletAddress 是声明值，与会话锚定不一致即 403，
+    // local 运行时才允许作为自报身份兜底。
+    return await this.requestJson<ProductInviteAcceptanceDTO>(
+      "POST",
+      participantPath(`/product/invites/${encodeURIComponent(inviteId)}/accept`, { walletAddress: input.walletAddress }),
+      input,
+      this.config.timeoutMs,
+      options.sessionToken ? { "x-uvp-store-session": options.sessionToken } : {}
+    );
   }
 
-  async rejectInvite(inviteId: string, input: RejectInviteInput = {}): Promise<ProductInviteAcceptanceDTO> {
+  async rejectInvite(inviteId: string, input: RejectInviteInput): Promise<ProductInviteAcceptanceDTO> {
     return await this.postJson<ProductInviteAcceptanceDTO>(`/product/invites/${encodeURIComponent(inviteId)}/reject`, input);
+  }
+
+  async proveWalletControl(input: { readonly address: string }): Promise<WalletSessionProof> {
+    const signer = this.config.personalSign;
+    if (!signer) {
+      throw new ProductApiError(
+        0,
+        "/store/auth/challenge",
+        "未配置钱包签名器：接受邀请需要先连接浏览器钱包完成会话签名。"
+      );
+    }
+    const address = input.address.trim();
+    if (!/^0x[0-9a-fA-F]{40}$/u.test(address)) {
+      throw new ProductApiError(0, "/store/auth/challenge", "钱包地址格式不合法，无法发起会话签名。");
+    }
+    const challenge = await this.postJson<{
+      readonly challenge: { readonly nonce: string; readonly message: string; readonly address: string };
+    }>("/store/auth/challenge", { address, intent: "login" });
+    const signature = await signer(address, challenge.challenge.message);
+    const verified = await this.postJson<{
+      readonly token: string;
+      readonly session: { readonly anchoredAddress?: string | undefined };
+    }>("/store/auth/verify", { nonce: challenge.challenge.nonce, signature });
+    return {
+      sessionToken: verified.token,
+      anchoredAddress: verified.session.anchoredAddress ?? address
+    };
   }
 
   async prepareTaskSubmit(taskId: string, input: PrepareTaskSubmitInput): Promise<PreparedTaskSubmitDTO> {
@@ -526,14 +593,21 @@ class BrowserProductApiClient implements ProductApiClient {
     return await this.requestJson<TResponse>("POST", pathname, body, timeoutMs);
   }
 
-  private async requestJson<TResponse>(method: string, pathname: string, body: unknown, timeoutMs: number): Promise<TResponse> {
+  private async requestJson<TResponse>(
+    method: string,
+    pathname: string,
+    body: unknown,
+    timeoutMs: number,
+    extraHeaders: Readonly<Record<string, string>> = {}
+  ): Promise<TResponse> {
     const signal = AbortSignal.timeout(timeoutMs);
     let response: Response;
     try {
       response = await withTimeout(this.config.fetcher(joinUrl(this.config.baseUrl, pathname), {
         method,
         headers: {
-          "content-type": "application/json"
+          "content-type": "application/json",
+          ...extraHeaders
         },
         ...(body === undefined ? {} : { body: JSON.stringify(body) }),
         signal

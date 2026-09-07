@@ -633,6 +633,11 @@ export async function installProductApiStub(page: Page, options: StubOptions = {
     await page.addInitScript(({ signature, reject }) => {
       const provider = {
         request: async ({ method }: { readonly method: string; readonly params?: readonly unknown[] }) => {
+          // 桩 typedData 的 domain.chainId=31337（0x7a69）：签名前的
+          // eth_chainId 域核对需要钱包应答当前链。
+          if (method === "eth_chainId") {
+            return "0x7a69";
+          }
           if (method !== "eth_signTypedData_v4") {
             throw new Error(`unsupported wallet method ${method}`);
           }

@@ -14,6 +14,8 @@ type InviteLoadState =
 
 interface InviteOnboardingProps {
   readonly inviteId: string;
+  /** 一次性邀请令牌（创建邀请时下发、随邀请链接送达）；accept/reject 必须回呈。 */
+  readonly inviteToken?: string | undefined;
   readonly actions: OrderAppActions;
   readonly session: ParticipantSession;
   readonly onAccepted: () => void;
@@ -26,7 +28,7 @@ function isEvmWalletAddress(value: string): boolean {
   return /^0x[0-9a-fA-F]{40}$/u.test(value);
 }
 
-export function InviteOnboarding({ inviteId, actions, session, onAccepted, onDismiss }: InviteOnboardingProps) {
+export function InviteOnboarding({ inviteId, inviteToken, actions, session, onAccepted, onDismiss }: InviteOnboardingProps) {
   const [walletAddress, setWalletAddress] = useState(session.walletAddress ?? "");
   const [displayName, setDisplayName] = useState("");
   const [contact, setContact] = useState("");
@@ -73,20 +75,42 @@ export function InviteOnboarding({ inviteId, actions, session, onAccepted, onDis
 
   const invite = loadState.status === "ready" || loadState.status === "accepted" ? loadState.invite : undefined;
   const walletFormatOk = isEvmWalletAddress(walletAddress.trim());
+  const tokenMissing = !inviteToken;
   const canAccept = Boolean(
-    invite?.acceptance?.canAccept && walletFormatOk && displayName.trim() && contact.trim()
+    invite?.acceptance?.canAccept && walletFormatOk && displayName.trim() && contact.trim() && !tokenMissing
   );
+
+  /**
+   * 服务端 accept 契约要求"已证明钱包控制的会话"。有浏览器钱包时走
+   * 服务端会话（challenge → personal_sign → verify）；没有钱包时退化为
+   * query 自报（服务端仅 local 运行时接受，其余环境会返回 401 并如实展示）。
+   */
+  async function ensureWalletSessionProof(wallet: string): Promise<{ readonly sessionToken?: string | undefined }> {
+    if (!actions.hasInjectedWallet()) {
+      return {};
+    }
+    const connected = await actions.requestWalletAddress();
+    if (connected.toLowerCase() !== wallet.toLowerCase()) {
+      throw new Error("浏览器钱包当前连接的地址与绑定钱包不一致；请先在钱包中切换到该地址。");
+    }
+    const proof = await actions.proveWalletControl({ address: wallet });
+    return { sessionToken: proof.sessionToken };
+  }
 
   function handleAccept() {
     if (!invite || !canAccept) {
       return;
     }
     setLoadState({ status: "loading" });
-    void actions.acceptInvite(inviteId, {
-      displayName: displayName.trim(),
-      walletAddress: walletAddress.trim(),
-      contact: contact.trim()
-    })
+    void (async () => {
+      const options = await ensureWalletSessionProof(walletAddress.trim());
+      return actions.acceptInvite(inviteId, {
+        displayName: displayName.trim(),
+        walletAddress: walletAddress.trim(),
+        contact: contact.trim(),
+        token: inviteToken ?? ""
+      }, options);
+    })()
       .then(() => {
         setLoadState({ status: "accepted", invite });
         onAccepted();
@@ -102,6 +126,7 @@ export function InviteOnboarding({ inviteId, actions, session, onAccepted, onDis
   function handleReject() {
     setLoadState({ status: "loading" });
     void actions.rejectInvite(inviteId, {
+      token: inviteToken ?? "",
       displayName: displayName.trim() || undefined,
       contact: contact.trim() || undefined
     })
@@ -189,16 +214,25 @@ export function InviteOnboarding({ inviteId, actions, session, onAccepted, onDis
           <input value={contact} onChange={(event) => setContact(event.target.value)} />
         </label>
         <label>
-          <span>签名钱包</span>
+          <span>绑定钱包</span>
           <input
-            aria-label="签名钱包"
+            aria-label="绑定钱包"
             value={walletAddress}
             onChange={(event) => setWalletAddress(event.target.value)}
           />
           {walletAddress.trim() && !walletFormatOk ? (
             <small className="blocked-copy">请填写 0x 开头的 42 位钱包地址；格式合法后才会校验绑定状态。</small>
-          ) : null}
+          ) : (
+            <small>
+              该地址将绑定到角色并接收待办；检测到浏览器钱包时，接受前需用该钱包完成一次会话签名以证明控制权。
+            </small>
+          )}
         </label>
+        {tokenMissing ? (
+          <p className="blocked-copy" role="alert">
+            邀请链接缺少一次性令牌（inviteToken）：请使用邀请方提供的完整链接打开本页，否则无法接受或拒绝邀请。
+          </p>
+        ) : null}
         <div className="invite-actions">
           <button className="quiet-button" type="button" onClick={handleReject}>拒绝</button>
           <button className="primary-button" type="button" disabled={!canAccept} onClick={handleAccept}>接受角色</button>

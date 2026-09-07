@@ -134,7 +134,6 @@ interface ResourcePatchDraftState {
   readonly manifestURI: string;
   readonly manifestHash: string;
   readonly policyHash: string;
-  readonly visibility: "public" | "protected" | "private";
 }
 
 type ManifestPreparedState =
@@ -178,11 +177,18 @@ function useTaskScopeGuard(task: ProductTaskDTO): {
 }
 
 /**
- * 提交响应信封状态如实展示：HTTP 200 不等于提交成功，
- * status=failed 按失败呈现；expired/replaced 是服务端记录的中间态，
- * 不宣判失败也不诱导重投（与 zhixu-store 轮询口径一致）。
+ * 提交响应信封状态如实展示：HTTP 200 不等于提交成功。服务端把
+ * failed/expired/replaced 都记录为不可重投的终态（expired 未生效、
+ * replaced 以最新提交为准），按失败如实呈现并引导重新 prepare，
+ * 与 zhixu-store 轮询判级（terminal_failure）同口径。
  */
 function submissionFailureText(status: string, errorCode?: string): string | undefined {
+  if (status === "expired") {
+    return "提交已过期未生效（终态），请重新准备提交。";
+  }
+  if (status === "replaced") {
+    return "本次提交已被后续提交取代（终态）：请以最新提交记录为准，勿盲目重投。";
+  }
   if (status !== "failed") {
     return undefined;
   }
@@ -192,12 +198,6 @@ function submissionFailureText(status: string, errorCode?: string): string | und
 function submissionPendingText(status: string): string {
   if (status === "confirmed") {
     return "提交已确认。";
-  }
-  if (status === "expired") {
-    return "提交记录已过期：仍在索引核对中，请勿重复提交，稍后刷新查看最终状态。";
-  }
-  if (status === "replaced") {
-    return "本次提交已被后续提交取代：仍在索引核对中，请勿重复提交。";
   }
   return "已提交，等待链上确认。";
 }
@@ -307,7 +307,11 @@ export function TaskPluginHost({
     try {
       const signature = await actions.signProductSubmit({
         typedData: prepared.typedData,
-        walletAddress: participantWallet ?? ""
+        walletAddress: participantWallet ?? "",
+        // 域校验预期：与任务投影携带的状态机地址交叉核对，防被攻陷 BFF 换域。
+        ...(task.stateMachineAddress
+          ? { expected: { verifyingContract: task.stateMachineAddress } }
+          : {})
       });
       if (taskScopeRef.current !== requestScopeKey) {
         return;
@@ -679,7 +683,10 @@ function ManifestAddOnPanel({
       if (prepared.actionKind === "submit_signal") {
         const signature = await actions.signProductSubmit({
           typedData: prepared.prepared.typedData,
-          walletAddress: prepared.input.walletAddress
+          walletAddress: prepared.input.walletAddress,
+          ...(task.stateMachineAddress
+            ? { expected: { verifyingContract: task.stateMachineAddress } }
+            : {})
         });
         if (taskScopeRef.current !== requestScopeKey) {
           return;
@@ -703,7 +710,10 @@ function ManifestAddOnPanel({
       } else if (prepared.actionKind === "stage_executor_patch") {
         const signature = await actions.signTypedData({
           typedData: prepared.prepared.typedData,
-          walletAddress: prepared.input.selectorWallet
+          walletAddress: prepared.input.selectorWallet,
+          ...(task.stateMachineAddress
+            ? { expected: { verifyingContract: task.stateMachineAddress } }
+            : {})
         });
         if (taskScopeRef.current !== requestScopeKey) {
           return;
@@ -731,7 +741,10 @@ function ManifestAddOnPanel({
       } else {
         const signature = await actions.signTypedData({
           typedData: prepared.prepared.typedData,
-          walletAddress: prepared.input.selectorWallet
+          walletAddress: prepared.input.selectorWallet,
+          ...(task.stateMachineAddress
+            ? { expected: { verifyingContract: task.stateMachineAddress } }
+            : {})
         });
         if (taskScopeRef.current !== requestScopeKey) {
           return;
@@ -1237,7 +1250,10 @@ function ExecutorPatchPanel({
     try {
       const signature = await actions.signTypedData({
         typedData: prepared.typedData,
-        walletAddress: draft.selectorWallet.trim()
+        walletAddress: draft.selectorWallet.trim(),
+        ...(task.stateMachineAddress
+          ? { expected: { verifyingContract: task.stateMachineAddress } }
+          : {})
       });
       if (taskScopeRef.current !== requestScopeKey) {
         return;
@@ -1612,8 +1628,7 @@ function ResourcePatchPanel({
       resourceKey: next.resourceKey,
       manifestURI: next.manifestURI,
       manifestHash: next.manifestHash,
-      policyHash: next.policyHash,
-      visibility: next.visibility
+      policyHash: next.policyHash
     });
   }
 
@@ -1623,8 +1638,7 @@ function ResourcePatchPanel({
       resourceKey,
       ...(option?.manifestURI ? { manifestURI: option.manifestURI } : {}),
       ...(option?.manifestHash ? { manifestHash: option.manifestHash } : {}),
-      ...(option?.policyHash ? { policyHash: option.policyHash } : {}),
-      ...(option?.visibility ? { visibility: option.visibility } : {})
+      ...(option?.policyHash ? { policyHash: option.policyHash } : {})
     });
   }
 
@@ -1668,7 +1682,10 @@ function ResourcePatchPanel({
     try {
       const signature = await actions.signTypedData({
         typedData: prepared.typedData,
-        walletAddress: draft.selectorWallet.trim()
+        walletAddress: draft.selectorWallet.trim(),
+        ...(task.stateMachineAddress
+          ? { expected: { verifyingContract: task.stateMachineAddress } }
+          : {})
       });
       if (taskScopeRef.current !== requestScopeKey) {
         return;
@@ -1793,21 +1810,6 @@ function ResourcePatchPanel({
           </label>
         )}
 
-        <label className="plugin-field">
-          <span>
-            可见性
-            <small>资源权限</small>
-          </span>
-          <select
-            aria-label="可见性"
-            onChange={(event) => updateDraft({ visibility: event.currentTarget.value as ResourcePatchDraftState["visibility"] })}
-            value={draft.visibility}
-          >
-            <option value="protected">受保护</option>
-            <option value="private">私密</option>
-            <option value="public">公开</option>
-          </select>
-        </label>
       </div>
 
       <label className="plugin-field">
@@ -1957,8 +1959,7 @@ function initialResourcePatchDraft(
     resourceKey: resource?.resourceKey ?? "",
     manifestURI: resource?.manifestURI ?? "",
     manifestHash: resource?.manifestHash ?? "",
-    policyHash: resource?.policyHash ?? "",
-    visibility: resource?.visibility ?? "protected"
+    policyHash: resource?.policyHash ?? ""
   };
 }
 
@@ -1968,30 +1969,26 @@ interface TargetResourceOption {
   readonly manifestURI?: string | undefined;
   readonly manifestHash?: string | undefined;
   readonly policyHash?: string | undefined;
-  readonly visibility?: "public" | "protected" | "private" | undefined;
 }
 
 function targetResourceOptions(task: ProductTaskDTO, target: SelectableTargetStageDTO | undefined): readonly TargetResourceOption[] {
   const resources = target?.resourceRequirements ?? resourceRequirementsForTask(task);
   if (resources.length > 0) {
-    return resources.map((resource) => {
-      const visibility = normalizeVisibility(resource.visibility ?? resource.accessPolicy?.visibility);
-      return {
-        resourceKey: cleanString(resource.resourceKey) ?? resource.resourceId,
-        label: cleanString(resource.label) ?? resource.resourceId,
-        ...(cleanString(resource.manifestURI) ? { manifestURI: cleanString(resource.manifestURI) } : {}),
-        ...(cleanString(resource.manifestHash) ? { manifestHash: cleanString(resource.manifestHash) } : {}),
-        ...(cleanString(resource.accessPolicy?.policyHash)
-          ? { policyHash: cleanString(resource.accessPolicy?.policyHash) }
-          : {}),
-        ...(visibility ? { visibility } : {})
-      };
-    });
+    return resources.map((resource) => ({
+      resourceKey: cleanString(resource.resourceKey) ?? resource.resourceId,
+      label: cleanString(resource.label) ?? resource.resourceId,
+      ...(cleanString(resource.manifestURI) ? { manifestURI: cleanString(resource.manifestURI) } : {}),
+      ...(cleanString(resource.manifestHash) ? { manifestHash: cleanString(resource.manifestHash) } : {}),
+      ...(cleanString(resource.accessPolicy?.policyHash)
+        ? { policyHash: cleanString(resource.accessPolicy?.policyHash) }
+        : {})
+    }));
   }
+  // 可见性属于链下资源清单（addOnManifestRuntime 同口径），不进 prepare 请求，
+  // 也不在补丁表单里提供会误导的"可见性"选择。
   return resourceRequirementDisplays(task).map((resource) => ({
     resourceKey: resource.resourceId,
-    label: resource.label,
-    visibility: resource.visibility === "unknown" ? "protected" : resource.visibility
+    label: resource.label
   }));
 }
 
@@ -2146,12 +2143,13 @@ function executorPatchStatusText(
   if (submission?.status === "confirmed") {
     return `${label}已确认。`;
   }
-  // expired/replaced 是服务端记录的中间态：不宣判失败，也不诱导重投。
+  // expired/replaced 是服务端记录的终态（未生效/被取代，不进索引）：
+  // 如实宣判并引导重新准备，不用"仍在索引核对中"的假等待话术。
   if (submission?.status === "expired") {
-    return `${label}提交记录已过期，仍在索引核对中；请勿重复提交，稍后刷新查看最终状态。`;
+    return `${label}提交已过期未生效（终态）；请重新准备提交。`;
   }
   if (submission?.status === "replaced") {
-    return `${label}提交已被后续提交取代，仍在索引核对中；请勿重复提交。`;
+    return `${label}提交已被后续提交取代（终态）；请以最新提交记录为准，勿盲目重投。`;
   }
   return "已提交，等待链上确认。";
 }
@@ -2161,10 +2159,10 @@ function resourcePatchStatusText(submission: StageResourcePatchSubmissionDTO | u
     return "资源补充已确认。";
   }
   if (submission?.status === "expired") {
-    return "资源补充提交记录已过期，仍在索引核对中；请勿重复提交，稍后刷新查看最终状态。";
+    return "资源补充提交已过期未生效（终态）；请重新准备提交。";
   }
   if (submission?.status === "replaced") {
-    return "资源补充提交已被后续提交取代，仍在索引核对中；请勿重复提交。";
+    return "资源补充提交已被后续提交取代（终态）；请以最新提交记录为准，勿盲目重投。";
   }
   return "已提交，等待链上确认。";
 }
@@ -2180,8 +2178,4 @@ function isContentAddressedReference(value: string): boolean {
     trimmed.startsWith("cid:") ||
     trimmed.startsWith("bafy") ||
     trimmed.startsWith("urn:");
-}
-
-function normalizeVisibility(value: unknown): "public" | "protected" | "private" | undefined {
-  return value === "public" || value === "protected" || value === "private" ? value : undefined;
 }

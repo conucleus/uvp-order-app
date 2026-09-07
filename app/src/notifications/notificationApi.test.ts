@@ -157,6 +157,42 @@ describe("order app notification read receipts", () => {
       uninstallMemoryWindow();
     }
   });
+
+  it("marks read without unhandled rejection when storage is disabled or full", async () => {
+    // 禁存储/配额满：写路径抛 QuotaExceededError 时不得让已读点击整体失败。
+    const backing = new Map<string, string>();
+    (globalThis as { window?: unknown }).window = {
+      localStorage: {
+        getItem: (key: string) => (backing.has(key) ? backing.get(key)! : null),
+        setItem: () => {
+          throw new DOMException("quota exceeded", "QuotaExceededError");
+        },
+        removeItem: (key: string) => {
+          backing.delete(key);
+        }
+      }
+    };
+    const originalWarn = console.warn;
+    const warnings: unknown[][] = [];
+    console.warn = (...args: unknown[]) => {
+      warnings.push(args);
+    };
+    try {
+      const result = await markOrderAppNotificationRead(
+        readReceiptTarget,
+        realSourceData,
+        session,
+        async () => new Response("{}", { status: 200 })
+      );
+
+      assert.equal(result.readStatus, "read");
+      assert.equal(result.syncPending, undefined);
+      assert.equal(warnings.some((args) => String(args[0]).includes("not persistable")), true);
+    } finally {
+      console.warn = originalWarn;
+      uninstallMemoryWindow();
+    }
+  });
 });
 
 describe("order app notification loading", () => {

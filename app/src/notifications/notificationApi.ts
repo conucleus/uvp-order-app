@@ -11,6 +11,9 @@ import type {
 
 type Fetcher = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
 
+/** 与同仓 productApi 相同的超时口径：通知请求挂起不得让面板永久 loading。 */
+const NOTIFICATION_FETCH_TIMEOUT_MS = 6000;
+
 interface ApiNotificationResponse {
   readonly notifications?: readonly Partial<OrderAppNotificationDTO>[];
   readonly unreadCount?: number;
@@ -36,7 +39,8 @@ export async function loadOrderAppNotifications(
       method: "GET",
       headers: {
         "content-type": "application/json"
-      }
+      },
+      signal: AbortSignal.timeout(NOTIFICATION_FETCH_TIMEOUT_MS)
     });
     if (!response.ok) {
       throw new Error(await responseText(response));
@@ -141,7 +145,8 @@ function postReadReceipt(
       },
       body: JSON.stringify({
         ...(session.walletAddress ? { walletAddress: session.walletAddress } : {})
-      })
+      }),
+      signal: AbortSignal.timeout(NOTIFICATION_FETCH_TIMEOUT_MS)
     }
   );
 }
@@ -391,7 +396,22 @@ function rememberReadNotification(session: ParticipantSession, notificationId: s
   const key = localReadStateKey(session);
   const next = Object.fromEntries(readNotificationIds(session));
   next[notificationId] = readAt;
-  window.localStorage.setItem(key, JSON.stringify(next));
+  // 写路径与读路径同样防护：该函数在调用方的 try 之外执行，禁存储/配额满
+  // 时抛出会变成未处理 rejection，并让已读点击整体静默失败。
+  tryWriteLocalStorage(key, JSON.stringify(next));
+}
+
+/**
+ * localStorage 写入永不抛出：读路径（readNotificationIds/pendingReadEntries）
+ * 已有防护，写路径保持同一口径——本地已读只是缓存，写不进去降级为
+ * "本次会话内已读"，不阻断已读回执的发送。
+ */
+function tryWriteLocalStorage(key: string, value: string): void {
+  try {
+    window.localStorage.setItem(key, value);
+  } catch (error) {
+    console.warn(`notification read state is not persistable (${key}); continuing in-memory`, error);
+  }
 }
 
 function readNotificationIds(session: ParticipantSession): ReadonlyMap<string, string> {
@@ -436,7 +456,8 @@ function enqueuePendingRead(session: ParticipantSession, notificationId: string,
   }
   const next = Object.fromEntries(pendingReadEntries(session));
   next[notificationId] = readAt;
-  window.localStorage.setItem(pendingReadStateKey(session), JSON.stringify(next));
+  // 该函数在失败回补路径（catch 分支）里调用：写失败不得顶替原返回值。
+  tryWriteLocalStorage(pendingReadStateKey(session), JSON.stringify(next));
 }
 
 function clearPendingRead(session: ParticipantSession, notificationId: string): void {
@@ -448,7 +469,7 @@ function clearPendingRead(session: ParticipantSession, notificationId: string): 
     return;
   }
   const next = Object.fromEntries(entries.filter(([id]) => id !== notificationId));
-  window.localStorage.setItem(pendingReadStateKey(session), JSON.stringify(next));
+  tryWriteLocalStorage(pendingReadStateKey(session), JSON.stringify(next));
 }
 
 function pendingReadStateKey(session: ParticipantSession): string {

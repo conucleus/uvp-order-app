@@ -117,11 +117,12 @@ describe("order app Product API boundary", () => {
   });
 
   it("previews and accepts invite onboarding through Product API routes", async () => {
-    const requested: Array<{ readonly url: string; readonly method: string; readonly body?: string }> = [];
+    const requested: Array<{ readonly url: string; readonly method: string; readonly body?: string; readonly headers?: Record<string, string> }> = [];
     const fetcher: ProductApiClientOptions["fetcher"] = async (input, init) => {
       const url = String(input);
       const body = init?.body as string | undefined;
-      requested.push({ url, method: init?.method ?? "GET", ...(body ? { body } : {}) });
+      const headers = (init?.headers ?? {}) as Record<string, string>;
+      requested.push({ url, method: init?.method ?? "GET", ...(body ? { body } : {}), headers });
       if (url.includes("/product/invites/invite-1?walletAddress=")) {
         return jsonResponse({
           invite: {
@@ -158,6 +159,9 @@ describe("order app Product API boundary", () => {
       if (url.includes("/product/invites/invite-1/accept")) {
         return jsonResponse({ invite: { inviteId: "invite-1", status: "accepted" } });
       }
+      if (url.includes("/product/invites/invite-1/reject")) {
+        return jsonResponse({ invite: { inviteId: "invite-1", status: "rejected" } });
+      }
       throw new Error(`unexpected URL ${url}`);
     };
     const client = createProductApiClient({
@@ -171,13 +175,73 @@ describe("order app Product API boundary", () => {
     const accepted = await client.acceptInvite("invite-1", {
       displayName: "交付方",
       walletAddress: "0x9d8A62f656a8d1615C1294FD71E9cfB3e4855A4F",
-      contact: "delivery@example.com"
-    });
+      contact: "delivery@example.com",
+      token: "invite-token-plaintext"
+    }, { sessionToken: "uvs_session_token" });
+    await client.rejectInvite("invite-1", { token: "invite-token-plaintext" });
 
     assert.equal(preview.acceptance?.status, "can_accept");
     assert.equal(accepted.invite && (accepted.invite as { readonly status: string }).status, "accepted");
     assert.ok(requested.some((request) => request.method === "GET" && request.url.includes("walletAddress=")));
-    assert.ok(requested.some((request) => request.method === "POST" && request.url.includes("/accept")));
+    // 服务端契约：accept 必须带一次性 token、query 声明钱包和会话头；reject 也必须带 token。
+    const acceptRequest = requested.find((request) => request.method === "POST" && request.url.includes("/accept"));
+    assert.ok(acceptRequest);
+    assert.ok(acceptRequest.url.includes("walletAddress="));
+    assert.equal(acceptRequest.headers?.["x-uvp-store-session"], "uvs_session_token");
+    assert.deepEqual(JSON.parse(acceptRequest.body ?? "{}"), {
+      displayName: "交付方",
+      walletAddress: "0x9d8A62f656a8d1615C1294FD71E9cfB3e4855A4F",
+      contact: "delivery@example.com",
+      token: "invite-token-plaintext"
+    });
+    const rejectRequest = requested.find((request) => request.method === "POST" && request.url.includes("/reject"));
+    assert.ok(rejectRequest);
+    assert.deepEqual(JSON.parse(rejectRequest.body ?? "{}"), { token: "invite-token-plaintext" });
+  });
+
+  it("proves wallet control through the server session flow before accept", async () => {
+    const requested: Array<{ readonly url: string; readonly method: string; readonly body?: string }> = [];
+    const fetcher: ProductApiClientOptions["fetcher"] = async (input, init) => {
+      const url = String(input);
+      const body = init?.body as string | undefined;
+      requested.push({ url, method: init?.method ?? "GET", ...(body ? { body } : {}) });
+      if (url.endsWith("/store/auth/challenge")) {
+        return jsonResponse({
+          challenge: {
+            nonce: "nonce-1",
+            address: "0x9d8A62f656a8d1615C1294FD71E9cfB3e4855A4F",
+            message: "uvp store wants you to sign in with your EVM account"
+          }
+        });
+      }
+      if (url.endsWith("/store/auth/verify")) {
+        return jsonResponse({
+          token: "uvs_issued",
+          session: { sessionId: "sess-1", anchoredAddress: "0x9d8A62f656a8d1615C1294FD71E9cfB3e4855A4F" }
+        });
+      }
+      throw new Error(`unexpected URL ${url}`);
+    };
+    const signedMessages: string[] = [];
+    const client = createProductApiClient({
+      baseUrl: "http://service.local/",
+      fetcher,
+      personalSign: async (address, message) => {
+        assert.equal(address, "0x9d8A62f656a8d1615C1294FD71E9cfB3e4855A4F");
+        signedMessages.push(message);
+        return "0xsignature";
+      }
+    });
+
+    const proof = await client.proveWalletControl({ address: "0x9d8A62f656a8d1615C1294FD71E9cfB3e4855A4F" });
+
+    assert.equal(proof.sessionToken, "uvs_issued");
+    assert.equal(proof.anchoredAddress, "0x9d8A62f656a8d1615C1294FD71E9cfB3e4855A4F");
+    assert.deepEqual(signedMessages, ["uvp store wants you to sign in with your EVM account"]);
+    assert.deepEqual(
+      JSON.parse(requested.find((request) => request.url.endsWith("/store/auth/verify"))?.body ?? "{}"),
+      { nonce: "nonce-1", signature: "0xsignature" }
+    );
   });
 
   it("prepares and submits executor and resource patches through Product API routes", async () => {

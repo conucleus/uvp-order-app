@@ -250,7 +250,11 @@ export function EvidencePanel({
       }
       const signature = await actions.signProductSubmit({
         typedData: prepared.raw.typedData,
-        walletAddress: signingWallet.trim()
+        walletAddress: signingWallet.trim(),
+        // 域校验预期：与任务投影的状态机地址交叉核对（F-8 同源修复）。
+        ...(task.stateMachineAddress
+          ? { expected: { verifyingContract: task.stateMachineAddress } }
+          : {})
       });
       if (taskScopeRef.current !== requestScopeKey) {
         return;
@@ -441,11 +445,16 @@ export function EvidencePanel({
         ) : null}
 
         {prepareState.status === "confirmed" ? (
-          <div className={`evidence-proof-handoff evidence-proof-handoff-${submissionHandoff(prepareState.proof).tone}`} role="status">
+          <div
+            className={`evidence-proof-handoff evidence-proof-handoff-${submissionHandoff(prepareState.proof).tone}`}
+            role={submissionHandoff(prepareState.proof).tone === "failed" ? "alert" : "status"}
+          >
             <div className="evidence-proof-handoff-title">
               {submissionHandoff(prepareState.proof).tone === "confirmed"
                 ? <CheckCircle2 aria-hidden="true" />
-                : <RefreshCw className="spin" aria-hidden="true" />}
+                : submissionHandoff(prepareState.proof).tone === "failed"
+                  ? <AlertTriangle aria-hidden="true" />
+                  : <RefreshCw className="spin" aria-hidden="true" />}
               {submissionHandoff(prepareState.proof).title}
             </div>
             <p>{submissionHandoff(prepareState.proof).text}</p>
@@ -853,7 +862,7 @@ function formatBytes(size: number | undefined): string {
 }
 
 function submissionHandoff(proof: TaskSubmissionProof): {
-  readonly tone: "confirmed" | "pending";
+  readonly tone: "confirmed" | "pending" | "failed";
   readonly title: string;
   readonly text: string;
 } {
@@ -865,17 +874,26 @@ function submissionHandoff(proof: TaskSubmissionProof): {
     };
   }
   if (proof.status === "expired") {
+    // 服务端终态：expired 未生效且不可重投，不会进入索引——
+    // 如实按失败呈现并引导重新准备提交，不显示"仍在核对"。
     return {
-      tone: "pending",
-      title: "提交记录已过期",
-      text: "原提交可能仍在索引或已失效；请勿重复提交，稍后刷新查看最终状态。"
+      tone: "failed",
+      title: "提交已过期未生效（终态）",
+      text: "本次提交没有进入索引；请重新准备提交。"
     };
   }
   if (proof.status === "replaced") {
     return {
-      tone: "pending",
-      title: "本次提交已被后续提交取代",
-      text: "仍在索引核对中；请勿重复提交，稍后刷新查看最终状态。"
+      tone: "failed",
+      title: "本次提交已被后续提交取代（终态）",
+      text: "该提交不再进入索引；请以最新提交记录为准，勿盲目重投。"
+    };
+  }
+  if (proof.status === "failed") {
+    return {
+      tone: "failed",
+      title: "提交失败（终态）",
+      text: "本次提交没有生效；请核对阻断原因后重新准备提交。"
     };
   }
   if (proof.status === "indexing") {

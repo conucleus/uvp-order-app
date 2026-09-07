@@ -17,7 +17,16 @@ import { participantQueryFromSession, readParticipantSession, shortWallet } from
 import { NotificationCenter, useOrderAppNotifications } from "./notifications/NotificationCenter";
 import type { OrderAppNotificationDTO } from "./notifications/types";
 import { InviteOnboarding } from "./onboarding/InviteOnboarding";
-import { readOrderAppRoute, routeHash, type OrderAppRoute, type OrderAppSection } from "./routes/appRoutes";
+import {
+  clearInviteSearchParams,
+  readInviteEntryFromSearch,
+  readOrderAppRoute,
+  routeHash,
+  type InviteEntry,
+  type OrderAppRoute,
+  type OrderAppSection
+} from "./routes/appRoutes";
+import { personalSignWithInjectedWallet } from "./wallet/injectedWallet";
 import type { TaskSubmissionProof } from "./task-model";
 import { TaskWorkspace } from "./workspace/TaskWorkspace";
 import "./app/collaboration-notifications.css";
@@ -30,7 +39,12 @@ type LoadState =
 export default function App() {
   const clientState = useMemo<{ readonly api?: ProductApiClient; readonly message?: string }>(() => {
     try {
-      return { api: createProductApiClient() };
+      return {
+        api: createProductApiClient({
+          // accept 邀请的钱包控制证明走服务端会话（challenge → personal_sign → verify）。
+          personalSign: (address, message) => personalSignWithInjectedWallet({ address, message })
+        })
+      };
     } catch (error) {
       return {
         message: error instanceof Error ? error.message : "参与者服务地址未配置。"
@@ -76,10 +90,18 @@ function AppShell({ api }: { readonly api: ProductApiClient }) {
   const [session] = useState(() => readParticipantSession());
   const [loadState, setLoadState] = useState<LoadState>({ status: "loading" });
   const [route, setRoute] = useState<OrderAppRoute>(() => readOrderAppRoute());
+  // ?invite=&inviteToken= 只作为进入应用的邀请入口读取一次；
+  // 读取后立刻从地址栏清除，否则 hash 导航（只改 hash 不清 search）
+  // 会在每次 hashchange 后把邀请面板还原，"返回待办"全部失效。
+  const [inviteEntry] = useState<InviteEntry | undefined>(() => readInviteEntryFromSearch());
   const [submissionProofs, setSubmissionProofs] = useState<Readonly<Record<string, TaskSubmissionProof>>>({});
   const [notificationsOpen, setNotificationsOpen] = useState(false);
   // 慢网下旧响应不得覆盖新响应：所有 loadParticipantHome 调用共用单调序号。
   const loadSequenceRef = useRef(0);
+
+  useEffect(() => {
+    clearInviteSearchParams();
+  }, []);
 
   useEffect(() => {
     function handleHashChange() {
@@ -165,9 +187,10 @@ function AppShell({ api }: { readonly api: ProductApiClient }) {
         <SystemBanner tone="error" title="参与者服务加载失败" text={loadState.message} />
       ) : null}
 
-      {route.inviteId ? (
+      {route.inviteId || inviteEntry ? (
         <InviteOnboarding
-          inviteId={route.inviteId}
+          inviteId={route.inviteId ?? inviteEntry?.inviteId ?? ""}
+          inviteToken={inviteEntry?.inviteToken}
           actions={actions}
           session={session}
           onAccepted={handleRefresh}
