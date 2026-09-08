@@ -21,12 +21,16 @@ import type {
 import type { OrderAppActions } from "../actions/orderAppActions";
 import { bytesToBase64 } from "./hashing";
 import {
+  FRAMEWORK_FILE_NAME_FIELD_KEY,
+  FRAMEWORK_FILE_SIZE_FIELD_KEY,
+  FRAMEWORK_PUBLIC_LABEL_FIELD_KEY,
   acceptAttribute,
   acceptHint,
   evidenceMetadataFields,
   evidenceMetadataSignature,
   fieldSlots,
   fileSlots,
+  frameworkEvidenceMetadataFields,
   missingEvidenceSlotLabels,
   planTaskEvidence,
   validateEvidenceFileForSlot
@@ -633,15 +637,14 @@ async function uploadEvidenceCapture(input: {
     metadata: {
       businessLabel: input.requirement.label,
       documentType: input.requirement.documentType,
-      fields: {
-        ...input.metadataFields,
-        publicLabel: input.requirement.label,
+      fields: frameworkEvidenceMetadataFields(input.metadataFields, {
+        label: input.requirement.label,
         fileName: input.file.name,
-        fileSize: input.file.size
-      },
+        size: input.file.size
+      }),
       redactionPolicy: {
-        public: ["businessLabel", "documentType", "publicLabel"],
-        internalOnly: ["fileName", "fileSize"]
+        public: ["businessLabel", "documentType", FRAMEWORK_PUBLIC_LABEL_FIELD_KEY],
+        internalOnly: [FRAMEWORK_FILE_NAME_FIELD_KEY, FRAMEWORK_FILE_SIZE_FIELD_KEY]
       }
     }
   });
