@@ -850,7 +850,8 @@ export async function installProductApiStub(page: Page, options: StubOptions = {
           taskTitle: task.title,
           targetStage: body.targetStageId,
           action: executorPatchModeLabel(mode),
-          validUntil: "2026-04-29T13:00:00.000Z"
+          validUntil: "2026-04-29T13:00:00.000Z",
+          verifyingContract: "0x8888888888888888888888888888888888888888"
         }
       });
       return;
@@ -954,7 +955,8 @@ export async function installProductApiStub(page: Page, options: StubOptions = {
           taskTitle: task.title,
           targetStage: body.targetStageId,
           action: "protected",
-          validUntil: "2026-04-29T13:00:00.000Z"
+          validUntil: "2026-04-29T13:00:00.000Z",
+          verifyingContract: "0x8888888888888888888888888888888888888888"
         }
       });
       return;

@@ -268,6 +268,8 @@ export interface PreparedStageExecutorPatchDTO {
     readonly targetStage?: string;
     readonly action?: string;
     readonly validUntil?: string;
+    /** 补丁 EIP-712 域的验签合约（UVPStagePatchModule 地址），与 typedData.domain 交叉核对。 */
+    readonly verifyingContract?: string;
   };
 }
 
@@ -308,6 +310,8 @@ export interface PreparedStageResourcePatchDTO {
     readonly resourceLabel?: string;
     readonly action?: string;
     readonly validUntil?: string;
+    /** 补丁 EIP-712 域的验签合约（UVPStagePatchModule 地址），与 typedData.domain 交叉核对。 */
+    readonly verifyingContract?: string;
   };
 }
 

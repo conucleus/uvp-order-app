@@ -63,7 +63,7 @@ import {
   signalContainerForTask,
   type TaskSignalContainerSummary
 } from "./signalContainer";
-import { cleanString, sameAddress } from "./taskUtils";
+import { cleanString, sameAddress, stagePatchSignExpectation } from "./taskUtils";
 import { taskExecutorDisplay } from "./taskPresentation";
 import { taskDisplay } from "./taskStatus";
 import "./taskRuntime.css";
@@ -711,9 +711,7 @@ function ManifestAddOnPanel({
         const signature = await actions.signTypedData({
           typedData: prepared.prepared.typedData,
           walletAddress: prepared.input.selectorWallet,
-          ...(task.stateMachineAddress
-            ? { expected: { verifyingContract: task.stateMachineAddress } }
-            : {})
+          ...stagePatchSignExpectation(prepared.prepared)
         });
         if (taskScopeRef.current !== requestScopeKey) {
           return;
@@ -742,9 +740,7 @@ function ManifestAddOnPanel({
         const signature = await actions.signTypedData({
           typedData: prepared.prepared.typedData,
           walletAddress: prepared.input.selectorWallet,
-          ...(task.stateMachineAddress
-            ? { expected: { verifyingContract: task.stateMachineAddress } }
-            : {})
+          ...stagePatchSignExpectation(prepared.prepared)
         });
         if (taskScopeRef.current !== requestScopeKey) {
           return;
@@ -1251,9 +1247,7 @@ function ExecutorPatchPanel({
       const signature = await actions.signTypedData({
         typedData: prepared.typedData,
         walletAddress: draft.selectorWallet.trim(),
-        ...(task.stateMachineAddress
-          ? { expected: { verifyingContract: task.stateMachineAddress } }
-          : {})
+        ...stagePatchSignExpectation(prepared)
       });
       if (taskScopeRef.current !== requestScopeKey) {
         return;
@@ -1683,9 +1677,7 @@ function ResourcePatchPanel({
       const signature = await actions.signTypedData({
         typedData: prepared.typedData,
         walletAddress: draft.selectorWallet.trim(),
-        ...(task.stateMachineAddress
-          ? { expected: { verifyingContract: task.stateMachineAddress } }
-          : {})
+        ...stagePatchSignExpectation(prepared)
       });
       if (taskScopeRef.current !== requestScopeKey) {
         return;
