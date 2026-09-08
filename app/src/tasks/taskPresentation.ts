@@ -71,7 +71,7 @@ export function taskPrimaryActionLabel(task: ProductTaskDTO, fallback?: string):
 
 export type TaskSubmitIntent = "confirm_stage" | "reject_stage" | "raise_dispute" | "resolve_dispute";
 
-/** 提交意图单一来源：按能力插件类型推导，争议任务不得以 confirm_stage 提交。 */
+/** 无 manifest 声明时的兜底映射：争议任务不得以 confirm_stage 提交。 */
 const submitIntentByPluginKind: Readonly<Record<FulfillmentPluginKind, TaskSubmitIntent>> = {
   payment_placeholder: "confirm_stage",
   evidence_submission: "confirm_stage",
@@ -80,7 +80,18 @@ const submitIntentByPluginKind: Readonly<Record<FulfillmentPluginKind, TaskSubmi
   dispute_material: "raise_dispute"
 };
 
+/**
+ * 提交意图与 zhixu-store 同源同序：manifest 显式声明的 submit_signal intent
+ * 优先（发布者声明是权威），无 manifest 声明时按能力插件类型推导。
+ * 两端各自单源推导会在 manifest 与插件类型不一致时得出不同 intent。
+ */
 export function taskSubmitIntent(task: ProductTaskDTO): TaskSubmitIntent {
+  const submitActions = (addOnManifestForTask(task)?.actions ?? [])
+    .filter((action) => action.actionKind === "submit_signal");
+  const primary = submitActions.find((action) => action.primary) ?? submitActions[0];
+  if (primary?.intent) {
+    return primary.intent;
+  }
   return submitIntentByPluginKind[taskCapabilityPluginKind(task)];
 }
 

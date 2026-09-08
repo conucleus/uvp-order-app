@@ -31,7 +31,8 @@ import {
   taskAddOnKind,
   taskCapabilityPluginKind,
   taskExecutorDisplay,
-  taskPrimaryActionLabel
+  taskPrimaryActionLabel,
+  taskSubmitIntent
 } from "./taskPresentation.js";
 import { signalContainerForTask } from "./signalContainer.js";
 import {
@@ -349,6 +350,32 @@ describe("task plugin runtime", () => {
     assert.deepEqual(prepare.input.evidenceIds, ["evidence-1", "evidence-2"]);
     assert.equal(prepare.input.walletAddress, wallet);
     assert.equal(prepare.input.intent, "confirm_stage");
+  });
+
+  it("derives the submit intent from the manifest declaration first, aligned with zhixu-store", () => {
+    const manifestIntent = (
+      intent: NonNullable<ParticipantAddOnManifestDTO["actions"][number]["intent"]>,
+      primary = true
+    ): ParticipantAddOnManifestDTO => ({
+      schemaVersion: "participant-addon-manifest.v1",
+      manifestId: "intent-manifest:v1",
+      roleSlotId: "delivery",
+      addOnKind: "submit_signal",
+      title: "提交",
+      summary: "",
+      stageBindings: [],
+      pages: [],
+      actions: [
+        { actionId: "a-primary", actionKind: "submit_signal", label: "主操作", primary, inputBindings: {}, intent },
+        { actionId: "a-secondary", actionKind: "submit_signal", label: "次要", inputBindings: {}, intent: "confirm_stage" }
+      ]
+    });
+
+    // manifest 显式声明优先于插件类型推导（与 zhixu-store 同源同序）。
+    assert.equal(taskSubmitIntent(taskFixture("dispute_material", { addOnManifest: manifestIntent("reject_stage") })), "reject_stage");
+    // manifest 未声明 intent 时回落插件类型映射：争议任务不得以 confirm_stage 提交。
+    assert.equal(taskSubmitIntent(taskFixture("dispute_material")), "raise_dispute");
+    assert.equal(taskSubmitIntent(taskFixture("delivery_update")), "confirm_stage");
   });
 
   it("builds executor and resource patch inputs from manifest action bindings", () => {
