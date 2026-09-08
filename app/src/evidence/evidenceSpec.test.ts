@@ -108,7 +108,7 @@ describe("evidence spec single-track planning", () => {
     assert.equal(plan.slots[0]?.documentType, "inspection_report");
   });
 
-  it("rejects an invalid evidenceSpec into no slots instead of throwing", () => {
+  it("drops an invalid evidenceSpec entirely instead of rendering duplicate slots", () => {
     const task = taskFixture({
       evidenceSpec: [
         { key: "", label: "空 key" },

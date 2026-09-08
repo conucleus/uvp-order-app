@@ -5,11 +5,11 @@ import { resourceRequirementDisplays } from "../task-model";
 import type { EvidenceRequirement } from "../task-model";
 
 /**
- * 证据规则单轨：槽位只来自 BFF 下发的 evidenceSpec（含 text/date 必填字段），
- * spec 缺失或非法即无凭证槽位（纯字段确认或按业务约定线下提交），不从声明
- * 文本臆造通用槽位；资源要求是服务端结构化数据，其上传槽位保留。前端不
- * 维护行业关键词→documentType 匹配表，也不维护硬编码格式白名单。与
- * zhixu-store planTaskEvidence 同口径。
+ * 证据规则单轨：spec 槽位只来自 BFF 下发的 evidenceSpec（含 text/date 必填字段），
+ * 不从声明文本臆造通用槽位，也不维护行业关键词→documentType 匹配表或硬编码
+ * 格式白名单。spec 缺失或非法时不渲染任何 spec 条目（防止重复 key 渲染出
+ * 双份必填槽位），保留服务端结构化资源要求的上传槽位（metadata 型除外）。
+ * 与 zhixu-store planTaskEvidence 同口径。
  */
 export interface TaskEvidencePlan {
   readonly mode: "spec" | "none";
