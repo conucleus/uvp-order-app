@@ -115,16 +115,8 @@ export function taskDisplay(task: ProductTaskDTO, now: Date = new Date()): Parti
     };
   }
 
-  if (rawStatus === "failed" || extension.errorCode) {
-    return {
-      state: "failed",
-      label: "提交失败",
-      bucketLabel: "提交失败",
-      rank: 4,
-      isOverdue
-    };
-  }
-
+  // blocked/open 是服务端权威任务态，先于失败判定：投影残留的
+  // submissionStatus/errorCode 扩展不得把可重试或受阻的任务改写成"提交失败"。
   if (task.status === "blocked") {
     return {
       state: "blocked",
@@ -136,6 +128,15 @@ export function taskDisplay(task: ProductTaskDTO, now: Date = new Date()): Parti
   }
 
   if (task.status === "submitted") {
+    if (rawStatus === "failed" || extension.errorCode) {
+      return {
+        state: "failed",
+        label: "提交失败",
+        bucketLabel: "提交失败",
+        rank: 4,
+        isOverdue
+      };
+    }
     return {
       state: rawStatus === "indexing" ? "indexing" : "submitted",
       label: "等待链上确认",

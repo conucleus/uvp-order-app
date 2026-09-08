@@ -713,6 +713,22 @@ describe("participant task inbox helpers", () => {
     assert.equal(display.label, "等待链上确认");
   });
 
+  it("keeps blocked and open tasks out of the failed bucket when a stale errorCode lingers", () => {
+    // 残留的失败扩展不得改写服务端权威任务态：blocked 显示受阻、open 显示待办，
+    // 只有 submitted 中间态才允许由失败扩展判"提交失败"。
+    const blocked = taskDisplay(taskFixture("delivery_update", { taskId: "blocked-stale", status: "blocked", errorCode: "REVERTED" }));
+    assert.equal(blocked.state, "blocked");
+    assert.equal(blocked.label, "受阻");
+
+    const open = taskDisplay(taskFixture("delivery_update", { taskId: "open-stale", status: "open", errorCode: "REVERTED", deadline: "2099-05-01 18:00" }));
+    assert.equal(open.state, "ready");
+    assert.equal(open.label, "待办");
+
+    const submitted = taskDisplay(taskFixture("delivery_update", { taskId: "submitted-failed", status: "submitted", errorCode: "REVERTED" }));
+    assert.equal(submitted.state, "failed");
+    assert.equal(submitted.label, "提交失败");
+  });
+
   it("returns all tasks unfiltered when no wallet is provided", () => {
     const result = filterParticipantTasksForWallet([
       taskFixture("delivery_update", { taskId: "a", assigneeWallet: wallet }),
