@@ -1,4 +1,5 @@
 import type { ProductTaskDTO } from "@uvp-eth/product-dto";
+import { parseDeadlineUtcMs } from "./taskUtils";
 
 export type ParticipantTaskDisplayState =
   | "ready"
@@ -169,9 +170,7 @@ function isDeadlineOverdue(deadline: string, now: Date): boolean {
 }
 
 function deadlineTime(deadline: string): number {
-  const normalized = deadline.trim().replace(" ", "T");
-  const timestamp = Date.parse(normalized);
-  return Number.isFinite(timestamp) ? timestamp : Number.MAX_SAFE_INTEGER;
+  return parseDeadlineUtcMs(deadline) ?? Number.MAX_SAFE_INTEGER;
 }
 
 function normalizeWallet(walletAddress: string | undefined): string | undefined {

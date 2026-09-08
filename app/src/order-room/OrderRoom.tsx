@@ -18,6 +18,7 @@ import type {
 } from "@uvp-eth/product-dto";
 import { taskExecutorDisplay } from "../tasks/taskPresentation";
 import { taskDisplay } from "../tasks/taskStatus";
+import { parseDeadlineUtcMs } from "../tasks/taskUtils";
 import "./orderRoom.css";
 
 interface OrderRoomProps {
@@ -425,8 +426,8 @@ function slaIcon(status: SlaRow["status"]) {
 }
 
 function parseDeadline(value: string): Date | undefined {
-  const parsed = Date.parse(value.trim().replace(" ", "T"));
-  return Number.isNaN(parsed) ? undefined : new Date(parsed);
+  const parsed = parseDeadlineUtcMs(value);
+  return parsed === undefined ? undefined : new Date(parsed);
 }
 
 function findParticipantTask(role: string, tasks: readonly ProductTaskDTO[]): ProductTaskDTO | undefined {

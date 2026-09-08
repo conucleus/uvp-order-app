@@ -1,6 +1,7 @@
 import type { ProductOrderDTO, ProductTaskDTO } from "@uvp-eth/product-dto";
 import type { ParticipantSession } from "../auth/participant";
 import type { ProductApiSource, ProductHomeData } from "../api/productApi";
+import { parseDeadlineUtcMs } from "../tasks/taskUtils";
 import type {
   OrderAppNotificationDTO,
   OrderAppNotificationKind,
@@ -322,8 +323,8 @@ function parseDeadline(value: string): Date | undefined {
   if (!normalized || normalized === "以业务约定为准") {
     return undefined;
   }
-  const parsed = Date.parse(normalized.replace(" ", "T"));
-  return Number.isNaN(parsed) ? undefined : new Date(parsed);
+  const parsed = parseDeadlineUtcMs(normalized);
+  return parsed === undefined ? undefined : new Date(parsed);
 }
 
 function blockedNotificationKind(task: ProductTaskDTO): Extract<OrderAppNotificationKind, "submission_failed" | "task_revoked"> {
