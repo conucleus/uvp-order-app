@@ -152,7 +152,6 @@ export interface ProductInvitePreviewDTO {
 }
 
 export type ProductSubmitIntent = "confirm_stage" | "reject_stage" | "raise_dispute" | "resolve_dispute";
-export type ProductStageExecutorPatchMode = ProductExecutorPatchMode | "replace";
 
 export interface PrepareTaskSubmitInput {
   readonly evidenceIds: readonly string[];
@@ -172,7 +171,7 @@ export interface PrepareStageExecutorPatchInput {
   readonly executorWallet: string;
   readonly executorMetadataHash: Hex | string;
   readonly metadataURI: string;
-  readonly mode?: ProductStageExecutorPatchMode | undefined;
+  readonly mode?: ProductExecutorPatchMode | undefined;
   readonly previousExecutorWallet?: string | undefined;
   readonly approval?: unknown | undefined;
   readonly executorReference?: string | undefined;
@@ -184,7 +183,7 @@ export interface SubmitStageExecutorPatchInput {
   readonly typedData?: Eip712TypedDataDTO | undefined;
   readonly signature: string;
   readonly patch?: PreparedStageExecutorPatchDTO | undefined;
-  readonly mode?: ProductStageExecutorPatchMode | undefined;
+  readonly mode?: ProductExecutorPatchMode | undefined;
   readonly previousExecutorWallet?: string | undefined;
   readonly previousExecutorSignature?: string | undefined;
 }
@@ -625,7 +624,13 @@ class BrowserProductApiClient implements ProductApiClient {
     if (!response.ok) {
       throw new ProductApiError(response.status, pathname, await responseText(response));
     }
-    return await response.json() as TResponse;
+    try {
+      return await response.json() as TResponse;
+    } catch (error) {
+      // 2xx 但不是 JSON：归入统一错误链（与 zhixu-store 同口径），而不是
+      // 把裸 SyntaxError 直接抛给界面。
+      throw new ProductApiError(response.status, pathname, error instanceof Error ? error.message : "response_not_json");
+    }
   }
 }
 

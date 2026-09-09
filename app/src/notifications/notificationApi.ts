@@ -46,7 +46,13 @@ export async function loadOrderAppNotifications(
     if (!response.ok) {
       throw new Error(await responseText(response));
     }
-    const body = await response.json() as ApiNotificationResponse;
+    let body: ApiNotificationResponse;
+    try {
+      body = await response.json() as ApiNotificationResponse;
+    } catch {
+      // 2xx 但不是 JSON：给出可读错误，不把裸解析异常透给通知面板。
+      throw new Error("通知响应不是 JSON");
+    }
     const notifications: OrderAppNotificationDTO[] = [];
     let skippedNotificationCount = 0;
     for (const entry of body.notifications ?? []) {
@@ -87,6 +93,12 @@ export async function markOrderAppNotificationRead(
   try {
     const response = await postReadReceipt(data.source.baseUrl, session, notification.notificationId, fetcher);
     if (!response.ok) {
+      if (isPermanentReadReceiptFailure(response.status)) {
+        // 4xx 是服务端对该回执的明确拒绝（通知不存在/形态非法）：重试永远
+        // 不会成功，本地已读保留，但不进重试队列，也不保留既有排队项。
+        clearPendingRead(session, notification.notificationId);
+        return { ...notification, readStatus: "read", readAt };
+      }
       throw new Error(await responseText(response));
     }
     clearPendingRead(session, notification.notificationId);
@@ -101,9 +113,10 @@ export async function markOrderAppNotificationRead(
 }
 
 /**
- * Replays read receipts that failed to reach the server earlier. Kept
- * entries stay queued until a POST succeeds; the local read state is never
- * rolled back.
+ * Replays read receipts that failed to reach the server earlier. Transient
+ * failures (5xx / network) stay queued for the next pass; a 4xx rejection is
+ * permanent and evicts the entry instead of retrying forever. The local read
+ * state is never rolled back either way.
  */
 export async function syncPendingNotificationReads(
   data: ProductHomeData,
@@ -116,10 +129,15 @@ export async function syncPendingNotificationReads(
   }
 
   let synced = 0;
+  let evicted = 0;
   for (const [notificationId] of pending) {
     try {
       const response = await postReadReceipt(data.source.baseUrl, session, notificationId, fetcher);
       if (!response.ok) {
+        if (isPermanentReadReceiptFailure(response.status)) {
+          clearPendingRead(session, notificationId);
+          evicted += 1;
+        }
         continue;
       }
       clearPendingRead(session, notificationId);
@@ -128,7 +146,12 @@ export async function syncPendingNotificationReads(
       // keep queued for the next sync pass
     }
   }
-  return { synced, remaining: pending.length - synced };
+  return { synced, remaining: pending.length - synced - evicted };
+}
+
+/** 4xx：回执本身被服务端拒绝，重试不可能转为成功；5xx/网络错误才是可重试的。 */
+function isPermanentReadReceiptFailure(status: number): boolean {
+  return status >= 400 && status < 500;
 }
 
 function postReadReceipt(
@@ -460,12 +483,23 @@ function pendingReadEntries(session: ParticipantSession): readonly (readonly [st
   }
 }
 
+/** 重试队列只是回执的兜底缓冲：封顶防止长期离线/持续失败时无界增长。 */
+const MAX_PENDING_READ_ENTRIES = 100;
+
 function enqueuePendingRead(session: ParticipantSession, notificationId: string, readAt: string): void {
   if (typeof window === "undefined") {
     return;
   }
   const next = Object.fromEntries(pendingReadEntries(session));
   next[notificationId] = readAt;
+  // 超限时丢 readAt 最旧的条目：新回执比旧回执更可能仍被服务端接受。
+  while (Object.keys(next).length > MAX_PENDING_READ_ENTRIES) {
+    const oldest = Object.entries(next).sort((left, right) => left[1].localeCompare(right[1]))[0];
+    if (!oldest) {
+      break;
+    }
+    delete next[oldest[0]];
+  }
   // 该函数在失败回补路径（catch 分支）里调用：写失败不得顶替原返回值。
   tryWriteLocalStorage(pendingReadStateKey(session), JSON.stringify(next));
 }

@@ -390,3 +390,21 @@ function jsonResponse(body: unknown): Response {
     }
   });
 }
+
+describe("2xx non-JSON responses", () => {
+  it("surfaces a ProductApiError instead of a bare SyntaxError", async () => {
+    // 网关/代理返回 200 + HTML（如维护页）时，裸 SyntaxError 会把解析细节
+    // 直接抛给界面；必须归入统一错误链。
+    const fetcher: ProductApiClientOptions["fetcher"] = async () =>
+      new Response("<html>maintenance</html>", {
+        status: 200,
+        headers: { "content-type": "text/html" }
+      });
+    const client = createProductApiClient({ baseUrl: "http://service.local", fetcher });
+
+    await assert.rejects(
+      client.getTask("task-1"),
+      (error) => error instanceof ProductApiError && error.status === 200 && error.endpoint === "/product/me/tasks/task-1"
+    );
+  });
+});

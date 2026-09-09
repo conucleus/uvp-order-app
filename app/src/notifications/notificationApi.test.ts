@@ -449,3 +449,93 @@ describe("order app notification projection", () => {
     assert.equal(rerun[0]?.notificationId, expected);
   });
 });
+
+describe("pending read receipt queue hygiene", () => {
+  function notificationWithId(id: string): OrderAppNotificationDTO {
+    return { ...readReceiptTarget, notificationId: id };
+  }
+
+  it("evicts receipts the server permanently rejects (4xx) instead of retrying them forever", async () => {
+    installMemoryWindow();
+    const originalWarn = console.warn;
+    console.warn = () => {};
+    try {
+      // 本地派生通知 id 对服务端可能是未知的：404 重试永远不会成功。
+      const rejected = await markOrderAppNotificationRead(
+        notificationWithId("notification-gone"),
+        realSourceData,
+        session,
+        async () => new Response("not found", { status: 404 })
+      );
+      assert.equal(rejected.readStatus, "read");
+      assert.equal(rejected.syncPending, undefined);
+
+      // 既有排队项遇到 4xx 同样出队。
+      await markOrderAppNotificationRead(
+        notificationWithId("notification-queued"),
+        realSourceData,
+        session,
+        async () => new Response("unavailable", { status: 503 })
+      );
+      const attempts: string[] = [];
+      const sync = await syncPendingNotificationReads(realSourceData, session, async (input: RequestInfo | URL) => {
+        attempts.push(String(input));
+        return new Response("gone", { status: 410 });
+      });
+      assert.equal(sync.synced, 0);
+      assert.equal(sync.remaining, 0);
+      assert.equal(attempts.length, 1);
+      const drained = await syncPendingNotificationReads(
+        realSourceData,
+        session,
+        async () => new Response("{}", { status: 200 })
+      );
+      assert.deepEqual(drained, { synced: 0, remaining: 0 });
+    } finally {
+      console.warn = originalWarn;
+      uninstallMemoryWindow();
+    }
+  });
+
+  it("keeps transient failures (5xx) queued for the next sync pass", async () => {
+    installMemoryWindow();
+    try {
+      await markOrderAppNotificationRead(
+        notificationWithId("notification-flaky"),
+        realSourceData,
+        session,
+        async () => new Response("boom", { status: 500 })
+      );
+      const sync = await syncPendingNotificationReads(
+        realSourceData,
+        session,
+        async () => new Response("later", { status: 502 })
+      );
+      assert.deepEqual(sync, { synced: 0, remaining: 1 });
+    } finally {
+      uninstallMemoryWindow();
+    }
+  });
+
+  it("caps the pending queue and drops the oldest receipts first", async () => {
+    installMemoryWindow();
+    const originalWarn = console.warn;
+    console.warn = () => {};
+    try {
+      const failingFetcher = async () => new Response("down", { status: 500 });
+      for (let index = 0; index < 105; index += 1) {
+        await markOrderAppNotificationRead(notificationWithId(`notification-${index}`), realSourceData, session, failingFetcher);
+      }
+      const raw = window.localStorage.getItem("uvp-order-app:notification-read-pending:0xabc0000000000000000000000000000000000009");
+      assert.ok(raw);
+      const queued = Object.keys(JSON.parse(raw) as Record<string, unknown>);
+      assert.equal(queued.length, 100);
+      assert.ok(!queued.includes("notification-0"));
+      assert.ok(!queued.includes("notification-4"));
+      assert.ok(queued.includes("notification-104"));
+    } finally {
+      console.warn = originalWarn;
+      uninstallMemoryWindow();
+    }
+  });
+});
