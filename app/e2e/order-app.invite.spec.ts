@@ -163,9 +163,11 @@ test("invite entry accepts through the server contract and returns to tasks", as
   expect(requests.some((request) => request.url.endsWith("/store/auth/challenge"))).toBe(true);
   expect(requests.some((request) => request.url.endsWith("/store/auth/verify"))).toBe(true);
 
-  // Bug 10：返回待办后面板卸载，不会被残留 search 复原。
+  // Bug 10：返回待办后面板卸载，不会被残留 search 复原；本地 inviteEntry
+  // 同步清除，工作区（参与者信息条）真正可达。
   await page.getByRole("button", { name: "查看我的待办" }).click();
   await expect(page.getByRole("heading", { name: "邀请验收订单" })).toHaveCount(0);
+  await expect(page.getByRole("region", { name: "参与者信息" })).toBeVisible();
   await expect(page.getByText("UVP Signal Console")).toBeVisible();
   await expect(page).toHaveURL(/#section=tasks/);
 });

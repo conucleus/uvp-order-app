@@ -93,7 +93,10 @@ function AppShell({ api }: { readonly api: ProductApiClient }) {
   // ?invite=&inviteToken= 只作为进入应用的邀请入口读取一次；
   // 读取后立刻从地址栏清除，否则 hash 导航（只改 hash 不清 search）
   // 会在每次 hashchange 后把邀请面板还原，"返回待办"全部失效。
-  const [inviteEntry] = useState<InviteEntry | undefined>(() => readInviteEntryFromSearch());
+  // 入口消费后必须同步清掉本地 state：渲染条件是 route.inviteId || inviteEntry，
+  // 只改 route 不清 inviteEntry 会让邀请面板在 accept/reject/关闭后仍然钉死，
+  // 工作区永远不可达。
+  const [inviteEntry, setInviteEntry] = useState<InviteEntry | undefined>(() => readInviteEntryFromSearch());
   const [submissionProofs, setSubmissionProofs] = useState<Readonly<Record<string, TaskSubmissionProof>>>({});
   const [notificationsOpen, setNotificationsOpen] = useState(false);
   // 慢网下旧响应不得覆盖新响应：所有 loadParticipantHome 调用共用单调序号。
@@ -163,6 +166,11 @@ function AppShell({ api }: { readonly api: ProductApiClient }) {
     setNotificationsOpen(false);
   }
 
+  function dismissInviteEntry() {
+    setInviteEntry(undefined);
+    navigate({ section: "tasks" });
+  }
+
   return (
     <main className="app-shell">
       <header className="topbar">
@@ -194,7 +202,7 @@ function AppShell({ api }: { readonly api: ProductApiClient }) {
           actions={actions}
           session={session}
           onAccepted={handleRefresh}
-          onDismiss={() => navigate({ section: "tasks" })}
+          onDismiss={dismissInviteEntry}
         />
       ) : (
         <>
