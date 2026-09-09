@@ -16,7 +16,7 @@ const walletOverrideQueryKeys = ["participantWallet", "uvpParticipantWallet", "u
 const allowedOverrideRuntimes = new Set(["local", "localhost", "development", "dev"]);
 
 export function readParticipantSession(input: ParticipantSessionReadInput = {}): ParticipantSession {
-  const env = input.env ?? readImportMetaEnv();
+  const env = input.env ?? buildTimeEnv();
   const overrideWallet = readWalletAddressOverride(input, env);
   if (overrideWallet) {
     return { walletAddress: overrideWallet, walletSource: "override" };
@@ -70,7 +70,7 @@ function readWalletAddressOverride(
   return cleanWalletAddress(sessionStorage.getItem(walletOverrideSessionKey));
 }
 
-export function walletOverrideAllowed(env: Readonly<Record<string, string | boolean | undefined>> | undefined = readImportMetaEnv()): boolean {
+export function walletOverrideAllowed(env: Readonly<Record<string, string | boolean | undefined>> | undefined = buildTimeEnv()): boolean {
   const runtime = (
     envString(env, "VITE_UVP_RUNTIME_ENV") ??
     envString(env, "MODE")
@@ -81,8 +81,16 @@ export function walletOverrideAllowed(env: Readonly<Record<string, string | bool
   return env?.DEV === true;
 }
 
-function readImportMetaEnv(): Readonly<Record<string, string | boolean | undefined>> | undefined {
-  return import.meta.env as Readonly<Record<string, string | boolean | undefined>> | undefined;
+// 构建期注入的静态值集合：每个键都经 import.meta.env.X 静态成员访问
+// （Vite 构建时内联为字面量），不把整个 env 对象留在运行期——随包分发
+// 环境开关是禁止形态。测试用例经 input.env 注入自己的值。
+function buildTimeEnv(): Readonly<Record<string, string | boolean | undefined>> {
+  return {
+    VITE_UVP_ORDER_APP_WALLET_ADDRESS: import.meta.env?.VITE_UVP_ORDER_APP_WALLET_ADDRESS,
+    VITE_UVP_RUNTIME_ENV: import.meta.env?.VITE_UVP_RUNTIME_ENV,
+    MODE: import.meta.env?.MODE,
+    DEV: import.meta.env?.DEV
+  };
 }
 
 function envString(

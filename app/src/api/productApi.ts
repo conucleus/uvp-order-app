@@ -713,14 +713,17 @@ function normalizeBaseUrl(baseUrl: string | undefined): string | undefined {
   return trimmed && trimmed.length > 0 ? trimmed : undefined;
 }
 
+// API 基地址与超时来自构建期注入的静态值（import.meta.env.VITE_X 静态成员
+// 访问，Vite 构建时内联）。传入整个 env 对象会把键名查找留在运行期，
+// 形成随包分发的环境开关。
 function runtimeEnv(): string | undefined {
-  const env = import.meta.env as Readonly<Record<string, string | undefined>> | undefined;
-  return env?.VITE_UVP_CHAIN_SERVICES_URL;
+  return import.meta.env?.VITE_UVP_CHAIN_SERVICES_URL;
 }
 
-function runtimeTimeoutMs(name: string): number | undefined {
-  const env = import.meta.env as Readonly<Record<string, string | undefined>> | undefined;
-  const raw = env?.[name];
+function runtimeTimeoutMs(name: "VITE_UVP_ORDER_APP_FETCH_TIMEOUT_MS" | "VITE_UVP_ORDER_APP_UPLOAD_TIMEOUT_MS"): number | undefined {
+  const raw = name === "VITE_UVP_ORDER_APP_FETCH_TIMEOUT_MS"
+    ? import.meta.env?.VITE_UVP_ORDER_APP_FETCH_TIMEOUT_MS
+    : import.meta.env?.VITE_UVP_ORDER_APP_UPLOAD_TIMEOUT_MS;
   const parsed = raw ? Number(raw) : Number.NaN;
   return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : undefined;
 }
