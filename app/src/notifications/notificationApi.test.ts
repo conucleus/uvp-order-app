@@ -264,7 +264,7 @@ describe("order app notification loading", () => {
   });
 
   it("normalizes invalidated notifications with the structured status field intact", async () => {
-    // bug_audit #25：reorg 失效通知按结构化状态呈现，reason 原样透传，
+    // reorg 失效通知按结构化状态呈现，reason 原样透传，
     // 前端不解析 message 文案判定失效。
     const fetcher = async () => new Response(JSON.stringify({
       notifications: [
@@ -425,7 +425,7 @@ describe("order app notification projection", () => {
     });
 
     // 服务端 read 回执端点按 bytes32 校验：本地 ID 必须是 0x+64hex，
-    // 否则接线即全 400（0216 S26）。
+    // 否则接线即全 400。
     assert.equal(notifications.length, 2);
     for (const notification of notifications) {
       assert.match(notification.notificationId, /^0x[0-9a-f]{64}$/u);

@@ -37,7 +37,7 @@ function sortJsonValue(value: unknown): unknown {
 
 // 码点序等价 UTF-8 字节序，与 uvp-core/uvp-protocol/zhixu-store 的 canonical
 // 口径一致；localeCompare 依赖 ICU/locale，同一份证据在不同环境会哈希出
-// 不同指纹（0216 O26）。按码点而非 UTF-16 码元比较：增补平面字符的代理对
+// 不同指纹。按码点而非 UTF-16 码元比较：增补平面字符的代理对
 // 在码元序里会排到 U+E000..U+FFFF 之前，偏离字节序。
 export function compareByCodePoint(left: string, right: string): number {
   if (left === right) {

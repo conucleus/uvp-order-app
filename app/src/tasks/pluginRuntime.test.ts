@@ -308,7 +308,7 @@ describe("task plugin runtime", () => {
     const inputs = requiredInputsForTask(task, plugin);
 
     // 标签是展示文案，去重只能按 inputId：同标签的两条必填都要保留，
-    // 否则提交校验永远缺一步（0216 O24）。
+    // 否则提交校验永远缺一步。
     assert.deepEqual(inputs.map((input) => input.inputId), [
       "resource-requirement:acceptance_form",
       "acceptance-form-number"

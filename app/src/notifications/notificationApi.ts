@@ -523,7 +523,7 @@ function pendingReadStateKey(session: ParticipantSession): string {
 function localNotificationId(kind: OrderAppNotificationKind, ...parts: readonly string[]): string {
   // 服务端 read 回执端点按 bytes32 校验 notificationId（uvp-chain-services
   // normalizeBytes32），非 0x+64hex 形态一律 400——本地派生 ID 若保留
-  // `local:kind:task` 可读形态，接线后已读回执永远发不上去（0216 S26）。
+  // `local:kind:task` 可读形态，接线后已读回执永远发不上去。
   // 派生是同步投影（deriveOrderAppNotifications 无 await），crypto.subtle
   // 不可用，这里用内置同步 SHA-256 得到 32 字节 hex；\0 分隔避免 parts
   // 含 ":" 时产生歧义碰撞。
