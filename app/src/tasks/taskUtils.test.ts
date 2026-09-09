@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { cleanString, parseDeadlineUtcMs, parseEvidenceIds, sameAddress, stagePatchSignExpectation } from "./taskUtils.js";
+import { cleanString, isContentAddressedReference, parseDeadlineUtcMs, parseEvidenceIds, sameAddress, stagePatchSignExpectation } from "./taskUtils.js";
 
 describe("task utility helpers", () => {
   it("normalizes shared task strings and wallet comparisons", () => {
@@ -42,5 +42,22 @@ describe("deadline parsing", () => {
     assert.equal(parseDeadlineUtcMs("2026-05-02T18:00:00-0800"), Date.parse("2026-05-02T18:00:00-0800"));
     assert.equal(parseDeadlineUtcMs("以业务约定为准"), undefined);
     assert.equal(parseDeadlineUtcMs("   "), undefined);
+  });
+});
+
+describe("content-addressed reference predicate", () => {
+  it("accepts the canonical content-addressed prefixes", () => {
+    assert.equal(isContentAddressedReference("ipfs://bafyabc"), true);
+    assert.equal(isContentAddressedReference("  AR://xyz  "), true);
+    assert.equal(isContentAddressedReference("cid:bafyabc"), true);
+    assert.equal(isContentAddressedReference("bafybeig..."), true);
+  });
+
+  it("rejects a bare urn: prefix because URNs are not inherently content-addressed", () => {
+    // urn:uuid / urn:isbn 等都是任意 URN；urn: 前缀放行会让非内容寻址引用
+    // 通过 URI 预检，与服务端生产口径（ipfs/ar）相反。
+    assert.equal(isContentAddressedReference("urn:uuid:6ec0bd7f-11c0-43da-975e-2a8ad9eacsd0"), false);
+    assert.equal(isContentAddressedReference("https://cos.example.com/manifest.json"), false);
+    assert.equal(isContentAddressedReference("urn:cid:bafyabc"), false);
   });
 });

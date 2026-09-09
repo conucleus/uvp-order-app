@@ -7,17 +7,18 @@ import type {
 } from "@uvp-eth/product-dto";
 import type {
   PrepareStageExecutorPatchInput,
-  PrepareStageResourcePatchInput,
-  ProductStageExecutorPatchMode
+  PrepareStageResourcePatchInput
 } from "../api/productApi";
+import type { ProductExecutorPatchMode } from "@uvp-eth/product-dto";
 import { shortWallet } from "../auth/participant";
 import {
   addOnManifestForTask,
+  executorPatchWorkStarted,
   selectableTargetsForTask,
   targetStageId
 } from "./addOnTypes";
 import type { PrepareSubmitInput } from "./pluginRuntime";
-import { parseEvidenceIds, sameAddress } from "./taskUtils";
+import { parseEvidenceIds, isContentAddressedReference, sameAddress } from "./taskUtils";
 
 export interface AddOnManifestRuntimeState {
   readonly task: ProductTaskDTO;
@@ -233,6 +234,25 @@ function semanticErrorsForAction(
     if (approval && !isValidJsonText(approval)) {
       errors.push("替换证明（approval）必须是合法的 JSON 文本，不能按原始字符串发送。");
     }
+    // 与应用层 ExecutorPatchPanel 同一替换门槛：manifest 驱动路径不得绕过。
+    const modeInput = boundValue(action, state, "mode");
+    const mode = normalizeExecutorPatchMode(modeInput);
+    if (modeInput && !mode) {
+      errors.push("处理方式必须是 assign/handoff/replacement 之一（协议拼写）。");
+    }
+    const target = selectableTargetsForTask(state.task)
+      .find((candidate) => targetStageId(candidate) === boundValue(action, state, "targetStageId"));
+    if (mode === "assign" && executorPatchWorkStarted(target)) {
+      errors.push("阶段已开始，不能直接选择履约者。");
+    }
+    if (mode === "handoff" || mode === "replacement") {
+      if (!boundValue(action, state, "previousExecutorWallet") && !boundValue(action, state, "previousExecutor")) {
+        errors.push("请填写原履约者钱包。");
+      }
+    }
+    if (mode === "replacement" && !approval) {
+      errors.push("需要替换证明。");
+    }
   }
   if (action.actionKind === "stage_resource_patch") {
     pushWalletMismatchError(errors, state, boundValue(action, state, "selectorWallet"));
@@ -285,8 +305,11 @@ function valueForInput(state: AddOnManifestRuntimeState, inputId: string): strin
   return state.values[inputId] ?? "";
 }
 
-function normalizeExecutorPatchMode(value: string): ProductStageExecutorPatchMode | undefined {
-  if (value === "assign" || value === "replace" || value === "handoff" || value === "replacement") {
+function normalizeExecutorPatchMode(value: string): ProductExecutorPatchMode | undefined {
+  // 只认协议冻结的拼写（assign/handoff/replacement）：服务端虽把 "replace"
+  // 别名归一为 replacement，但那是服务端宽限；客户端自造拼写会让 manifest
+  // 驱动路径绕开应用层按 mode 建立的替换门槛（见 semanticErrorsForAction）。
+  if (value === "assign" || value === "handoff" || value === "replacement") {
     return value;
   }
   return undefined;
@@ -294,15 +317,6 @@ function normalizeExecutorPatchMode(value: string): ProductStageExecutorPatchMod
 
 function looksLikeHash(value: string): boolean {
   return /^0x[0-9a-fA-F]{64}$/u.test(value.trim());
-}
-
-function isContentAddressedReference(value: string): boolean {
-  const trimmed = value.trim().toLowerCase();
-  return trimmed.startsWith("ipfs://") ||
-    trimmed.startsWith("ar://") ||
-    trimmed.startsWith("cid:") ||
-    trimmed.startsWith("bafy") ||
-    trimmed.startsWith("urn:");
 }
 
 function parseOptionalJson(value: string): unknown {

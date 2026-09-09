@@ -63,7 +63,7 @@ import {
   signalContainerForTask,
   type TaskSignalContainerSummary
 } from "./signalContainer";
-import { cleanString, sameAddress, stagePatchSignExpectation } from "./taskUtils";
+import { cleanString, isContentAddressedReference, sameAddress, stagePatchSignExpectation } from "./taskUtils";
 import { taskExecutorDisplay } from "./taskPresentation";
 import { taskDisplay } from "./taskStatus";
 import "./taskRuntime.css";
@@ -2163,11 +2163,3 @@ function looksLikeHash(value: string): boolean {
   return /^0x[0-9a-fA-F]{64}$/u.test(value.trim());
 }
 
-function isContentAddressedReference(value: string): boolean {
-  const trimmed = value.trim().toLowerCase();
-  return trimmed.startsWith("ipfs://") ||
-    trimmed.startsWith("ar://") ||
-    trimmed.startsWith("cid:") ||
-    trimmed.startsWith("bafy") ||
-    trimmed.startsWith("urn:");
-}

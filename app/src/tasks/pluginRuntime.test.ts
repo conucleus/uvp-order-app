@@ -895,6 +895,7 @@ function addOnManifestFixture(
             { componentId: "executor-wallet", componentKind: "wallet", inputId: "executorWallet", label: "履约者钱包", required: true },
             { componentId: "executor-metadata-hash", componentKind: "hash", inputId: "executorMetadataHash", label: "履约者指纹", required: true },
             { componentId: "executor-reference", componentKind: "text", inputId: "executorReference", label: "履约者参考" },
+            { componentId: "previous-executor", componentKind: "wallet", inputId: "previousExecutorWallet", label: "原履约者钱包" },
             { componentId: "metadata-uri", componentKind: "uri", inputId: "metadataURI", label: "补充说明 URI", required: true },
             { componentId: "mode", componentKind: "select", inputId: "mode", label: "处理方式", options: [{ value: "assign", label: "选择履约者" }] },
             ...(options.withApprovalBinding ? [approvalComponent] : [])
@@ -912,6 +913,7 @@ function addOnManifestFixture(
           executorWallet: "executorWallet",
           executorMetadataHash: "executorMetadataHash",
           executorReference: "executorReference",
+          previousExecutorWallet: "previousExecutorWallet",
           metadataURI: "metadataURI",
           mode: "mode",
           ...(options.withApprovalBinding ? { approval: "approval" } : {})
@@ -1006,3 +1008,58 @@ function addOnManifestFixture(
     }]
   };
 }
+
+describe("manifest-driven executor patch honors the replacement gate", () => {
+  const manifest = addOnManifestFixture("stage_executor_patch", "stage_executor_patch", { withApprovalBinding: true });
+  const task = taskFixture("evidence_submission", {
+    addOnManifest: manifest,
+    canSubmit: true,
+    selectableTargets: [{ targetStageId: "inspection", targetStageName: "检验", allowed: true }]
+  });
+  const baseValues = {
+    selectorWallet: wallet,
+    targetStageId: "inspection",
+    executorWallet: "0x0000000000000000000000000000000000000002",
+    executorMetadataHash: "0x2222222222222222222222222222222222222222222222222222222222222222",
+    metadataURI: "ipfs://executor/inspection"
+  };
+
+  function validateWith(values: Record<string, string>) {
+    const action = manifest.actions[0]!;
+    return validateAddOnManifestAction(manifest, action, {
+      task,
+      walletAddress: wallet,
+      values: { ...baseValues, ...values },
+      confirmations: {}
+    });
+  }
+
+  it("rejects the self-invented replace spelling instead of letting it slip through as assign", () => {
+    const validation = validateWith({ mode: "replace" });
+    assert.equal(validation.ok, false);
+    assert.ok(validation.errors.includes("处理方式必须是 assign/handoff/replacement 之一（协议拼写）。"));
+  });
+
+  it("requires a replacement proof for replacement mode, aligned with the application-level panel", () => {
+    const missing = validateWith({ mode: "replacement" });
+    assert.equal(missing.ok, false);
+    assert.ok(missing.errors.includes("需要替换证明。"));
+
+    const present = validateWith({
+      mode: "replacement",
+      approval: JSON.stringify({ sourceId: "0x11", signalId: "0x22" }),
+      previousExecutorWallet: "0x0000000000000000000000000000000000000003"
+    });
+    assert.equal(present.ok, true);
+  });
+
+  it("requires the previous executor wallet for handoff and replacement modes", () => {
+    const handoff = validateWith({ mode: "handoff" });
+    assert.equal(handoff.ok, false);
+    assert.ok(handoff.errors.includes("请填写原履约者钱包。"));
+
+    const replacement = validateWith({ mode: "replacement", approval: JSON.stringify({ sourceId: "0x11", signalId: "0x22" }) });
+    assert.equal(replacement.ok, false);
+    assert.ok(replacement.errors.includes("请填写原履约者钱包。"));
+  });
+});
