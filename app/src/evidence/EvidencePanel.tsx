@@ -255,7 +255,7 @@ export function EvidencePanel({
       const signature = await actions.signProductSubmit({
         typedData: prepared.raw.typedData,
         walletAddress: signingWallet.trim(),
-        // 域校验预期：与任务投影的状态机地址交叉核对（F-8 同源修复）。
+        // 域校验预期：与任务投影的状态机地址交叉核对。
         ...(task.stateMachineAddress
           ? { expected: { verifyingContract: task.stateMachineAddress } }
           : {})
