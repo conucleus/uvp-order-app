@@ -263,6 +263,34 @@ describe("order app notification loading", () => {
     }
   });
 
+  it("normalizes invalidated notifications with the structured status field intact", async () => {
+    // bug_audit #25：reorg 失效通知按结构化状态呈现，reason 原样透传，
+    // 前端不解析 message 文案判定失效。
+    const fetcher = async () => new Response(JSON.stringify({
+      notifications: [
+        {
+          notificationId: "0x" + "ab".repeat(32),
+          kind: "notification_invalidated",
+          severity: "warning",
+          readStatus: "unread",
+          orderId: "order-7",
+          orderTitle: "真实订单标题",
+          eventLabel: "通知已失效",
+          message: "该提醒指向的链上记录已被重组回滚，内容不再可信。请打开订单证明核对最新链上状态。",
+          actionHref: "#section=orders&order=order-7",
+          proofHref: "#section=orders&order=order-7/proof",
+          invalidation: { status: "invalidated", reason: "reorg_rolled_back" },
+          createdAt: "2026-08-01T00:00:00.000Z",
+          source: "notification_delivery"
+        }
+      ]
+    }), { status: 200 });
+    const result = await loadOrderAppNotifications(realSourceData, session, fetcher);
+    assert.equal(result.notifications.length, 1);
+    assert.equal(result.notifications[0]?.kind, "notification_invalidated");
+    assert.deepEqual(result.notifications[0]?.invalidation, { status: "invalidated", reason: "reorg_rolled_back" });
+  });
+
   it("clears corrupted local read state instead of silently discarding it", async () => {
     const storage = installMemoryWindow();
     const readKey = "uvp-order-app:notification-read:0xabc0000000000000000000000000000000000009";

@@ -154,6 +154,11 @@ export function NotificationCenter({
                 <div className="notification-meta">
                   <span>{notification.orderTitle}</span>
                   {notification.stageLabel ? <span>{notification.stageLabel}</span> : null}
+                  {notification.invalidation?.status === "invalidated" ? (
+                    <span className="notification-invalidated-flag">
+                      状态：已失效{notification.invalidation.reason === "reorg_rolled_back" ? "（链上重组回滚）" : ""}
+                    </span>
+                  ) : null}
                   <span>{notification.privacy === "participant_only" ? "仅参与方可见" : ""}</span>
                 </div>
               </div>

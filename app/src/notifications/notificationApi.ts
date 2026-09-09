@@ -293,6 +293,14 @@ function normalizeApiNotification(input: Partial<OrderAppNotificationDTO>): Orde
     message: input.message,
     actionHref: input.actionHref,
     ...(typeof input.proofHref === "string" ? { proofHref: input.proofHref } : {}),
+    ...(input.invalidation?.status === "invalidated"
+      ? {
+          invalidation: {
+            status: "invalidated" as const,
+            ...(typeof input.invalidation.reason === "string" ? { reason: input.invalidation.reason } : {})
+          }
+        }
+      : {}),
     createdAt: input.createdAt,
     ...(typeof input.readAt === "string" ? { readAt: input.readAt } : {}),
     source: input.source === "notification_delivery" ? "notification_delivery" : "api",
@@ -371,6 +379,7 @@ function notificationKind(value: unknown): OrderAppNotificationKind | undefined 
     case "submission_confirmed":
     case "submission_failed":
     case "task_revoked":
+    case "notification_invalidated":
       return value;
     default:
       return undefined;

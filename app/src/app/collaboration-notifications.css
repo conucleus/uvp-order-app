@@ -147,6 +147,11 @@
   font-size: 12px;
 }
 
+.notification-invalidated-flag {
+  color: var(--app-warning, #b45309);
+  font-weight: 600;
+}
+
 .notification-actions {
   gap: 8px;
   flex-wrap: wrap;
