@@ -1,6 +1,15 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { cleanString, isContentAddressedReference, parseDeadlineUtcMs, parseEvidenceIds, sameAddress, stagePatchSignExpectation } from "./taskUtils.js";
+import {
+  cleanString,
+  isContentAddressedReference,
+  parseDeadlineUtcMs,
+  parseEvidenceIds,
+  sameAddress,
+  stagePatchSignExpectation,
+  submitSignExpectation,
+  type SignDomainEnv
+} from "./taskUtils.js";
 
 describe("task utility helpers", () => {
   it("normalizes shared task strings and wallet comparisons", () => {
@@ -15,18 +24,37 @@ describe("task utility helpers", () => {
 });
 
 describe("stage patch signing domain expectation", () => {
-  it("derives the domain expectation from the module address declared by the prepare envelope", () => {
-    const moduleAddress = "0x8888888888888888888888888888888888888888";
+  const moduleAddress = "0x8888888888888888888888888888888888888888";
+
+  it("derives the domain expectation from deployment config, not the prepare envelope", () => {
+    // 预期值来自部署配置注入（独立来源）：prepare 信封里的
+    // humanSummary.verifyingContract 与 typedData 同源，不作为核对基准。
     assert.deepEqual(
-      stagePatchSignExpectation({ humanSummary: { verifyingContract: `  ${moduleAddress} ` } }),
+      stagePatchSignExpectation({ VITE_UVP_STAGE_PATCH_MODULE_ADDRESS: `  ${moduleAddress} ` }),
       { expected: { verifyingContract: moduleAddress } }
     );
   });
 
-  it("refuses to sign when the prepare envelope does not declare the patch verifying contract", () => {
-    assert.throws(() => stagePatchSignExpectation({}), /humanSummary\.verifyingContract/);
-    assert.throws(() => stagePatchSignExpectation({ humanSummary: {} }), /humanSummary\.verifyingContract/);
-    assert.throws(() => stagePatchSignExpectation({ humanSummary: { verifyingContract: "   " } }), /humanSummary\.verifyingContract/);
+  it("refuses to sign when the deployment config does not declare the patch module address", () => {
+    // 缺预期值即拒绝签名（fail-closed），不再条件性跳过比对。
+    assert.throws(() => stagePatchSignExpectation({}), /VITE_UVP_STAGE_PATCH_MODULE_ADDRESS/u);
+    assert.throws(() => stagePatchSignExpectation({ VITE_UVP_STAGE_PATCH_MODULE_ADDRESS: "not-an-address" }), /VITE_UVP_STAGE_PATCH_MODULE_ADDRESS/u);
+  });
+});
+
+describe("task submit signing domain expectation", () => {
+  const stateMachineAddress = "0x7777777777777777777777777777777777777777";
+
+  it("derives the submit expectation from deployment config, independent of the BFF response", () => {
+    assert.deepEqual(
+      submitSignExpectation({ VITE_UVP_STATE_MACHINE_ADDRESS: stateMachineAddress }),
+      { expected: { verifyingContract: stateMachineAddress } }
+    );
+  });
+
+  it("refuses to sign when the deployment config does not declare the state machine address", () => {
+    assert.throws(() => submitSignExpectation({}), /VITE_UVP_STATE_MACHINE_ADDRESS/u);
+    assert.throws(() => submitSignExpectation({ VITE_UVP_STATE_MACHINE_ADDRESS: "0x1234" }), /VITE_UVP_STATE_MACHINE_ADDRESS/u);
   });
 });
 

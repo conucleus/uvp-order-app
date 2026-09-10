@@ -204,6 +204,50 @@ describe("order app notification loading", () => {
     );
   });
 
+  it("merges the local read cache so unsynced receipts do not flip back to unread", async () => {
+    // 回执同步失败后（重试仍在队列），刷新不得把已读通知回退成未读：
+    // 本地读缓存在加载路径合并，未同步的标 syncPending。
+    installMemoryWindow();
+    window.localStorage.setItem(
+      "uvp-order-app:notification-read:0xabc0000000000000000000000000000000000009",
+      JSON.stringify({ "notification-local-read-1": "2026-08-02T00:00:00.000Z" })
+    );
+    window.localStorage.setItem(
+      "uvp-order-app:notification-read-pending:0xabc0000000000000000000000000000000000009",
+      JSON.stringify({ "notification-local-read-1": "2026-08-02T00:00:00.000Z" })
+    );
+    const fetcher = (async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
+      if (init?.method === "POST") {
+        // 回执重放仍失败（5xx 瞬时错误）：条目保留在重试队列。
+        return new Response("still down", { status: 503 });
+      }
+      return new Response(JSON.stringify({
+        notifications: [
+          {
+            notificationId: "notification-local-read-1",
+            kind: "task_ready",
+            severity: "action",
+            readStatus: "unread",
+            orderId: "order-7",
+            orderTitle: "真实订单标题",
+            eventLabel: "任务已就绪",
+            message: "服务端下发的通知正文。",
+            actionHref: "#section=orders&order=order-7",
+            createdAt: "2026-08-01T00:00:00.000Z",
+            source: "notification_delivery"
+          }
+        ]
+      }), { status: 200 });
+    }) as typeof fetch;
+
+    const result = await loadOrderAppNotifications(realSourceData, session, fetcher);
+
+    assert.equal(result.notifications[0]?.readStatus, "read");
+    assert.equal(result.notifications[0]?.readAt, "2026-08-02T00:00:00.000Z");
+    assert.equal(result.notifications[0]?.syncPending, true);
+    assert.equal(result.unreadCount, 0);
+  });
+
   it("rejects notification loads for sources other than the real participant API", async () => {
     const demoData = { ...realSourceData, source: { kind: "demo", reason: "demo-mode" } } as unknown as ProductHomeData;
     await assert.rejects(loadOrderAppNotifications(demoData, session), /参与者服务/);

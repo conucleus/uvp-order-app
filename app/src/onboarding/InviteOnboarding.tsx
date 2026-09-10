@@ -51,7 +51,12 @@ export function InviteOnboarding({ inviteId, inviteToken, actions, session, onAc
   useEffect(() => {
     let cancelled = false;
     setLoadState({ status: "loading" });
-    void actions.previewInvite(inviteId, probedWalletAddress ? { walletAddress: probedWalletAddress } : {})
+    // 预览与 accept/reject 同一凭据口径：服务端按 token 哈希比对（缺失 403），
+    // 预览请求必须携带邀请链接里的一次性令牌。
+    void actions.previewInvite(inviteId, {
+      ...(probedWalletAddress ? { walletAddress: probedWalletAddress } : {}),
+      ...(inviteToken ? { token: inviteToken } : {})
+    })
       .then((invite) => {
         if (cancelled) {
           return;
@@ -71,7 +76,7 @@ export function InviteOnboarding({ inviteId, inviteToken, actions, session, onAc
     return () => {
       cancelled = true;
     };
-  }, [actions, inviteId, probedWalletAddress]);
+  }, [actions, inviteId, inviteToken, probedWalletAddress]);
 
   const invite = loadState.status === "ready" || loadState.status === "accepted" ? loadState.invite : undefined;
   const walletFormatOk = isEvmWalletAddress(walletAddress.trim());
@@ -234,7 +239,9 @@ export function InviteOnboarding({ inviteId, inviteToken, actions, session, onAc
           </p>
         ) : null}
         <div className="invite-actions">
-          <button className="quiet-button" type="button" onClick={handleReject}>拒绝</button>
+          {/* reject 同样强制回呈 token（服务端哈希比对）：缺令牌时禁用，
+              不发出注定 403 的请求；提示已在上方 tokenMissing 文案给出。 */}
+          <button className="quiet-button" type="button" disabled={tokenMissing} onClick={handleReject}>拒绝</button>
           <button className="primary-button" type="button" disabled={!canAccept} onClick={handleAccept}>接受角色</button>
         </div>
       </div>

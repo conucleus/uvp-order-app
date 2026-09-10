@@ -71,6 +71,7 @@ export function TaskWorkspace({
                 source={source}
                 task={selectedTask}
                 onProofReady={onProofReady}
+                onSubmitted={onSubmitted}
               />
             )}
             onPrepareSubmit={onPrepareTaskSubmit}

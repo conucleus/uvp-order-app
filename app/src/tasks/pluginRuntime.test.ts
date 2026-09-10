@@ -378,6 +378,71 @@ describe("task plugin runtime", () => {
     assert.equal(taskSubmitIntent(taskFixture("delivery_update")), "confirm_stage");
   });
 
+  it("derives the manifest-driven prepare intent by plugin kind when the action declares none (aligned with zhixu-store)", () => {
+    // manifest 动作未声明 intent 时按能力插件类型推导，不再兜底
+    // confirm_stage：dispute_material 动作必须以 raise_dispute 提交。
+    const undeclaredManifest: ParticipantAddOnManifestDTO = {
+      schemaVersion: "participant-addon-manifest.v1",
+      manifestId: "dispute-undeclared:v1",
+      roleSlotId: "dispute",
+      addOnKind: "submit_signal",
+      title: "争议材料提交",
+      summary: "",
+      stageBindings: [],
+      pages: [],
+      actions: [
+        {
+          actionId: "dispute.submit",
+          actionKind: "submit_signal",
+          label: "提交争议材料",
+          primary: true,
+          inputBindings: { walletAddress: "dispute.wallet", evidenceIds: "dispute.evidence" }
+        }
+      ]
+    };
+    const disputeTask = taskFixture("dispute_material", {
+      addOnManifest: undeclaredManifest,
+      canSubmit: true
+    });
+    const disputeState = {
+      ...createInitialAddOnManifestState(disputeTask, wallet),
+      values: {
+        "dispute.wallet": wallet,
+        "dispute.evidence": "evidence-dispute-1"
+      },
+      confirmations: {}
+    };
+    const disputeAction = undeclaredManifest.actions[0]!;
+
+    assert.equal(taskSubmitIntent(disputeTask), "raise_dispute");
+    const disputePrepare = buildAddOnManifestPrepareInput(disputeAction, disputeState);
+    assert.equal(disputePrepare.actionKind, "submit_signal");
+    assert.equal(disputePrepare.input.intent, "raise_dispute");
+
+    // 显式声明仍然优先（发布者声明是权威）。
+    const declaredPrepare = buildAddOnManifestPrepareInput(
+      { ...disputeAction, intent: "reject_stage" },
+      disputeState
+    );
+    assert.equal(declaredPrepare.actionKind, "submit_signal");
+    assert.equal(declaredPrepare.input.intent, "reject_stage");
+
+    // 非争议插件未声明时保持 confirm_stage（与 zhixu-store 同序）。
+    const confirmPrepare = buildAddOnManifestPrepareInput(
+      disputeAction,
+      {
+        ...createInitialAddOnManifestState(taskFixture("delivery_update", {
+          addOnManifest: undeclaredManifest,
+          canSubmit: true
+        }), wallet),
+        values: { "dispute.wallet": wallet, "dispute.evidence": "evidence-1" },
+        confirmations: {}
+      }
+    );
+    assert.equal(confirmPrepare.actionKind, "submit_signal");
+    assert.equal(confirmPrepare.input.intent, "confirm_stage");
+  });
+
   it("builds executor and resource patch inputs from manifest action bindings", () => {
     const selectorManifest = addOnManifestFixture("stage_executor_patch", "stage_executor_patch");
     const selectorTask = taskFixture("evidence_submission", {
@@ -713,6 +778,35 @@ describe("participant task inbox helpers", () => {
     assert.equal(display.label, "等待链上确认");
   });
 
+  it("keeps a residual confirmed projection from overriding the authoritative open status", () => {
+    // 权威 open 优先：早先尝试残留的 submissionStatus=confirmed 只在任务
+    // 已进入 submitted（等待索引）时才算确认，不得把仍开放的任务改写成
+    // "已确认"（同函数对 errorCode 残留的裁定口径）。
+    const openWithResidualConfirmed = taskFixture("delivery_update", {
+      taskId: "open-residual-confirmed",
+      status: "open",
+      deadline: "2099-05-01 18:00",
+      submissionStatus: "confirmed"
+    });
+    assert.equal(taskDisplay(openWithResidualConfirmed).state, "ready");
+    assert.equal(taskDisplay(openWithResidualConfirmed).label, "待办");
+
+    const blockedWithResidualConfirmed = taskFixture("delivery_update", {
+      taskId: "blocked-residual-confirmed",
+      status: "blocked",
+      submissionStatus: "confirmed"
+    });
+    assert.equal(taskDisplay(blockedWithResidualConfirmed).state, "blocked");
+
+    // 权威 submitted + 投影 confirmed（索引超前）仍按已确认展示。
+    const submittedWithConfirmed = taskFixture("delivery_update", {
+      taskId: "submitted-confirmed",
+      status: "submitted",
+      submissionStatus: "confirmed"
+    });
+    assert.equal(taskDisplay(submittedWithConfirmed).state, "confirmed");
+  });
+
   it("keeps blocked and open tasks out of the failed bucket when a stale errorCode lingers", () => {
     // 残留的失败扩展不得改写服务端权威任务态：blocked 显示受阻、open 显示待办，
     // 只有 submitted 中间态才允许由失败扩展判"提交失败"。
@@ -788,7 +882,11 @@ describe("participant task inbox helpers", () => {
 
 function taskFixture(
   kind: FulfillmentPluginKind,
-  overrides: Partial<ProductTaskWithAddOns> & { readonly errorCode?: string } = {}
+  overrides: Partial<ProductTaskWithAddOns> & {
+    readonly errorCode?: string;
+    readonly submissionStatus?: string;
+    readonly chainStatus?: string;
+  } = {}
 ): ProductTaskDTO {
   return {
     taskId: overrides.taskId ?? `task-${kind}`,

@@ -63,6 +63,7 @@ const participantBody = {
 
 interface CapturedRequest {
   readonly url: string;
+  readonly method: string;
   readonly headers: Record<string, string>;
   readonly body: string | null;
 }async function installInviteRoutes(page: Page): Promise<{ requests: CapturedRequest[] }> {
@@ -87,6 +88,7 @@ interface CapturedRequest {
     const url = new URL(request.url());
     requests.push({
       url: request.url(),
+      method: request.method(),
       headers: request.headers(),
       body: request.postData()
     });
@@ -106,6 +108,12 @@ interface CapturedRequest {
       return;
     }
     if (request.method() === "GET" && url.pathname === `/product/invites/${INVITE_ID}`) {
+      // 契约对齐：预览与 accept/reject 同一凭据口径（token 哈希比对），
+      // 缺 token/错 token 一律 403，不再无条件 200 掩盖客户端断裂。
+      if (url.searchParams.get("token") !== INVITE_TOKEN) {
+        await fulfill({ error: "invite_token_mismatch", message: "invite token required" }, 403);
+        return;
+      }
       await fulfill(invitePreviewBody);
       return;
     }
@@ -159,6 +167,10 @@ test("invite entry accepts through the server contract and returns to tasks", as
   const acceptUrl = new URL(accept.url);
   expect(acceptUrl.searchParams.get("walletAddress")).toBe(participantWallet);
   expect(JSON.parse(accept.body ?? "{}")).toMatchObject({ token: INVITE_TOKEN, walletAddress: participantWallet });
+  // 预览请求同样携带一次性令牌（服务端按 token 哈希比对，缺失 403）。
+  const preview = requests.find((request) => request.method === "GET" && request.url.includes(`/product/invites/${INVITE_ID}?`));
+  assert.ok(preview, "preview request captured");
+  expect(new URL(preview.url).searchParams.get("token")).toBe(INVITE_TOKEN);
   // 会话证明链路确实发生过。
   expect(requests.some((request) => request.url.endsWith("/store/auth/challenge"))).toBe(true);
   expect(requests.some((request) => request.url.endsWith("/store/auth/verify"))).toBe(true);
@@ -172,13 +184,15 @@ test("invite entry accepts through the server contract and returns to tasks", as
   await expect(page).toHaveURL(/#section=tasks/);
 });
 
-test("invite entry without a token blocks accept instead of firing a doomed request", async ({ page }) => {
+test("invite entry without a token is refused by the token-checked preview and never reaches accept", async ({ page }) => {
   const { requests } = await installInviteRoutes(page);
   await page.goto(`/?invite=${INVITE_ID}`);
 
-  await expect(page.getByRole("heading", { name: "邀请验收订单" })).toBeVisible();
-  await expect(page.getByText("邀请链接缺少一次性令牌（inviteToken）", { exact: false })).toBeVisible();
-  await page.getByLabel("绑定钱包").fill(participantWallet);
-  await expect(page.getByRole("button", { name: "接受角色" })).toBeDisabled();
+  // 预览即被 403（token 哈希比对是邀请面统一凭据口径）：面板如实呈现
+  // 邀请不可用，不渲染可操作的 accept/reject 表单。
+  await expect(page.getByRole("heading", { name: "邀请不可用" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "接受角色" })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "拒绝", exact: true })).toHaveCount(0);
   expect(requests.some((request) => request.url.includes("/accept"))).toBe(false);
+  expect(requests.some((request) => request.url.includes("/reject"))).toBe(false);
 });

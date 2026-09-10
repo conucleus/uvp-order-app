@@ -36,7 +36,13 @@ import {
   validateEvidenceFileForSlot
 } from "./evidenceSpec";
 import type { CapturedEvidence, EvidenceRequirement, TaskSubmissionProof } from "../task-model";
-import { sameAddress, signalContainerForTask, taskPrimaryActionLabel, taskSubmitIntent } from "../task-model";
+import {
+  sameAddress,
+  signalContainerForTask,
+  taskPrimaryActionLabel,
+  taskSubmitIntent,
+  submitSignExpectation
+} from "../task-model";
 import { shortWallet } from "../auth/participant";
 import "./evidence.css";
 
@@ -47,6 +53,8 @@ interface EvidencePanelProps {
   readonly task?: ProductTaskDTO | undefined;
   readonly participantWallet?: string | undefined;
   readonly onProofReady: (proof: TaskSubmissionProof) => void;
+  /** 提交成功（非终态失败）后回调一次，触发上层刷新任务投影。 */
+  readonly onSubmitted?: (() => void) | undefined;
 }
 
 type PrepareState =
@@ -71,7 +79,8 @@ export function EvidencePanel({
   order,
   task,
   participantWallet,
-  onProofReady
+  onProofReady,
+  onSubmitted
 }: EvidencePanelProps) {
   const [captures, setCaptures] = useState<Readonly<Record<string, CapturedEvidence>>>({});
   const [fieldValues, setFieldValues] = useState<Readonly<Record<string, string>>>({});
@@ -85,6 +94,11 @@ export function EvidencePanel({
   useLayoutEffect(() => {
     taskScopeRef.current = taskScopeKey;
   }, [taskScopeKey]);
+  // 同步互斥（zhixu-store submitInflightRef 同款）：prepare→签名→提交是长
+  // 链路，按钮的 pending 禁用要等状态落盘+重渲染才生效，同步 ref 挡住
+  // 重渲染前的第二次点击；ref 在单次请求收尾即释放，防重复提交的终态
+  // 闸由 confirmed 任务状态门（:235/:264 的准入检查）承担。
+  const submitInflightRef = useRef(false);
 
   useEffect(() => {
     setCaptures({});
@@ -121,7 +135,12 @@ export function EvidencePanel({
         hasInjectedWallet
       })
     : [];
-  const canPrepare = blockers.length === 0 && prepareState.status !== "preparing" && prepareState.status !== "submitting";
+  const canPrepare = blockers.length === 0 &&
+    prepareState.status !== "preparing" &&
+    prepareState.status !== "submitting" &&
+    // 终态闸：本次会话已成功提交后不再开放重投，重复提交只能经由刷新后的
+    // 任务投影状态改判（submitted/done 时 preflightBlockers 会关闭入口）。
+    prepareState.status !== "confirmed";
   const canSubmitSignature =
     (prepareState.status === "prepared" || prepareState.status === "failed") &&
     canPrepare;
@@ -214,7 +233,7 @@ export function EvidencePanel({
   }
 
   async function handlePrepareSubmit() {
-    if (!task || blockers.length > 0) {
+    if (!task || blockers.length > 0 || submitInflightRef.current) {
       return;
     }
     const requestScopeKey = taskScopeRef.current;
@@ -243,10 +262,11 @@ export function EvidencePanel({
   }
 
   async function handleSubmitSignature(prepared: PreparedSubmitView) {
-    if (!task || !canSubmitSignature) {
+    if (!task || !canSubmitSignature || submitInflightRef.current) {
       return;
     }
     const requestScopeKey = taskScopeRef.current;
+    submitInflightRef.current = true;
     setPrepareState({ status: "submitting", prepared });
     try {
       if (!prepared.raw) {
@@ -255,10 +275,9 @@ export function EvidencePanel({
       const signature = await actions.signProductSubmit({
         typedData: prepared.raw.typedData,
         walletAddress: signingWallet.trim(),
-        // 域校验预期：与任务投影的状态机地址交叉核对。
-        ...(task.stateMachineAddress
-          ? { expected: { verifyingContract: task.stateMachineAddress } }
-          : {})
+        // 域校验预期来自部署配置注入（独立来源），缺配置即拒签，不读同一
+        // BFF 响应里的地址，防被攻陷 BFF 换域让钱包照签。
+        ...submitSignExpectation()
       });
       if (taskScopeRef.current !== requestScopeKey) {
         return;
@@ -285,18 +304,26 @@ export function EvidencePanel({
         prepared,
         evidence: refreshed.evidence
       });
-      // 提交信封如实展示：failed 是失败，expired/replaced 是中间态。
-      if (submission.status === "failed") {
+      // 提交信封如实展示：failed/expired/replaced 都是服务端记录的终态，
+      // 按失败呈现并引导重新准备（submissionHandoff 同口径）。
+      if (submission.status === "failed" || submission.status === "expired" || submission.status === "replaced") {
         onProofReady(proof);
         setPrepareState({
           status: "failed",
-          message: `提交失败${submission.errorCode ? `（${submission.errorCode}）` : ""}，请核对后重试。`,
+          message: submission.status === "failed"
+            ? `提交失败${submission.errorCode ? `（${submission.errorCode}）` : ""}，请核对后重试。`
+            : submission.status === "expired"
+              ? "提交已过期未生效（终态），请重新准备提交。"
+              : "本次提交已被后续提交取代（终态），请以最新提交记录为准，勿盲目重投。",
           prepared
         });
         return;
       }
       setPrepareState({ status: "confirmed", proof, unverifiedProofs: refreshed.failedChecks });
       onProofReady(proof);
+      // 刷新任务投影：confirmed 后由服务端状态（submitted/done）关闭提交
+      // 入口，面板内终态闸只是刷新落地前的过渡防线。
+      onSubmitted?.();
     } catch (error) {
       if (taskScopeRef.current !== requestScopeKey) {
         return;
@@ -306,6 +333,8 @@ export function EvidencePanel({
         message: error instanceof Error ? error.message : "提交失败",
         prepared
       });
+    } finally {
+      submitInflightRef.current = false;
     }
   }
 

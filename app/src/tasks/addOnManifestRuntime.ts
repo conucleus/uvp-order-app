@@ -18,6 +18,7 @@ import {
   targetStageId
 } from "./addOnTypes";
 import type { PrepareSubmitInput } from "./pluginRuntime";
+import { taskSubmitIntentForAction } from "./taskPresentation";
 import { parseEvidenceIds, isContentAddressedReference, sameAddress } from "./taskUtils";
 
 export interface AddOnManifestRuntimeState {
@@ -153,7 +154,10 @@ export function buildAddOnManifestPrepareInput(
         input: {
           evidenceIds: parseEvidenceIds(boundValue(action, state, "evidenceIds")),
           walletAddress: boundValue(action, state, "walletAddress"),
-          intent: action.intent ?? "confirm_stage"
+          // 未声明 intent 时按能力插件类型推导（dispute_material →
+          // raise_dispute），与 taskPresentation/zhixu-store 同源，不再
+          // 兜底 confirm_stage 把争议动作反转成确认。
+          intent: taskSubmitIntentForAction(action, state.task)
         }
       };
     case "stage_executor_patch": {
@@ -296,6 +300,18 @@ function boundValue(
 ): string {
   const inputId = action.inputBindings[bindingKey];
   return inputId ? valueForInput(state, inputId).trim() : "";
+}
+
+/**
+ * manifest 输入绑定值的只读访问（面板提交期读取 live state 用）：
+ * 原履约者加签在 prepare 之后才有可签名对象，提交时从当前表单值取。
+ */
+export function manifestBoundValue(
+  action: ParticipantAddOnManifestActionDTO,
+  state: AddOnManifestRuntimeState,
+  bindingKey: string
+): string {
+  return boundValue(action, state, bindingKey);
 }
 
 function valueForInput(state: AddOnManifestRuntimeState, inputId: string): string {

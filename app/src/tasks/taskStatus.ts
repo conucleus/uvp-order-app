@@ -104,8 +104,10 @@ export function taskDisplay(task: ProductTaskDTO, now: Date = new Date()): Parti
   const isOverdue = task.status === "open" && isDeadlineOverdue(task.deadline, now);
 
   // done/confirmed 是链上最终态：早先失败尝试残留的 errorCode 不再把
-  // 已完成任务展示为"提交失败"。
-  if (task.status === "done" || rawStatus === "confirmed") {
+  // 已完成任务展示为"提交失败"。投影残留的 confirmed 只在任务已进入
+  // submitted（等待索引）时作为索引超前的展示；不得改写权威 open/blocked
+  // 态（同函数对 submissionStatus/errorCode 的裁定：投影残留不覆盖权威态）。
+  if (task.status === "done" || (task.status === "submitted" && rawStatus === "confirmed")) {
     return {
       state: "confirmed",
       label: "已确认",

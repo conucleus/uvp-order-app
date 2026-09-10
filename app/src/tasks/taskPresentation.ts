@@ -1,4 +1,9 @@
-import type { FulfillmentPluginKind, FulfillmentRequiredInputDTO, ProductTaskDTO } from "@uvp-eth/product-dto";
+import type {
+  FulfillmentPluginKind,
+  FulfillmentRequiredInputDTO,
+  ParticipantAddOnManifestActionDTO,
+  ProductTaskDTO
+} from "@uvp-eth/product-dto";
 import {
   addOnManifestForTask,
   executorOverlayForTask,
@@ -89,10 +94,23 @@ export function taskSubmitIntent(task: ProductTaskDTO): TaskSubmitIntent {
   const submitActions = (addOnManifestForTask(task)?.actions ?? [])
     .filter((action) => action.actionKind === "submit_signal");
   const primary = submitActions.find((action) => action.primary) ?? submitActions[0];
-  if (primary?.intent) {
-    return primary.intent;
+  return taskSubmitIntentForAction(primary, task);
+}
+
+/**
+ * manifest 驱动路径的提交意图（与 zhixu-store taskSubmitIntent 同源同序）：
+ * 动作显式声明优先；未声明时按能力插件类型推导——dispute_material 的
+ * 未声明动作不得兜底成 confirm_stage，否则争议任务会以确认口径提交。
+ */
+export function taskSubmitIntentForAction(
+  action: Pick<ParticipantAddOnManifestActionDTO, "intent"> | undefined,
+  task: Pick<ProductTaskDTO, "capabilityPlugin">
+): TaskSubmitIntent {
+  if (action?.intent) {
+    return action.intent;
   }
-  return submitIntentByPluginKind[taskCapabilityPluginKind(task)];
+  const pluginKind = task.capabilityPlugin?.pluginKind;
+  return pluginKind ? submitIntentByPluginKind[pluginKind] ?? "confirm_stage" : "confirm_stage";
 }
 
 export function taskRequiredInputsFromCapability(

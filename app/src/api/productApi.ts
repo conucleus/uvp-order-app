@@ -49,6 +49,8 @@ export interface ProductApiClient {
    * 运行时必须携带该会话；签名者由调用方注入。
    */
   proveWalletControl(input: { readonly address: string }): Promise<WalletSessionProof>;
+  /** 客户端当前持有的钱包会话 token（proveWalletControl 成功后留存），供通知等旁路请求复用同一会话锚定。 */
+  currentSessionToken(): string | undefined;
   prepareTaskSubmit(taskId: string, input: PrepareTaskSubmitInput): Promise<PreparedTaskSubmitDTO>;
   submitTask(taskId: string, input: SubmitTaskInput): Promise<ProductSubmissionDTO>;
   prepareStageExecutorPatch(taskId: string, input: PrepareStageExecutorPatchInput): Promise<PreparedStageExecutorPatchDTO>;
@@ -61,6 +63,8 @@ export interface ProductApiClient {
 
 export interface ParticipantQueryInput {
   readonly walletAddress?: string | undefined;
+  /** 一次性邀请令牌：预览（GET /product/invites/:id）与 accept/reject 一样按 token 哈希比对，缺失 403。 */
+  readonly token?: string | undefined;
 }
 
 /** 钱包消息签名器：与会话 challenge 报文配套（personal_sign 口径）。 */
@@ -421,6 +425,13 @@ const DEFAULT_FETCH_TIMEOUT_MS = 6000;
 const DEFAULT_UPLOAD_TIMEOUT_MS = 60_000;
 
 class BrowserProductApiClient implements ProductApiClient {
+  /**
+   * 钱包会话 token（proveWalletControl 成功后留存）：所有参与者面请求统一
+   * 携带 x-uvp-store-session（与 acceptInvite 的会话通道同款）——非 local
+   * 运行时服务端对参与者面读写强制会话锚定，仅 query 自报钱包会 401。
+   */
+  private walletSessionToken: string | undefined;
+
   constructor(
     private readonly config: {
       readonly baseUrl: string;
@@ -430,6 +441,10 @@ class BrowserProductApiClient implements ProductApiClient {
       readonly personalSign?: PersonalSigner | undefined;
     }
   ) {}
+
+  currentSessionToken(): string | undefined {
+    return this.walletSessionToken;
+  }
 
   async loadParticipantHome(input: ParticipantQueryInput = {}): Promise<ProductHomeData> {
     const [meResponse, ordersResponse, tasksResponse] = await Promise.all([
@@ -520,6 +535,9 @@ class BrowserProductApiClient implements ProductApiClient {
       readonly token: string;
       readonly session: { readonly anchoredAddress?: string | undefined };
     }>("/store/auth/verify", { nonce: challenge.challenge.nonce, signature });
+    // 会话留存：后续 me/tasks/orders/prepare-submit/evidence 请求统一携带，
+    // 不再退化为只有 accept 邀请才有会话锚定身份。
+    this.walletSessionToken = verified.token;
     return {
       sessionToken: verified.token,
       anchoredAddress: verified.session.anchoredAddress ?? address
@@ -604,15 +622,23 @@ class BrowserProductApiClient implements ProductApiClient {
     extraHeaders: Readonly<Record<string, string>> = {}
   ): Promise<TResponse> {
     const signal = AbortSignal.timeout(timeoutMs);
+    // 会话头与调用方显式传入的头合并：显式值（如 accept 邀请的新会话）优先。
+    const sessionHeaders = this.walletSessionToken
+      ? { "x-uvp-store-session": this.walletSessionToken }
+      : {};
     let response: Response;
     try {
       response = await withTimeout(this.config.fetcher(joinUrl(this.config.baseUrl, pathname), {
         method,
         headers: {
           "content-type": "application/json",
+          ...sessionHeaders,
           ...extraHeaders
         },
         ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+        // 禁止跟随重定向（executor-kit 同款）：这些请求携带钱包会话头，
+        // 3xx 会让凭据头随重定向重放到 Location 指向的任意主机。
+        redirect: "manual",
         signal
       }), signal);
     } catch (error) {
@@ -620,6 +646,11 @@ class BrowserProductApiClient implements ProductApiClient {
         throw new ProductApiError(0, pathname, `请求超时（${timeoutMs} 毫秒），请稍后重试。`);
       }
       throw error;
+    }
+    // manual 模式下浏览器的跨源重定向是 status 0 的 opaqueredirect：与所有
+    // 3xx 一样按错误处理（executor-kit isProductApiRedirectStatus 同口径）。
+    if (response.status === 0 || (response.status >= 300 && response.status < 400)) {
+      throw new ProductApiError(response.status, pathname, `redirect_refused:${response.status}`);
     }
     if (!response.ok) {
       throw new ProductApiError(response.status, pathname, await responseText(response));
@@ -697,11 +728,15 @@ function sortOrders(orders: readonly ProductOrderDTO[]): readonly ProductOrderDT
 }
 
 function participantPath(pathname: string, input: ParticipantQueryInput): string {
-  if (!input.walletAddress) {
-    return pathname;
+  const query = new URLSearchParams();
+  if (input.walletAddress) {
+    query.set("walletAddress", input.walletAddress);
   }
-  const query = new URLSearchParams({ walletAddress: input.walletAddress });
-  return `${pathname}?${query.toString()}`;
+  if (input.token) {
+    query.set("token", input.token);
+  }
+  const serialized = query.toString();
+  return serialized.length > 0 ? `${pathname}?${serialized}` : pathname;
 }
 
 function joinUrl(baseUrl: string, pathname: string): string {

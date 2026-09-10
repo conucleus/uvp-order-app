@@ -244,6 +244,103 @@ describe("order app Product API boundary", () => {
     );
   });
 
+  it("carries the invite token on preview requests (server token-hash gate)", async () => {
+    const requested: string[] = [];
+    const fetcher: ProductApiClientOptions["fetcher"] = async (input) => {
+      const url = String(input);
+      requested.push(url);
+      if (url.includes("/product/invites/invite-9")) {
+        return jsonResponse({
+          invite: { inviteId: "invite-9", status: "active", expiresAt: "2026-05-01T00:00:00.000Z" },
+          participant: {
+            participantId: "participant-9",
+            roleLabel: "物流/报关",
+            displayName: "受邀方",
+            contact: "invite@example.com",
+            status: "invited"
+          },
+          draft: { draftId: "draft-9", title: "订单", businessType: "b", currency: "USDC", totalAmount: "1" }
+        });
+      }
+      throw new Error(`unexpected URL ${url}`);
+    };
+    const client = createProductApiClient({ baseUrl: "http://service.local/", fetcher });
+
+    await client.previewInvite("invite-9", { token: "one-time-token" });
+
+    const previewUrl = requested.find((url) => url.includes("/product/invites/invite-9?"));
+    assert.ok(previewUrl, "preview request captured");
+    assert.ok(previewUrl.includes("token=one-time-token"));
+  });
+
+  it("keeps the proven wallet session on subsequent participant-scoped requests", async () => {
+    // 非 local 运行时服务端强制会话锚定：proveWalletControl 成功后，
+    // me/tasks/prepare-submit 等请求统一携带 x-uvp-store-session。
+    const requested: Array<{ readonly url: string; readonly headers?: Record<string, string> }> = [];
+    const fetcher: ProductApiClientOptions["fetcher"] = async (input, init) => {
+      const url = String(input);
+      const headers = (init?.headers ?? {}) as Record<string, string>;
+      requested.push({ url, headers });
+      if (url.endsWith("/store/auth/challenge")) {
+        return jsonResponse({
+          challenge: { nonce: "nonce-1", address: "0x9d8A62f656a8d1615C1294FD71E9cfB3e4855A4F", message: "challenge" }
+        });
+      }
+      if (url.endsWith("/store/auth/verify")) {
+        return jsonResponse({
+          token: "uvs_issued",
+          session: { anchoredAddress: "0x9d8A62f656a8d1615C1294FD71E9cfB3e4855A4F" }
+        });
+      }
+      if (url.endsWith("/product/tasks/task-1/prepare-submit")) {
+        return jsonResponse({
+          prepareId: "prep-1",
+          taskId: "task-1",
+          orderId: "order-1",
+          intent: "confirm_stage",
+          payloadHash: `0x${"11".repeat(32)}`,
+          submitter: "0x9d8A62f656a8d1615C1294FD71E9cfB3e4855A4F",
+          expiresAt: "2026-05-01T00:00:00.000Z",
+          typedData: {},
+          evidence: []
+        });
+      }
+      throw new Error(`unexpected URL ${url}`);
+    };
+    const client = createProductApiClient({
+      baseUrl: "http://service.local/",
+      fetcher,
+      personalSign: async () => "0xsignature"
+    });
+
+    await client.proveWalletControl({ address: "0x9d8A62f656a8d1615C1294FD71E9cfB3e4855A4F" });
+    assert.equal(client.currentSessionToken(), "uvs_issued");
+    await client.prepareTaskSubmit("task-1", {
+      evidenceIds: [],
+      walletAddress: "0x9d8A62f656a8d1615C1294FD71E9cfB3e4855A4F",
+      intent: "confirm_stage"
+    });
+
+    const prepare = requested.find((request) => request.url.endsWith("/prepare-submit"));
+    assert.ok(prepare, "prepare request captured");
+    assert.equal(prepare.headers?.["x-uvp-store-session"], "uvs_issued");
+  });
+
+  it("refuses redirects so the session header is never replayed", async () => {
+    const fetcher: ProductApiClientOptions["fetcher"] = async () =>
+      new Response(null, { status: 302, headers: { location: "https://attacker.test/" } });
+    const client = createProductApiClient({ baseUrl: "http://service.local/", fetcher });
+
+    await assert.rejects(
+      client.getTask("task-1"),
+      (error: unknown) => {
+        assert.ok(error instanceof ProductApiError);
+        assert.match(error.message, /redirect_refused:302/u);
+        return true;
+      }
+    );
+  });
+
   it("prepares and submits executor and resource patches through Product API routes", async () => {
     const requested: Array<{ readonly url: string; readonly method: string; readonly body?: string }> = [];
     const fetcher: ProductApiClientOptions["fetcher"] = async (input, init) => {

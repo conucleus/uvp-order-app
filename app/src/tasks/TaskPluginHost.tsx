@@ -46,6 +46,7 @@ import {
 import {
   buildAddOnManifestPrepareInput,
   createInitialAddOnManifestState,
+  manifestBoundValue,
   manifestIntentLabel,
   validateAddOnManifestAction,
   type AddOnManifestRuntimeState,
@@ -63,7 +64,7 @@ import {
   signalContainerForTask,
   type TaskSignalContainerSummary
 } from "./signalContainer";
-import { cleanString, isContentAddressedReference, sameAddress, stagePatchSignExpectation } from "./taskUtils";
+import { cleanString, isContentAddressedReference, sameAddress, stagePatchSignExpectation, submitSignExpectation } from "./taskUtils";
 import { taskExecutorDisplay } from "./taskPresentation";
 import { taskDisplay } from "./taskStatus";
 import "./taskRuntime.css";
@@ -219,7 +220,7 @@ export function TaskPluginHost({
   const addOnManifest = addOnManifestForTask(task);
   const executorDisplay = taskExecutorDisplay(task);
   const signalContainer = signalContainerForTask(task);
-  const { taskScopeRef } = useTaskScopeGuard(task);
+  const { scopeKey: taskScopeKey, taskScopeRef } = useTaskScopeGuard(task);
   const [state, setState] = useState<TaskPluginState>(() => createInitialTaskPluginState(task, participantWallet));
   const [phase, setPhase] = useState<RuntimePhase>("idle");
   const [prepared, setPrepared] = useState<PreparedTaskSubmit | undefined>();
@@ -234,7 +235,9 @@ export function TaskPluginHost({
     setSubmission(undefined);
     setSubmittedNotice(undefined);
     setError(undefined);
-  }, [participantWallet, task]);
+    // 重置按稳定标识（任务作用域）触发：投影刷新每次产生新 task 对象，
+    // 按引用重置会在刷新时清掉用户编辑中的输入（EvidencePanel 同口径）。
+  }, [participantWallet, taskScopeKey]);
 
   const runtimeState = useMemo<TaskPluginState>(() => ({
     ...state,
@@ -308,10 +311,9 @@ export function TaskPluginHost({
       const signature = await actions.signProductSubmit({
         typedData: prepared.typedData,
         walletAddress: participantWallet ?? "",
-        // 域校验预期：与任务投影携带的状态机地址交叉核对，防被攻陷 BFF 换域。
-        ...(task.stateMachineAddress
-          ? { expected: { verifyingContract: task.stateMachineAddress } }
-          : {})
+        // 域校验预期来自部署配置注入（独立来源），缺配置即拒签，不读同一
+        // BFF 响应里的地址，防被攻陷 BFF 换域让钱包照签。
+        ...submitSignExpectation()
       });
       if (taskScopeRef.current !== requestScopeKey) {
         return;
@@ -580,11 +582,14 @@ function ManifestAddOnPanel({
   readonly onSubmitPrepared: (taskId: string, input: SubmitPreparedInput) => Promise<ProductSubmission>;
 }) {
   const [state, setState] = useState<AddOnManifestRuntimeState>(() => createInitialAddOnManifestState(task, participantWallet));
-  const { taskScopeRef } = useTaskScopeGuard(task);
+  const { scopeKey: taskScopeKey, taskScopeRef } = useTaskScopeGuard(task);
   const [phase, setPhase] = useState<RuntimePhase>("idle");
   const [prepared, setPrepared] = useState<ManifestPreparedState | undefined>();
   const [submittedNotice, setSubmittedNotice] = useState<string | undefined>();
   const [error, setError] = useState<string | undefined>();
+  // 交接（handoff）模式的原履约者加签：签名对象是 prepare 返回的补丁
+  // typedData，只能在 prepare 之后填写，提交前与服务端强制口径对齐。
+  const [previousExecutorSignature, setPreviousExecutorSignature] = useState("");
 
   useEffect(() => {
     setState(createInitialAddOnManifestState(task, participantWallet));
@@ -592,7 +597,20 @@ function ManifestAddOnPanel({
     setPrepared(undefined);
     setSubmittedNotice(undefined);
     setError(undefined);
-  }, [manifest, participantWallet, task]);
+    setPreviousExecutorSignature("");
+    // 重置依赖稳定标识（任务作用域）而不是 task 对象引用：投影刷新每次
+    // 产生新对象，按引用重置会清掉用户编辑中的输入。
+  }, [manifest, participantWallet, taskScopeKey]);
+
+  // prepared 的 handoff 加签可能由 manifest 声明的输入绑定携带（签名
+  // 粘贴进表单），否则用本地签名框的值；两者都空时提交按钮保持禁用。
+  const preparedAction = prepared ? manifest.actions.find((item) => item.actionId === prepared.actionId) : undefined;
+  const handoffSignatureRequired = prepared?.actionKind === "stage_executor_patch" && prepared.input.mode === "handoff";
+  const effectivePreviousExecutorSignature = handoffSignatureRequired && preparedAction
+    ? manifestBoundValue(preparedAction, state, "previousExecutorSignature") || previousExecutorSignature.trim()
+    : handoffSignatureRequired
+      ? previousExecutorSignature.trim()
+      : "";
 
   function updateValue(inputId: string, value: string) {
     setPrepared(undefined);
@@ -684,9 +702,8 @@ function ManifestAddOnPanel({
         const signature = await actions.signProductSubmit({
           typedData: prepared.prepared.typedData,
           walletAddress: prepared.input.walletAddress,
-          ...(task.stateMachineAddress
-            ? { expected: { verifyingContract: task.stateMachineAddress } }
-            : {})
+          // 预期值来自部署配置注入（独立来源），缺配置即拒签（同 submit 边界）。
+          ...submitSignExpectation()
         });
         if (taskScopeRef.current !== requestScopeKey) {
           return;
@@ -711,7 +728,7 @@ function ManifestAddOnPanel({
         const signature = await actions.signTypedData({
           typedData: prepared.prepared.typedData,
           walletAddress: prepared.input.selectorWallet,
-          ...stagePatchSignExpectation(prepared.prepared)
+          ...stagePatchSignExpectation()
         });
         if (taskScopeRef.current !== requestScopeKey) {
           return;
@@ -723,7 +740,13 @@ function ManifestAddOnPanel({
           signature,
           patch: prepared.prepared,
           ...(prepared.input.mode ? { mode: prepared.input.mode } : {}),
-          ...(prepared.input.previousExecutorWallet ? { previousExecutorWallet: prepared.input.previousExecutorWallet } : {})
+          ...(prepared.input.previousExecutorWallet ? { previousExecutorWallet: prepared.input.previousExecutorWallet } : {}),
+          // handoff 必须回呈原履约者对同一补丁 typedData 的加签（服务端
+          // signatureForPreviousExecutor 强制），与内置 ExecutorPatchPanel
+          // 同一边界；缺失时按钮已禁用，这里再 fail-closed 一次。
+          ...(prepared.input.mode === "handoff" && effectivePreviousExecutorSignature
+            ? { previousExecutorSignature: effectivePreviousExecutorSignature }
+            : {})
         });
         if (taskScopeRef.current !== requestScopeKey) {
           return;
@@ -740,7 +763,7 @@ function ManifestAddOnPanel({
         const signature = await actions.signTypedData({
           typedData: prepared.prepared.typedData,
           walletAddress: prepared.input.selectorWallet,
-          ...stagePatchSignExpectation(prepared.prepared)
+          ...stagePatchSignExpectation()
         });
         if (taskScopeRef.current !== requestScopeKey) {
           return;
@@ -865,9 +888,23 @@ function ManifestAddOnPanel({
             <ProofRow label="动作" value={prepared.actionLabel} />
             <ProofRow label="指纹" value={manifestPreparedHash(prepared)} />
           </dl>
+          {handoffSignatureRequired ? (
+            <label className="plugin-field">
+              <span>
+                原履约者签名
+                <small>交接履约者</small>
+              </span>
+              <input
+                aria-label="原履约者签名"
+                onChange={(event) => setPreviousExecutorSignature(event.currentTarget.value)}
+                placeholder="0x..."
+                value={previousExecutorSignature}
+              />
+            </label>
+          ) : null}
           <button
             className="primary-button"
-            disabled={phase === "submitting"}
+            disabled={phase === "submitting" || (handoffSignatureRequired && !effectivePreviousExecutorSignature.trim())}
             onClick={() => void submitPreparedAction()}
             type="button"
           >
@@ -1129,7 +1166,7 @@ function ExecutorPatchPanel({
   readonly onSubmitted?: (() => void) | undefined;
 }) {
   const [draft, setDraft] = useState<ExecutorPatchDraftState>(() => initialExecutorPatchDraft(task, targets, participantWallet));
-  const { taskScopeRef } = useTaskScopeGuard(task);
+  const { scopeKey: taskScopeKey, taskScopeRef } = useTaskScopeGuard(task);
   const [phase, setPhase] = useState<PatchPhase>("idle");
   const [prepared, setPrepared] = useState<PreparedStageExecutorPatchDTO | undefined>();
   const [submission, setSubmission] = useState<StageExecutorPatchSubmissionDTO | undefined>();
@@ -1155,7 +1192,9 @@ function ExecutorPatchPanel({
     setPrepared(undefined);
     setSubmission(undefined);
     setError(undefined);
-  }, [participantWallet, targets, task]);
+    // 重置按稳定标识（任务作用域）触发：投影刷新每次产生新 task/targets
+    // 对象，按引用重置会清掉用户编辑中的输入（EvidencePanel 同口径）。
+  }, [participantWallet, taskScopeKey]);
 
   function updateDraft(patch: Partial<ExecutorPatchDraftState>) {
     setPrepared(undefined);
@@ -1247,7 +1286,7 @@ function ExecutorPatchPanel({
       const signature = await actions.signTypedData({
         typedData: prepared.typedData,
         walletAddress: draft.selectorWallet.trim(),
-        ...stagePatchSignExpectation(prepared)
+        ...stagePatchSignExpectation()
       });
       if (taskScopeRef.current !== requestScopeKey) {
         return;
@@ -1578,7 +1617,7 @@ function ResourcePatchPanel({
   readonly onSubmitted?: (() => void) | undefined;
 }) {
   const [draft, setDraft] = useState<ResourcePatchDraftState>(() => initialResourcePatchDraft(task, targets, participantWallet));
-  const { taskScopeRef } = useTaskScopeGuard(task);
+  const { scopeKey: taskScopeKey, taskScopeRef } = useTaskScopeGuard(task);
   const [phase, setPhase] = useState<PatchPhase>("idle");
   const [prepared, setPrepared] = useState<PreparedStageResourcePatchDTO | undefined>();
   const [submission, setSubmission] = useState<StageResourcePatchSubmissionDTO | undefined>();
@@ -1601,7 +1640,8 @@ function ResourcePatchPanel({
     setPrepared(undefined);
     setSubmission(undefined);
     setError(undefined);
-  }, [participantWallet, targets, task]);
+    // 重置按稳定标识（任务作用域）触发（ExecutorPatchPanel 同口径）。
+  }, [participantWallet, taskScopeKey]);
 
   function updateDraft(patch: Partial<ResourcePatchDraftState>) {
     setPrepared(undefined);
@@ -1628,11 +1668,13 @@ function ResourcePatchPanel({
 
   function updateResourceKey(resourceKey: string) {
     const option = resourceOptions.find((resource) => resource.resourceKey === resourceKey);
+    // 与 updateTarget/updateMode 同口径显式清空：条件展开会在新资源未声明
+    // 某个字段时残留上一资源的清单三元组，提交两份资源混合的指纹。
     updateDraft({
       resourceKey,
-      ...(option?.manifestURI ? { manifestURI: option.manifestURI } : {}),
-      ...(option?.manifestHash ? { manifestHash: option.manifestHash } : {}),
-      ...(option?.policyHash ? { policyHash: option.policyHash } : {})
+      manifestURI: option?.manifestURI ?? "",
+      manifestHash: option?.manifestHash ?? "",
+      policyHash: option?.policyHash ?? ""
     });
   }
 
@@ -1677,7 +1719,7 @@ function ResourcePatchPanel({
       const signature = await actions.signTypedData({
         typedData: prepared.typedData,
         walletAddress: draft.selectorWallet.trim(),
-        ...stagePatchSignExpectation(prepared)
+        ...stagePatchSignExpectation()
       });
       if (taskScopeRef.current !== requestScopeKey) {
         return;

@@ -25,24 +25,35 @@ interface ApiNotificationReadResponse {
   readonly notification?: Partial<OrderAppNotificationDTO>;
 }
 
+/** 通知请求的可选会话锚定：与 productApi 客户端同一身份通道。 */
+export interface NotificationRequestOptions {
+  readonly sessionToken?: string | undefined;
+}
+
 export async function loadOrderAppNotifications(
   data: ProductHomeData,
   session: ParticipantSession,
-  fetcher: Fetcher = globalThis.fetch.bind(globalThis)
+  fetcher: Fetcher = globalThis.fetch.bind(globalThis),
+  options: NotificationRequestOptions = {}
 ): Promise<OrderAppNotificationList> {
   if (data.source.kind !== "real") {
     throw new Error("通知中心仅在参与者服务连接后可用。");
   }
 
   try {
-    await syncPendingNotificationReads(data, session, fetcher);
+    await syncPendingNotificationReads(data, session, fetcher, options);
     const response = await fetcher(joinUrl(data.source.baseUrl, participantPath("/product/me/activity-feed", session)), {
       method: "GET",
       headers: {
-        "content-type": "application/json"
+        "content-type": "application/json",
+        ...(options.sessionToken ? { "x-uvp-store-session": options.sessionToken } : {})
       },
+      redirect: "manual",
       signal: AbortSignal.timeout(NOTIFICATION_FETCH_TIMEOUT_MS)
     });
+    if (isRedirectStatus(response.status)) {
+      throw new Error("通知请求被重定向，已拒绝（凭据头不随重定向重放）");
+    }
     if (!response.ok) {
       throw new Error(await responseText(response));
     }
@@ -66,9 +77,12 @@ export async function loadOrderAppNotifications(
     if (skippedNotificationCount > 0) {
       console.warn(`activity-feed returned ${skippedNotificationCount} invalid notification entries; skipped`);
     }
+    const merged = mergeLocalReadState(session, notifications);
     return {
-      notifications,
-      unreadCount: body.unreadCount ?? notifications.filter((notification) => notification.readStatus === "unread").length,
+      notifications: merged,
+      // 未读数按合并本地已读后的列表计算：回执同步失败时用户已读过的
+      // 通知不得因服务端仍未记账而重新亮起未读。
+      unreadCount: merged.filter((notification) => notification.readStatus === "unread").length,
       source: "api",
       sourceOfTruth: body.sourceOfTruth ?? "product-projection-and-notification-read-state"
     };
@@ -77,11 +91,42 @@ export async function loadOrderAppNotifications(
   }
 }
 
+/**
+ * 加载路径合并本地已读缓存：回执同步失败（或尚未重放）的通知在刷新后
+ * 仍按已读呈现（syncPending 标记回执待同步），不回退成未读。
+ */
+function mergeLocalReadState(
+  session: ParticipantSession,
+  notifications: readonly OrderAppNotificationDTO[]
+): readonly OrderAppNotificationDTO[] {
+  const localRead = readNotificationIds(session);
+  if (localRead.size === 0) {
+    return notifications;
+  }
+  const pendingIds = new Set(pendingReadEntries(session).map(([id]) => id));
+  return notifications.map((notification) => {
+    if (notification.readStatus === "read") {
+      return notification;
+    }
+    const readAt = localRead.get(notification.notificationId);
+    if (!readAt) {
+      return notification;
+    }
+    return {
+      ...notification,
+      readStatus: "read" as const,
+      readAt,
+      ...(pendingIds.has(notification.notificationId) ? { syncPending: true } : {})
+    };
+  });
+}
+
 export async function markOrderAppNotificationRead(
   notification: OrderAppNotificationDTO,
   data: ProductHomeData,
   session: ParticipantSession,
-  fetcher: Fetcher = globalThis.fetch.bind(globalThis)
+  fetcher: Fetcher = globalThis.fetch.bind(globalThis),
+  options: NotificationRequestOptions = {}
 ): Promise<OrderAppNotificationDTO> {
   const readAt = new Date().toISOString();
   rememberReadNotification(session, notification.notificationId, readAt);
@@ -91,7 +136,10 @@ export async function markOrderAppNotificationRead(
   }
 
   try {
-    const response = await postReadReceipt(data.source.baseUrl, session, notification.notificationId, fetcher);
+    const response = await postReadReceipt(data.source.baseUrl, session, notification.notificationId, fetcher, options);
+    if (isRedirectStatus(response.status)) {
+      throw new Error("已读回执被重定向，已拒绝（凭据头不随重定向重放）");
+    }
     if (!response.ok) {
       if (isPermanentReadReceiptFailure(response.status)) {
         // 4xx 是服务端对该回执的明确拒绝（通知不存在/形态非法）：重试永远
@@ -121,7 +169,8 @@ export async function markOrderAppNotificationRead(
 export async function syncPendingNotificationReads(
   data: ProductHomeData,
   session: ParticipantSession,
-  fetcher: Fetcher = globalThis.fetch.bind(globalThis)
+  fetcher: Fetcher = globalThis.fetch.bind(globalThis),
+  options: NotificationRequestOptions = {}
 ): Promise<{ readonly synced: number; readonly remaining: number }> {
   const pending = pendingReadEntries(session);
   if (data.source.kind !== "real" || pending.length === 0) {
@@ -132,12 +181,13 @@ export async function syncPendingNotificationReads(
   let evicted = 0;
   for (const [notificationId] of pending) {
     try {
-      const response = await postReadReceipt(data.source.baseUrl, session, notificationId, fetcher);
+      const response = await postReadReceipt(data.source.baseUrl, session, notificationId, fetcher, options);
+      if (isPermanentReadReceiptFailure(response.status)) {
+        clearPendingRead(session, notificationId);
+        evicted += 1;
+        continue;
+      }
       if (!response.ok) {
-        if (isPermanentReadReceiptFailure(response.status)) {
-          clearPendingRead(session, notificationId);
-          evicted += 1;
-        }
         continue;
       }
       clearPendingRead(session, notificationId);
@@ -149,6 +199,11 @@ export async function syncPendingNotificationReads(
   return { synced, remaining: pending.length - synced - evicted };
 }
 
+/** manual 重定向模式下跨源 3xx 是 status 0 的 opaqueredirect，与 3xx 一并拒绝（executor-kit 同口径）。 */
+function isRedirectStatus(status: number): boolean {
+  return status === 0 || (status >= 300 && status < 400);
+}
+
 /** 4xx：回执本身被服务端拒绝，重试不可能转为成功；5xx/网络错误才是可重试的。 */
 function isPermanentReadReceiptFailure(status: number): boolean {
   return status >= 400 && status < 500;
@@ -158,18 +213,21 @@ function postReadReceipt(
   baseUrl: string,
   session: ParticipantSession,
   notificationId: string,
-  fetcher: Fetcher
+  fetcher: Fetcher,
+  options: NotificationRequestOptions = {}
 ): Promise<Response> {
   return fetcher(
     joinUrl(baseUrl, `/product/me/activity-feed/${encodeURIComponent(notificationId)}/read`),
     {
       method: "POST",
       headers: {
-        "content-type": "application/json"
+        "content-type": "application/json",
+        ...(options.sessionToken ? { "x-uvp-store-session": options.sessionToken } : {})
       },
       body: JSON.stringify({
         ...(session.walletAddress ? { walletAddress: session.walletAddress } : {})
       }),
+      redirect: "manual",
       signal: AbortSignal.timeout(NOTIFICATION_FETCH_TIMEOUT_MS)
     }
   );

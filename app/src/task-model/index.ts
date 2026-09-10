@@ -31,5 +31,10 @@ export {
 export {
   cleanString,
   parseEvidenceIds,
-  sameAddress
+  sameAddress,
+  // 签名域预期值（部署配置注入的独立来源）：evidence/proof 面板经此公共
+  // 边界取用，不直接依赖 tasks 内部模块。
+  stagePatchSignExpectation,
+  submitSignExpectation,
+  type SignDomainEnv
 } from "../tasks/taskUtils";

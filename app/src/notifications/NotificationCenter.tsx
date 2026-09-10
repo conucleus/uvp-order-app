@@ -16,7 +16,8 @@ type NotificationLoadState =
 
 export function useOrderAppNotifications(
   data: ProductHomeData | undefined,
-  session: ParticipantSession
+  session: ParticipantSession,
+  getSessionToken?: () => string | undefined
 ): {
   readonly loadState: NotificationLoadState;
   readonly unreadCount: number;
@@ -31,7 +32,8 @@ export function useOrderAppNotifications(
     }
     let cancelled = false;
     setLoadState({ status: "loading" });
-    void loadOrderAppNotifications(data, session)
+    // 通知请求与会话锚定身份同一通道（productApi 客户端持有的钱包会话）。
+    void loadOrderAppNotifications(data, session, undefined, { sessionToken: getSessionToken?.() })
       .then((nextData) => {
         if (cancelled) {
           return;
@@ -59,13 +61,15 @@ export function useOrderAppNotifications(
     return () => {
       cancelled = true;
     };
-  }, [data, session]);
+  }, [data, session, getSessionToken]);
 
   async function markRead(notification: OrderAppNotificationDTO): Promise<void> {
     if (!data) {
       return;
     }
-    const nextNotification = await markOrderAppNotificationRead(notification, data, session);
+    const nextNotification = await markOrderAppNotificationRead(notification, data, session, undefined, {
+      sessionToken: getSessionToken?.()
+    });
     setLoadState((current) => {
       if (current.status !== "ready" && current.status !== "error") {
         return current;

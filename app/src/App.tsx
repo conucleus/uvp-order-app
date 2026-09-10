@@ -118,10 +118,14 @@ function AppShell({ api }: { readonly api: ProductApiClient }) {
     loadParticipantHome();
   }, [api, session]);
 
-  function loadParticipantHome() {
+  function loadParticipantHome(options: { readonly silent?: boolean } = {}) {
     const sequence = loadSequenceRef.current + 1;
     loadSequenceRef.current = sequence;
-    setLoadState({ status: "loading" });
+    // 静默刷新（提交成功后的投影刷新）不退回整页 loading：工作区保持挂载，
+    // 提交确认结果不被卸载清掉；新数据到达后原地替换。
+    if (!options.silent) {
+      setLoadState({ status: "loading" });
+    }
     void api.loadParticipantHome(participantQueryFromSession(session))
       .then((data) => {
         if (loadSequenceRef.current === sequence) {
@@ -145,15 +149,18 @@ function AppShell({ api }: { readonly api: ProductApiClient }) {
     [data?.orders, route.orderId, selectedTask]
   );
   const selectedSubmissionProof = selectedTask ? submissionProofs[selectedTask.taskId] : undefined;
-  const notificationState = useOrderAppNotifications(data, session);
+  // 通知中心与主客户端共用同一钱包会话（会话锚定身份单一来源）；
+  // 取值器按 api 记忆，避免每次渲染都触发通知 effect 重跑。
+  const notificationSessionToken = useMemo(() => () => api.currentSessionToken(), [api]);
+  const notificationState = useOrderAppNotifications(data, session, notificationSessionToken);
 
   function navigate(nextRoute: OrderAppRoute) {
     window.location.hash = routeHash(nextRoute);
     setRoute(nextRoute);
   }
 
-  function handleRefresh() {
-    loadParticipantHome();
+  function handleRefresh(options: { readonly silent?: boolean } = {}) {
+    loadParticipantHome(options);
   }
 
   function handleOpenNotification(notification: OrderAppNotificationDTO) {
@@ -185,7 +192,7 @@ function AppShell({ api }: { readonly api: ProductApiClient }) {
         </div>
         <div className="topbar-actions">
           <SourceBadge source={data?.source} loading={loadState.status === "loading"} />
-          <button className="icon-button" onClick={handleRefresh} type="button" aria-label="刷新">
+          <button className="icon-button" onClick={() => handleRefresh()} type="button" aria-label="刷新">
             <RefreshCw aria-hidden="true" />
           </button>
         </div>
@@ -295,7 +302,7 @@ function AppShell({ api }: { readonly api: ProductApiClient }) {
                   ...current,
                   [proof.taskId]: proof
                 }))}
-                onSubmitted={handleRefresh}
+                onSubmitted={() => handleRefresh({ silent: true })}
               />
             )}
           </section>
