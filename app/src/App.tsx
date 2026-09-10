@@ -11,12 +11,20 @@ import {
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { ReactElement } from "react";
 import type { ProductOrderDTO, ProductTaskDTO } from "@uvp-eth/product-dto";
-import { createProductApiClient, type ProductApiClient, type ProductHomeData } from "./api/productApi";
+import {
+  createProductApiClient,
+  isWalletIdentityRequired,
+  persistWalletSessionToken,
+  readPersistedWalletSessionToken,
+  type ProductApiClient,
+  type ProductHomeData
+} from "./api/productApi";
 import { createOrderAppActions } from "./actions/orderAppActions";
 import { participantQueryFromSession, readParticipantSession, shortWallet } from "./auth/participant";
 import { NotificationCenter, useOrderAppNotifications } from "./notifications/NotificationCenter";
 import type { OrderAppNotificationDTO } from "./notifications/types";
 import { InviteOnboarding } from "./onboarding/InviteOnboarding";
+import { WalletLoginPanel } from "./onboarding/WalletLoginPanel";
 import {
   clearInviteSearchParams,
   readInviteEntryFromSearch,
@@ -34,7 +42,9 @@ import "./app/collaboration-notifications.css";
 type LoadState =
   | { readonly status: "loading" }
   | { readonly status: "ready"; readonly data: ProductHomeData }
-  | { readonly status: "error"; readonly message: string };
+  | { readonly status: "error"; readonly message: string }
+  /** 非 local 部署缺有效钱包会话：切换到钱包登录入口而不是报错死路。 */
+  | { readonly status: "unauthenticated"; readonly message: string };
 
 export default function App() {
   const clientState = useMemo<{ readonly api?: ProductApiClient; readonly message?: string }>(() => {
@@ -89,6 +99,9 @@ function AppShell({ api }: { readonly api: ProductApiClient }) {
   const actions = useMemo(() => createOrderAppActions(api), [api]);
   const [session] = useState(() => readParticipantSession());
   const [loadState, setLoadState] = useState<LoadState>({ status: "loading" });
+  // 会话恢复：proveWalletControl 留存的 token 会话级持久化，刷新页面时
+  // 先恢复再请求——非 local 部署没有会话锚定身份的请求一律 401。
+  const [sessionRestored] = useState(() => api.restoreSessionToken(readPersistedWalletSessionToken()));
   const [route, setRoute] = useState<OrderAppRoute>(() => readOrderAppRoute());
   // ?invite=&inviteToken= 只作为进入应用的邀请入口读取一次；
   // 读取后立刻从地址栏清除，否则 hash 导航（只改 hash 不清 search）
@@ -116,7 +129,7 @@ function AppShell({ api }: { readonly api: ProductApiClient }) {
 
   useEffect(() => {
     loadParticipantHome();
-  }, [api, session]);
+  }, [api, session, sessionRestored]);
 
   function loadParticipantHome(options: { readonly silent?: boolean } = {}) {
     const sequence = loadSequenceRef.current + 1;
@@ -133,13 +146,28 @@ function AppShell({ api }: { readonly api: ProductApiClient }) {
         }
       })
       .catch((error) => {
-        if (loadSequenceRef.current === sequence) {
-          setLoadState({
-            status: "error",
-            message: error instanceof Error ? error.message : "参与者服务加载失败"
-          });
+        if (loadSequenceRef.current !== sequence) {
+          return;
         }
+        if (isWalletIdentityRequired(error)) {
+          // 持久化的会话已失效（或从未建立）：清掉残留 token，给出登录
+          // 入口——重发同一无会话请求只会再吃一次 401。
+          persistWalletSessionToken(undefined);
+          api.restoreSessionToken(undefined);
+          setLoadState({ status: "unauthenticated", message: error.message });
+          return;
+        }
+        setLoadState({
+          status: "error",
+          message: error instanceof Error ? error.message : "参与者服务加载失败"
+        });
       });
+  }
+
+  async function handleWalletLogin(): Promise<void> {
+    const address = await actions.requestWalletAddress();
+    await actions.proveWalletControl({ address });
+    loadParticipantHome();
   }
 
   const data = loadState.status === "ready" ? loadState.data : undefined;
@@ -211,6 +239,10 @@ function AppShell({ api }: { readonly api: ProductApiClient }) {
           onAccepted={handleRefresh}
           onDismiss={dismissInviteEntry}
         />
+      ) : loadState.status === "unauthenticated" ? (
+        // 非 local 部署的无会话态：登录是唯一可用入口，不渲染待办工作区
+        //（渲染了也只是一整屏 401 派生错误）。
+        <WalletLoginPanel hasWallet={actions.hasInjectedWallet()} onLogin={handleWalletLogin} />
       ) : (
         <>
           <section className="participant-strip" aria-label="参与者信息">

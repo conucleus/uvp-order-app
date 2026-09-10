@@ -4,6 +4,9 @@ import type { ProductOrderDTO, ProductTaskDTO } from "@uvp-eth/product-dto";
 import {
   ProductApiError,
   createProductApiClient,
+  isWalletIdentityRequired,
+  persistWalletSessionToken,
+  readPersistedWalletSessionToken,
   type ProductApiClientOptions
 } from "./productApi.js";
 
@@ -503,5 +506,97 @@ describe("2xx non-JSON responses", () => {
       client.getTask("task-1"),
       (error) => error instanceof ProductApiError && error.status === 200 && error.endpoint === "/product/me/tasks/task-1"
     );
+  });
+});
+
+describe("wallet session recovery (non-local entry)", () => {
+  it("surfaces wallet_identity_required 401s with the error code the UI branches on", async () => {
+    const fetcher: ProductApiClientOptions["fetcher"] = async () =>
+      new Response(JSON.stringify({ error: "wallet_identity_required", message: "anchored wallet session required" }), {
+        status: 401,
+        headers: { "content-type": "application/json" }
+      });
+    const client = createProductApiClient({ baseUrl: "http://service.local/", fetcher });
+
+    await assert.rejects(
+      client.loadParticipantHome(),
+      (error: unknown) => isWalletIdentityRequired(error)
+    );
+  });
+
+  it("persists the proven token and restores it into a fresh client (page reload)", async () => {
+    // node 环境没有 sessionStorage：安装最小桩，测试后卸载。
+    const store = new Map<string, string>();
+    const previousSessionStorage = (globalThis as { sessionStorage?: Storage }).sessionStorage;
+    (globalThis as { sessionStorage?: Storage }).sessionStorage = {
+      getItem: (key: string) => store.get(key) ?? null,
+      setItem: (key: string, value: string) => void store.set(key, value),
+      removeItem: (key: string) => void store.delete(key),
+      clear: () => store.clear(),
+      key: () => null,
+      get length() {
+        return store.size;
+      }
+    } as Storage;
+    const requested: Array<Record<string, string>> = [];
+    const fetcher: ProductApiClientOptions["fetcher"] = async (input, init) => {
+      const url = String(input);
+      const headers = (init?.headers ?? {}) as Record<string, string>;
+      if (url.endsWith("/product/me") || url.endsWith("/product/me/orders") || url.endsWith("/product/me/tasks")) {
+        requested.push(headers);
+        return jsonResponse({
+          participant: {
+            participantId: "p1",
+            walletAddress: "0x9d8A62f656a8d1615C1294fd71e9cfB3e4855A4F",
+            roleLabels: ["物流/报关"],
+            displayName: "参与方",
+            status: "active"
+          },
+          orders: [],
+          tasks: []
+        });
+      }
+      if (url.endsWith("/store/auth/challenge")) {
+        return jsonResponse({
+          challenge: { nonce: "n", address: "0x9d8A62f656a8d1615C1294fd71e9cfB3e4855A4F", message: "m" }
+        });
+      }
+      if (url.endsWith("/store/auth/verify")) {
+        return jsonResponse({
+          token: "uvs_reload",
+          session: { anchoredAddress: "0x9d8A62f656a8d1615C1294fd71e9cfB3e4855A4F" }
+        });
+      }
+      throw new Error(`unexpected URL ${url}`);
+    };
+    try {
+      const client = createProductApiClient({
+        baseUrl: "http://service.local/",
+        fetcher,
+        personalSign: async () => "0xsignature"
+      });
+      await client.proveWalletControl({ address: "0x9d8A62f656a8d1615C1294fd71e9cfB3e4855A4F" });
+      assert.equal(readPersistedWalletSessionToken(), "uvs_reload");
+
+      // 模拟页面重载：新客户端实例从持久化恢复 token，参与者请求带会话头。
+      const reloaded = createProductApiClient({
+        baseUrl: "http://service.local/",
+        fetcher,
+        personalSign: async () => "0xsignature"
+      });
+      assert.equal(reloaded.restoreSessionToken(readPersistedWalletSessionToken()), true);
+      await reloaded.loadParticipantHome();
+      assert.ok(
+        requested.length > 0 && requested.every((headers) => headers["x-uvp-store-session"] === "uvs_reload"),
+        "restored session token must ride every participant request"
+      );
+    } finally {
+      const globalsWithStorage = globalThis as { sessionStorage?: Storage };
+      delete globalsWithStorage.sessionStorage;
+      if (previousSessionStorage !== undefined) {
+        globalsWithStorage.sessionStorage = previousSessionStorage;
+      }
+      persistWalletSessionToken(undefined);
+    }
   });
 });

@@ -51,6 +51,11 @@ export interface ProductApiClient {
   proveWalletControl(input: { readonly address: string }): Promise<WalletSessionProof>;
   /** 客户端当前持有的钱包会话 token（proveWalletControl 成功后留存），供通知等旁路请求复用同一会话锚定。 */
   currentSessionToken(): string | undefined;
+  /**
+   * 恢复/清除钱包会话 token（页面刷新时从 sessionStorage 恢复；服务端
+   * 判定会话失效时清除）。返回是否真的改变了客户端持有的 token。
+   */
+  restoreSessionToken(token: string | undefined): boolean;
   prepareTaskSubmit(taskId: string, input: PrepareTaskSubmitInput): Promise<PreparedTaskSubmitDTO>;
   submitTask(taskId: string, input: SubmitTaskInput): Promise<ProductSubmissionDTO>;
   prepareStageExecutorPatch(taskId: string, input: PrepareStageExecutorPatchInput): Promise<PreparedStageExecutorPatchDTO>;
@@ -393,14 +398,52 @@ export interface EvidenceProofDTO {
 
 export class ProductApiError extends Error {
   override readonly name = "ProductApiError";
+  /** 服务端错误体的 `error` 短码（如 wallet_identity_required）；非 JSON 体为空。 */
+  readonly errorCode?: string;
 
   constructor(
     readonly status: number,
     readonly endpoint: string,
-    message: string
+    message: string,
+    errorCode?: string
   ) {
     super(message);
+    if (errorCode !== undefined) {
+      this.errorCode = errorCode;
+    }
   }
+}
+
+/** 401 + 该码表示参与者面请求缺有效钱包会话：界面据此切换到钱包登录入口。 */
+export const WALLET_IDENTITY_REQUIRED_CODE = "wallet_identity_required";
+
+/** 钱包会话 token 的会话级持久化键：刷新页面可恢复会话，关标签页即失效。 */
+const WALLET_SESSION_STORAGE_KEY = "uvp-order-app:wallet-session";
+
+export function readPersistedWalletSessionToken(): string | undefined {
+  try {
+    return globalThis.sessionStorage?.getItem(WALLET_SESSION_STORAGE_KEY) ?? undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+export function persistWalletSessionToken(token: string | undefined): void {
+  try {
+    if (token === undefined) {
+      globalThis.sessionStorage?.removeItem(WALLET_SESSION_STORAGE_KEY);
+    } else {
+      globalThis.sessionStorage?.setItem(WALLET_SESSION_STORAGE_KEY, token);
+    }
+  } catch {
+    // 存储不可用（隐私模式/测试环境）只损失刷新恢复，登录流程本身不受影响。
+  }
+}
+
+export function isWalletIdentityRequired(error: unknown): error is ProductApiError {
+  return error instanceof ProductApiError
+    && error.status === 401
+    && error.errorCode === WALLET_IDENTITY_REQUIRED_CODE;
 }
 
 export function createProductApiClient(options: ProductApiClientOptions = {}): ProductApiClient {
@@ -444,6 +487,12 @@ class BrowserProductApiClient implements ProductApiClient {
 
   currentSessionToken(): string | undefined {
     return this.walletSessionToken;
+  }
+
+  restoreSessionToken(token: string | undefined): boolean {
+    const changed = this.walletSessionToken !== token;
+    this.walletSessionToken = token;
+    return changed;
   }
 
   async loadParticipantHome(input: ParticipantQueryInput = {}): Promise<ProductHomeData> {
@@ -536,8 +585,10 @@ class BrowserProductApiClient implements ProductApiClient {
       readonly session: { readonly anchoredAddress?: string | undefined };
     }>("/store/auth/verify", { nonce: challenge.challenge.nonce, signature });
     // 会话留存：后续 me/tasks/orders/prepare-submit/evidence 请求统一携带，
-    // 不再退化为只有 accept 邀请才有会话锚定身份。
+    // 不再退化为只有 accept 邀请才有会话锚定身份；会话级持久化让刷新后
+    // 无需重新签名（服务端 TTL 是会话真实有效期，过期即重新登录）。
     this.walletSessionToken = verified.token;
+    persistWalletSessionToken(verified.token);
     return {
       sessionToken: verified.token,
       anchoredAddress: verified.session.anchoredAddress ?? address
@@ -653,7 +704,19 @@ class BrowserProductApiClient implements ProductApiClient {
       throw new ProductApiError(response.status, pathname, `redirect_refused:${response.status}`);
     }
     if (!response.ok) {
-      throw new ProductApiError(response.status, pathname, await responseText(response));
+      const text = await responseText(response);
+      // 服务端错误体是 {error: 短码, message?}：短码进 errorCode 供界面
+      // 分支（如钱包会话缺失切换登录入口），文本整体留作展示。
+      let errorCode: string | undefined;
+      try {
+        const parsed = JSON.parse(text) as { readonly error?: unknown };
+        if (typeof parsed.error === "string") {
+          errorCode = parsed.error;
+        }
+      } catch {
+        // 非 JSON 错误体只有文本可用。
+      }
+      throw new ProductApiError(response.status, pathname, text, errorCode);
     }
     try {
       return await response.json() as TResponse;
