@@ -30,7 +30,14 @@ function webServerCommand(): string {
     return `pnpm dev --host ${host} --port ${port} --strictPort`;
   }
   if (profile === "api-stub") {
-    return `VITE_UVP_CHAIN_SERVICES_URL=http://product-api.test pnpm dev --host ${host} --port ${port} --strictPort`;
+    // 签名域预期值走部署配置注入（与 e2e 桩 typedData.domain 的地址一致）：
+    // 桩与配置同值才不会把合法用例误判为换域攻击。
+    return [
+      "VITE_UVP_CHAIN_SERVICES_URL=http://product-api.test",
+      "VITE_UVP_STATE_MACHINE_ADDRESS=0x8888888888888888888888888888888888888888",
+      "VITE_UVP_STAGE_PATCH_MODULE_ADDRESS=0x8888888888888888888888888888888888888888",
+      `pnpm dev --host ${host} --port ${port} --strictPort`
+    ].join(" ");
   }
   return `pnpm dev --host ${host} --port ${port} --strictPort`;
 }

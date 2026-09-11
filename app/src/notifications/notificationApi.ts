@@ -1,6 +1,7 @@
 import type { ProductOrderDTO, ProductTaskDTO } from "@uvp-eth/product-dto";
 import type { ParticipantSession } from "../auth/participant";
 import type { ProductApiSource, ProductHomeData } from "../api/productApi";
+import { parseDeadlineUtcMs } from "../tasks/taskUtils";
 import type {
   OrderAppNotificationDTO,
   OrderAppNotificationKind,
@@ -10,6 +11,9 @@ import type {
 } from "./types";
 
 type Fetcher = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
+
+/** 与同仓 productApi 相同的超时口径：通知请求挂起不得让面板永久 loading。 */
+const NOTIFICATION_FETCH_TIMEOUT_MS = 6000;
 
 interface ApiNotificationResponse {
   readonly notifications?: readonly Partial<OrderAppNotificationDTO>[];
@@ -21,27 +25,45 @@ interface ApiNotificationReadResponse {
   readonly notification?: Partial<OrderAppNotificationDTO>;
 }
 
+/** 通知请求的可选会话锚定：与 productApi 客户端同一身份通道。 */
+export interface NotificationRequestOptions {
+  readonly sessionToken?: string | undefined;
+}
+
 export async function loadOrderAppNotifications(
   data: ProductHomeData,
   session: ParticipantSession,
-  fetcher: Fetcher = globalThis.fetch.bind(globalThis)
+  fetcher: Fetcher = globalThis.fetch.bind(globalThis),
+  options: NotificationRequestOptions = {}
 ): Promise<OrderAppNotificationList> {
   if (data.source.kind !== "real") {
     throw new Error("通知中心仅在参与者服务连接后可用。");
   }
 
   try {
-    await syncPendingNotificationReads(data, session, fetcher);
+    await syncPendingNotificationReads(data, session, fetcher, options);
     const response = await fetcher(joinUrl(data.source.baseUrl, participantPath("/product/me/activity-feed", session)), {
       method: "GET",
       headers: {
-        "content-type": "application/json"
-      }
+        "content-type": "application/json",
+        ...(options.sessionToken ? { "x-uvp-store-session": options.sessionToken } : {})
+      },
+      redirect: "manual",
+      signal: AbortSignal.timeout(NOTIFICATION_FETCH_TIMEOUT_MS)
     });
+    if (isRedirectStatus(response.status)) {
+      throw new Error("通知请求被重定向，已拒绝（凭据头不随重定向重放）");
+    }
     if (!response.ok) {
       throw new Error(await responseText(response));
     }
-    const body = await response.json() as ApiNotificationResponse;
+    let body: ApiNotificationResponse;
+    try {
+      body = await response.json() as ApiNotificationResponse;
+    } catch {
+      // 2xx 但不是 JSON：给出可读错误，不把裸解析异常透给通知面板。
+      throw new Error("通知响应不是 JSON");
+    }
     const notifications: OrderAppNotificationDTO[] = [];
     let skippedNotificationCount = 0;
     for (const entry of body.notifications ?? []) {
@@ -55,9 +77,12 @@ export async function loadOrderAppNotifications(
     if (skippedNotificationCount > 0) {
       console.warn(`activity-feed returned ${skippedNotificationCount} invalid notification entries; skipped`);
     }
+    const merged = mergeLocalReadState(session, notifications);
     return {
-      notifications,
-      unreadCount: body.unreadCount ?? notifications.filter((notification) => notification.readStatus === "unread").length,
+      notifications: merged,
+      // 未读数按合并本地已读后的列表计算：回执同步失败时用户已读过的
+      // 通知不得因服务端仍未记账而重新亮起未读。
+      unreadCount: merged.filter((notification) => notification.readStatus === "unread").length,
       source: "api",
       sourceOfTruth: body.sourceOfTruth ?? "product-projection-and-notification-read-state"
     };
@@ -66,11 +91,42 @@ export async function loadOrderAppNotifications(
   }
 }
 
+/**
+ * 加载路径合并本地已读缓存：回执同步失败（或尚未重放）的通知在刷新后
+ * 仍按已读呈现（syncPending 标记回执待同步），不回退成未读。
+ */
+function mergeLocalReadState(
+  session: ParticipantSession,
+  notifications: readonly OrderAppNotificationDTO[]
+): readonly OrderAppNotificationDTO[] {
+  const localRead = readNotificationIds(session);
+  if (localRead.size === 0) {
+    return notifications;
+  }
+  const pendingIds = new Set(pendingReadEntries(session).map(([id]) => id));
+  return notifications.map((notification) => {
+    if (notification.readStatus === "read") {
+      return notification;
+    }
+    const readAt = localRead.get(notification.notificationId);
+    if (!readAt) {
+      return notification;
+    }
+    return {
+      ...notification,
+      readStatus: "read" as const,
+      readAt,
+      ...(pendingIds.has(notification.notificationId) ? { syncPending: true } : {})
+    };
+  });
+}
+
 export async function markOrderAppNotificationRead(
   notification: OrderAppNotificationDTO,
   data: ProductHomeData,
   session: ParticipantSession,
-  fetcher: Fetcher = globalThis.fetch.bind(globalThis)
+  fetcher: Fetcher = globalThis.fetch.bind(globalThis),
+  options: NotificationRequestOptions = {}
 ): Promise<OrderAppNotificationDTO> {
   const readAt = new Date().toISOString();
   rememberReadNotification(session, notification.notificationId, readAt);
@@ -80,8 +136,17 @@ export async function markOrderAppNotificationRead(
   }
 
   try {
-    const response = await postReadReceipt(data.source.baseUrl, session, notification.notificationId, fetcher);
+    const response = await postReadReceipt(data.source.baseUrl, session, notification.notificationId, fetcher, options);
+    if (isRedirectStatus(response.status)) {
+      throw new Error("已读回执被重定向，已拒绝（凭据头不随重定向重放）");
+    }
     if (!response.ok) {
+      if (isPermanentReadReceiptFailure(response.status)) {
+        // 资源已不存在（404/410）：重试永远不会成功，本地已读保留，但
+        // 不进重试队列，也不保留既有排队项。
+        clearPendingRead(session, notification.notificationId);
+        return { ...notification, readStatus: "read", readAt };
+      }
       throw new Error(await responseText(response));
     }
     clearPendingRead(session, notification.notificationId);
@@ -96,14 +161,16 @@ export async function markOrderAppNotificationRead(
 }
 
 /**
- * Replays read receipts that failed to reach the server earlier. Kept
- * entries stay queued until a POST succeeds; the local read state is never
- * rolled back.
+ * Replays read receipts that failed to reach the server earlier. Transient
+ * failures (5xx / network / recoverable 401-403) stay queued for the next
+ * pass; only a 404/410 (notification gone) permanently evicts the entry. The
+ * local read state is never rolled back either way.
  */
 export async function syncPendingNotificationReads(
   data: ProductHomeData,
   session: ParticipantSession,
-  fetcher: Fetcher = globalThis.fetch.bind(globalThis)
+  fetcher: Fetcher = globalThis.fetch.bind(globalThis),
+  options: NotificationRequestOptions = {}
 ): Promise<{ readonly synced: number; readonly remaining: number }> {
   const pending = pendingReadEntries(session);
   if (data.source.kind !== "real" || pending.length === 0) {
@@ -111,9 +178,15 @@ export async function syncPendingNotificationReads(
   }
 
   let synced = 0;
+  let evicted = 0;
   for (const [notificationId] of pending) {
     try {
-      const response = await postReadReceipt(data.source.baseUrl, session, notificationId, fetcher);
+      const response = await postReadReceipt(data.source.baseUrl, session, notificationId, fetcher, options);
+      if (isPermanentReadReceiptFailure(response.status)) {
+        clearPendingRead(session, notificationId);
+        evicted += 1;
+        continue;
+      }
       if (!response.ok) {
         continue;
       }
@@ -123,25 +196,43 @@ export async function syncPendingNotificationReads(
       // keep queued for the next sync pass
     }
   }
-  return { synced, remaining: pending.length - synced };
+  return { synced, remaining: pending.length - synced - evicted };
+}
+
+/** manual 重定向模式下跨源 3xx 是 status 0 的 opaqueredirect，与 3xx 一并拒绝（executor-kit 同口径）。 */
+function isRedirectStatus(status: number): boolean {
+  return status === 0 || (status >= 300 && status < 400);
+}
+
+/**
+ * 永久失败仅限资源已不存在（404/410）：重试不可能转为成功。401/403 是
+ * 鉴权类可恢复失败（会话过期后重新登录即可补投），留在重试队列；5xx 与
+ * 网络错误同样可重试。
+ */
+function isPermanentReadReceiptFailure(status: number): boolean {
+  return status === 404 || status === 410;
 }
 
 function postReadReceipt(
   baseUrl: string,
   session: ParticipantSession,
   notificationId: string,
-  fetcher: Fetcher
+  fetcher: Fetcher,
+  options: NotificationRequestOptions = {}
 ): Promise<Response> {
   return fetcher(
     joinUrl(baseUrl, `/product/me/activity-feed/${encodeURIComponent(notificationId)}/read`),
     {
       method: "POST",
       headers: {
-        "content-type": "application/json"
+        "content-type": "application/json",
+        ...(options.sessionToken ? { "x-uvp-store-session": options.sessionToken } : {})
       },
       body: JSON.stringify({
         ...(session.walletAddress ? { walletAddress: session.walletAddress } : {})
-      })
+      }),
+      redirect: "manual",
+      signal: AbortSignal.timeout(NOTIFICATION_FETCH_TIMEOUT_MS)
     }
   );
 }
@@ -287,6 +378,14 @@ function normalizeApiNotification(input: Partial<OrderAppNotificationDTO>): Orde
     message: input.message,
     actionHref: input.actionHref,
     ...(typeof input.proofHref === "string" ? { proofHref: input.proofHref } : {}),
+    ...(input.invalidation?.status === "invalidated"
+      ? {
+          invalidation: {
+            status: "invalidated" as const,
+            ...(typeof input.invalidation.reason === "string" ? { reason: input.invalidation.reason } : {})
+          }
+        }
+      : {}),
     createdAt: input.createdAt,
     ...(typeof input.readAt === "string" ? { readAt: input.readAt } : {}),
     source: input.source === "notification_delivery" ? "notification_delivery" : "api",
@@ -317,8 +416,8 @@ function parseDeadline(value: string): Date | undefined {
   if (!normalized || normalized === "以业务约定为准") {
     return undefined;
   }
-  const parsed = Date.parse(normalized.replace(" ", "T"));
-  return Number.isNaN(parsed) ? undefined : new Date(parsed);
+  const parsed = parseDeadlineUtcMs(normalized);
+  return parsed === undefined ? undefined : new Date(parsed);
 }
 
 function blockedNotificationKind(task: ProductTaskDTO): Extract<OrderAppNotificationKind, "submission_failed" | "task_revoked"> {
@@ -365,6 +464,7 @@ function notificationKind(value: unknown): OrderAppNotificationKind | undefined 
     case "submission_confirmed":
     case "submission_failed":
     case "task_revoked":
+    case "notification_invalidated":
       return value;
     default:
       return undefined;
@@ -391,7 +491,22 @@ function rememberReadNotification(session: ParticipantSession, notificationId: s
   const key = localReadStateKey(session);
   const next = Object.fromEntries(readNotificationIds(session));
   next[notificationId] = readAt;
-  window.localStorage.setItem(key, JSON.stringify(next));
+  // 写路径与读路径同样防护：该函数在调用方的 try 之外执行，禁存储/配额满
+  // 时抛出会变成未处理 rejection，并让已读点击整体静默失败。
+  tryWriteLocalStorage(key, JSON.stringify(next));
+}
+
+/**
+ * localStorage 写入永不抛出：读路径（readNotificationIds/pendingReadEntries）
+ * 已有防护，写路径保持同一口径——本地已读只是缓存，写不进去降级为
+ * "本次会话内已读"，不阻断已读回执的发送。
+ */
+function tryWriteLocalStorage(key: string, value: string): void {
+  try {
+    window.localStorage.setItem(key, value);
+  } catch (error) {
+    console.warn(`notification read state is not persistable (${key}); continuing in-memory`, error);
+  }
 }
 
 function readNotificationIds(session: ParticipantSession): ReadonlyMap<string, string> {
@@ -430,13 +545,25 @@ function pendingReadEntries(session: ParticipantSession): readonly (readonly [st
   }
 }
 
+/** 重试队列只是回执的兜底缓冲：封顶防止长期离线/持续失败时无界增长。 */
+const MAX_PENDING_READ_ENTRIES = 100;
+
 function enqueuePendingRead(session: ParticipantSession, notificationId: string, readAt: string): void {
   if (typeof window === "undefined") {
     return;
   }
   const next = Object.fromEntries(pendingReadEntries(session));
   next[notificationId] = readAt;
-  window.localStorage.setItem(pendingReadStateKey(session), JSON.stringify(next));
+  // 超限时丢 readAt 最旧的条目：新回执比旧回执更可能仍被服务端接受。
+  while (Object.keys(next).length > MAX_PENDING_READ_ENTRIES) {
+    const oldest = Object.entries(next).sort((left, right) => left[1].localeCompare(right[1]))[0];
+    if (!oldest) {
+      break;
+    }
+    delete next[oldest[0]];
+  }
+  // 该函数在失败回补路径（catch 分支）里调用：写失败不得顶替原返回值。
+  tryWriteLocalStorage(pendingReadStateKey(session), JSON.stringify(next));
 }
 
 function clearPendingRead(session: ParticipantSession, notificationId: string): void {
@@ -448,7 +575,7 @@ function clearPendingRead(session: ParticipantSession, notificationId: string): 
     return;
   }
   const next = Object.fromEntries(entries.filter(([id]) => id !== notificationId));
-  window.localStorage.setItem(pendingReadStateKey(session), JSON.stringify(next));
+  tryWriteLocalStorage(pendingReadStateKey(session), JSON.stringify(next));
 }
 
 function pendingReadStateKey(session: ParticipantSession): string {
@@ -458,7 +585,7 @@ function pendingReadStateKey(session: ParticipantSession): string {
 function localNotificationId(kind: OrderAppNotificationKind, ...parts: readonly string[]): string {
   // 服务端 read 回执端点按 bytes32 校验 notificationId（uvp-chain-services
   // normalizeBytes32），非 0x+64hex 形态一律 400——本地派生 ID 若保留
-  // `local:kind:task` 可读形态，接线后已读回执永远发不上去（0216 S26）。
+  // `local:kind:task` 可读形态，接线后已读回执永远发不上去。
   // 派生是同步投影（deriveOrderAppNotifications 无 await），crypto.subtle
   // 不可用，这里用内置同步 SHA-256 得到 32 字节 hex；\0 分隔避免 parts
   // 含 ":" 时产生歧义碰撞。

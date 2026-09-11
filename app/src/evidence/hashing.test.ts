@@ -11,7 +11,7 @@ describe("evidence canonical hashing", () => {
     );
   });
 
-  it("sorts keys by code point order, not locale collation (0216 O26)", () => {
+  it("sorts keys by code point order, not locale collation", () => {
     // 码点序等价 UTF-8 字节序：ASCII < 拉丁扩展 < CJK。
     // localeCompare 在多数 locale 下会把 "é" 排到 "z" 之前（口音折叠），
     // 同一证据跨环境哈希漂移。

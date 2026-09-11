@@ -10,7 +10,7 @@ import type {
   StageExecutorActionKind,
   ProductTaskDTO
 } from "@uvp-eth/product-dto";
-import { cleanString } from "./taskUtils";
+import { cleanString, isContentAddressedReference } from "./taskUtils";
 
 export type ParticipantAddOnKind = StageExecutorActionKind;
 
@@ -331,9 +331,11 @@ function resourceHandleSummary(resource: ProductResourceRequirementDTO): string 
     cleanString(resource.storageCID) ??
     cleanString(resource.metadataURI);
   if (reference) {
-    return isDisallowedProductionReference(reference)
-      ? "需使用加密内容寻址清单"
-      : `资源清单 ${compactReference(reference)}`;
+    // 判定用内容寻址谓词（协议语义），不枚举云厂商子串：框架代码特判
+    // 特定供应商既不完整也不中立，且换一家云就漏判。
+    return isContentAddressedReference(reference)
+      ? `资源清单 ${compactReference(reference)}`
+      : "需使用加密内容寻址清单";
   }
   const resourceType = cleanString(resource.resourceType);
   return resourceType ? `资源类型 ${resourceType}` : "资源清单已配置";
@@ -409,10 +411,3 @@ function defaultAccessLabel(
   return "访问状态待同步";
 }
 
-function isDisallowedProductionReference(value: string): boolean {
-  const trimmed = value.trim().toLowerCase();
-  return /^https?:\/\//u.test(trimmed) ||
-    trimmed.includes("txcloud") ||
-    trimmed.includes("plain_text") ||
-    trimmed.includes("tencentcloud");
-}

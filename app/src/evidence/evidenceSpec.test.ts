@@ -11,6 +11,7 @@ import {
   evidenceMetadataSignature,
   fieldSlots,
   fileSlots,
+  frameworkEvidenceMetadataFields,
   missingEvidenceSlotLabels,
   planTaskEvidence,
   validateEvidenceFileForSlot,
@@ -107,7 +108,7 @@ describe("evidence spec single-track planning", () => {
     assert.equal(plan.slots[0]?.documentType, "inspection_report");
   });
 
-  it("rejects an invalid evidenceSpec into no slots instead of throwing", () => {
+  it("drops an invalid evidenceSpec entirely instead of rendering duplicate slots", () => {
     const task = taskFixture({
       evidenceSpec: [
         { key: "", label: "空 key" },
@@ -144,6 +145,16 @@ describe("evidence accept constraints", () => {
     assert.equal(acceptAllowsFile([".png"], pdf), false);
     // 空 accept 表示不限制，替代旧硬编码白名单。
     assert.equal(acceptAllowsFile([], fileLike({ name: "data.bin", type: "application/octet-stream", size: 10 })), true);
+  });
+
+  it("expands wildcard MIME entries so image/* slots are uploadable", () => {
+    const png = fileLike({ name: "照片.png", type: "image/png", size: 10 });
+    const jpeg = fileLike({ name: "照片.jpg", type: "image/jpeg", size: 10 });
+    const pdf = fileLike({ name: "凭证.pdf", type: "application/pdf", size: 10 });
+    assert.equal(acceptAllowsFile(["image/*"], png), true);
+    assert.equal(acceptAllowsFile(["image/*"], jpeg), true);
+    assert.equal(acceptAllowsFile(["image/*"], pdf), false);
+    assert.equal(acceptAllowsFile(["*/*"], png), true);
   });
 
   it("derives input accept attribute and hint from the delivered accept list", () => {
@@ -201,6 +212,18 @@ describe("evidence metadata fields", () => {
     assert.deepEqual(fields, { invoice_no: "INV-1" });
   });
 
+  it("namespaces framework-injected keys so spec fields with colliding names survive", () => {
+    const fields = frameworkEvidenceMetadataFields(
+      { fileName: "spec 声明的文件名", notes: "备注" },
+      { label: "装箱单", fileName: "实际文件.pdf", size: 1024 }
+    );
+    assert.equal(fields.fileName, "spec 声明的文件名");
+    assert.equal(fields["uvp_framework_fileName"], "实际文件.pdf");
+    assert.equal(fields["uvp_framework_fileSize"], "1024");
+    assert.equal(fields["uvp_framework_publicLabel"], "装箱单");
+    assert.equal(fields.notes, "备注");
+  });
+
   it("signs metadata fields order-independently for staleness checks", () => {
     assert.equal(
       evidenceMetadataSignature({ a: "1", b: "2" }),
@@ -209,6 +232,15 @@ describe("evidence metadata fields", () => {
     assert.notEqual(
       evidenceMetadataSignature({ a: "1" }),
       evidenceMetadataSignature({ a: "2" })
+    );
+  });
+
+  it("orders signature keys by code point, not UTF-16 code units", () => {
+    const astral = "\u{1F600}键";
+    const bmp = "\uFFFF键";
+    assert.equal(
+      evidenceMetadataSignature({ [astral]: "1", [bmp]: "2" }),
+      JSON.stringify([[bmp, "2"], [astral, "1"]])
     );
   });
 });

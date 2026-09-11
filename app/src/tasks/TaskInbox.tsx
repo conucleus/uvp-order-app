@@ -1,7 +1,7 @@
 import { AlertTriangle, CheckCircle2, Clock3, FileCheck2, PackageCheck, ShieldCheck, WalletCards } from "lucide-react";
 import type { ReactNode } from "react";
 import type { ProductTaskDTO } from "@uvp-eth/product-dto";
-import { shortWallet } from "../auth/participant";
+import { shortWallet, walletOverrideAllowed } from "../auth/participant";
 import {
   filterParticipantTasksForWallet,
   groupParticipantTasksByOrder,
@@ -140,9 +140,14 @@ function emptyStateGuidance(filterResult: TaskFilterResult, participantWallet?: 
           {filterResult.filteredOutCount} 个不属于当前钱包。
         </p>
         <p>
-          请确认你使用的钱包地址是否与订单邀请中登记的钱包一致；如需切换，请在支持的钱包环境中使用
-          <code>?participantWallet=0x...</code> 参数或在环境变量中设置
-          <code>VITE_UVP_ORDER_APP_WALLET_ADDRESS</code>。
+          请确认你使用的钱包地址是否与订单邀请中登记的钱包一致
+          {/* ?participantWallet= 覆盖只在白名单运行时（local/dev）生效：
+              指引按运行时门控，生产部署不得教用户使用不可用的参数。 */}
+          {walletOverrideAllowed() ? (
+            <>；如需切换，可使用<code>?participantWallet=0x...</code> 参数或在环境变量中设置<code>VITE_UVP_ORDER_APP_WALLET_ADDRESS</code>。</>
+          ) : (
+            <>；如需更换参与钱包，请联系部署方或订单邀请方重新登记。</>
+          )}
         </p>
       </>
     );

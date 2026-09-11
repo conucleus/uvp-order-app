@@ -263,6 +263,16 @@
   color: var(--app-amber);
 }
 
+/* 终态失败（expired/replaced/failed）：红色警示，不用"等待中"的旋转图标语义。 */
+.evidence-proof-handoff-failed {
+  border-color: #e5a1a1;
+  background: var(--app-red-soft);
+}
+
+.evidence-proof-handoff-failed .evidence-proof-handoff-title {
+  color: var(--app-red);
+}
+
 @media (max-width: 760px) {
   .evidence-fingerprint-list,
   .evidence-preflight-grid {

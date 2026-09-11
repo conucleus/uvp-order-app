@@ -157,6 +157,42 @@ describe("order app notification read receipts", () => {
       uninstallMemoryWindow();
     }
   });
+
+  it("marks read without unhandled rejection when storage is disabled or full", async () => {
+    // 禁存储/配额满：写路径抛 QuotaExceededError 时不得让已读点击整体失败。
+    const backing = new Map<string, string>();
+    (globalThis as { window?: unknown }).window = {
+      localStorage: {
+        getItem: (key: string) => (backing.has(key) ? backing.get(key)! : null),
+        setItem: () => {
+          throw new DOMException("quota exceeded", "QuotaExceededError");
+        },
+        removeItem: (key: string) => {
+          backing.delete(key);
+        }
+      }
+    };
+    const originalWarn = console.warn;
+    const warnings: unknown[][] = [];
+    console.warn = (...args: unknown[]) => {
+      warnings.push(args);
+    };
+    try {
+      const result = await markOrderAppNotificationRead(
+        readReceiptTarget,
+        realSourceData,
+        session,
+        async () => new Response("{}", { status: 200 })
+      );
+
+      assert.equal(result.readStatus, "read");
+      assert.equal(result.syncPending, undefined);
+      assert.equal(warnings.some((args) => String(args[0]).includes("not persistable")), true);
+    } finally {
+      console.warn = originalWarn;
+      uninstallMemoryWindow();
+    }
+  });
 });
 
 describe("order app notification loading", () => {
@@ -166,6 +202,50 @@ describe("order app notification loading", () => {
       loadOrderAppNotifications(realSourceData, session, failingFetcher),
       /feed down/
     );
+  });
+
+  it("merges the local read cache so unsynced receipts do not flip back to unread", async () => {
+    // 回执同步失败后（重试仍在队列），刷新不得把已读通知回退成未读：
+    // 本地读缓存在加载路径合并，未同步的标 syncPending。
+    installMemoryWindow();
+    window.localStorage.setItem(
+      "uvp-order-app:notification-read:0xabc0000000000000000000000000000000000009",
+      JSON.stringify({ "notification-local-read-1": "2026-08-02T00:00:00.000Z" })
+    );
+    window.localStorage.setItem(
+      "uvp-order-app:notification-read-pending:0xabc0000000000000000000000000000000000009",
+      JSON.stringify({ "notification-local-read-1": "2026-08-02T00:00:00.000Z" })
+    );
+    const fetcher = (async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
+      if (init?.method === "POST") {
+        // 回执重放仍失败（5xx 瞬时错误）：条目保留在重试队列。
+        return new Response("still down", { status: 503 });
+      }
+      return new Response(JSON.stringify({
+        notifications: [
+          {
+            notificationId: "notification-local-read-1",
+            kind: "task_ready",
+            severity: "action",
+            readStatus: "unread",
+            orderId: "order-7",
+            orderTitle: "真实订单标题",
+            eventLabel: "任务已就绪",
+            message: "服务端下发的通知正文。",
+            actionHref: "#section=orders&order=order-7",
+            createdAt: "2026-08-01T00:00:00.000Z",
+            source: "notification_delivery"
+          }
+        ]
+      }), { status: 200 });
+    }) as typeof fetch;
+
+    const result = await loadOrderAppNotifications(realSourceData, session, fetcher);
+
+    assert.equal(result.notifications[0]?.readStatus, "read");
+    assert.equal(result.notifications[0]?.readAt, "2026-08-02T00:00:00.000Z");
+    assert.equal(result.notifications[0]?.syncPending, true);
+    assert.equal(result.unreadCount, 0);
   });
 
   it("rejects notification loads for sources other than the real participant API", async () => {
@@ -225,6 +305,34 @@ describe("order app notification loading", () => {
     } finally {
       console.warn = originalWarn;
     }
+  });
+
+  it("normalizes invalidated notifications with the structured status field intact", async () => {
+    // reorg 失效通知按结构化状态呈现，reason 原样透传，
+    // 前端不解析 message 文案判定失效。
+    const fetcher = async () => new Response(JSON.stringify({
+      notifications: [
+        {
+          notificationId: "0x" + "ab".repeat(32),
+          kind: "notification_invalidated",
+          severity: "warning",
+          readStatus: "unread",
+          orderId: "order-7",
+          orderTitle: "真实订单标题",
+          eventLabel: "通知已失效",
+          message: "该提醒指向的链上记录已被重组回滚，内容不再可信。请打开订单证明核对最新链上状态。",
+          actionHref: "#section=orders&order=order-7",
+          proofHref: "#section=orders&order=order-7/proof",
+          invalidation: { status: "invalidated", reason: "reorg_rolled_back" },
+          createdAt: "2026-08-01T00:00:00.000Z",
+          source: "notification_delivery"
+        }
+      ]
+    }), { status: 200 });
+    const result = await loadOrderAppNotifications(realSourceData, session, fetcher);
+    assert.equal(result.notifications.length, 1);
+    assert.equal(result.notifications[0]?.kind, "notification_invalidated");
+    assert.deepEqual(result.notifications[0]?.invalidation, { status: "invalidated", reason: "reorg_rolled_back" });
   });
 
   it("clears corrupted local read state instead of silently discarding it", async () => {
@@ -361,7 +469,7 @@ describe("order app notification projection", () => {
     });
 
     // 服务端 read 回执端点按 bytes32 校验：本地 ID 必须是 0x+64hex，
-    // 否则接线即全 400（0216 S26）。
+    // 否则接线即全 400。
     assert.equal(notifications.length, 2);
     for (const notification of notifications) {
       assert.match(notification.notificationId, /^0x[0-9a-f]{64}$/u);
@@ -383,5 +491,95 @@ describe("order app notification projection", () => {
       now: new Date("2026-04-29T12:00:00.000Z")
     });
     assert.equal(rerun[0]?.notificationId, expected);
+  });
+});
+
+describe("pending read receipt queue hygiene", () => {
+  function notificationWithId(id: string): OrderAppNotificationDTO {
+    return { ...readReceiptTarget, notificationId: id };
+  }
+
+  it("evicts receipts the server permanently rejects (4xx) instead of retrying them forever", async () => {
+    installMemoryWindow();
+    const originalWarn = console.warn;
+    console.warn = () => {};
+    try {
+      // 本地派生通知 id 对服务端可能是未知的：404 重试永远不会成功。
+      const rejected = await markOrderAppNotificationRead(
+        notificationWithId("notification-gone"),
+        realSourceData,
+        session,
+        async () => new Response("not found", { status: 404 })
+      );
+      assert.equal(rejected.readStatus, "read");
+      assert.equal(rejected.syncPending, undefined);
+
+      // 既有排队项遇到 4xx 同样出队。
+      await markOrderAppNotificationRead(
+        notificationWithId("notification-queued"),
+        realSourceData,
+        session,
+        async () => new Response("unavailable", { status: 503 })
+      );
+      const attempts: string[] = [];
+      const sync = await syncPendingNotificationReads(realSourceData, session, async (input: RequestInfo | URL) => {
+        attempts.push(String(input));
+        return new Response("gone", { status: 410 });
+      });
+      assert.equal(sync.synced, 0);
+      assert.equal(sync.remaining, 0);
+      assert.equal(attempts.length, 1);
+      const drained = await syncPendingNotificationReads(
+        realSourceData,
+        session,
+        async () => new Response("{}", { status: 200 })
+      );
+      assert.deepEqual(drained, { synced: 0, remaining: 0 });
+    } finally {
+      console.warn = originalWarn;
+      uninstallMemoryWindow();
+    }
+  });
+
+  it("keeps transient failures (5xx) queued for the next sync pass", async () => {
+    installMemoryWindow();
+    try {
+      await markOrderAppNotificationRead(
+        notificationWithId("notification-flaky"),
+        realSourceData,
+        session,
+        async () => new Response("boom", { status: 500 })
+      );
+      const sync = await syncPendingNotificationReads(
+        realSourceData,
+        session,
+        async () => new Response("later", { status: 502 })
+      );
+      assert.deepEqual(sync, { synced: 0, remaining: 1 });
+    } finally {
+      uninstallMemoryWindow();
+    }
+  });
+
+  it("caps the pending queue and drops the oldest receipts first", async () => {
+    installMemoryWindow();
+    const originalWarn = console.warn;
+    console.warn = () => {};
+    try {
+      const failingFetcher = async () => new Response("down", { status: 500 });
+      for (let index = 0; index < 105; index += 1) {
+        await markOrderAppNotificationRead(notificationWithId(`notification-${index}`), realSourceData, session, failingFetcher);
+      }
+      const raw = window.localStorage.getItem("uvp-order-app:notification-read-pending:0xabc0000000000000000000000000000000000009");
+      assert.ok(raw);
+      const queued = Object.keys(JSON.parse(raw) as Record<string, unknown>);
+      assert.equal(queued.length, 100);
+      assert.ok(!queued.includes("notification-0"));
+      assert.ok(!queued.includes("notification-4"));
+      assert.ok(queued.includes("notification-104"));
+    } finally {
+      console.warn = originalWarn;
+      uninstallMemoryWindow();
+    }
   });
 });

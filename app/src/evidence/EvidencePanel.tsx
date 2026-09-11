@@ -21,18 +21,28 @@ import type {
 import type { OrderAppActions } from "../actions/orderAppActions";
 import { bytesToBase64 } from "./hashing";
 import {
+  FRAMEWORK_FILE_NAME_FIELD_KEY,
+  FRAMEWORK_FILE_SIZE_FIELD_KEY,
+  FRAMEWORK_PUBLIC_LABEL_FIELD_KEY,
   acceptAttribute,
   acceptHint,
   evidenceMetadataFields,
   evidenceMetadataSignature,
   fieldSlots,
   fileSlots,
+  frameworkEvidenceMetadataFields,
   missingEvidenceSlotLabels,
   planTaskEvidence,
   validateEvidenceFileForSlot
 } from "./evidenceSpec";
 import type { CapturedEvidence, EvidenceRequirement, TaskSubmissionProof } from "../task-model";
-import { sameAddress, signalContainerForTask, taskPrimaryActionLabel, taskSubmitIntent } from "../task-model";
+import {
+  sameAddress,
+  signalContainerForTask,
+  taskPrimaryActionLabel,
+  taskSubmitIntent,
+  submitSignExpectation
+} from "../task-model";
 import { shortWallet } from "../auth/participant";
 import "./evidence.css";
 
@@ -43,6 +53,8 @@ interface EvidencePanelProps {
   readonly task?: ProductTaskDTO | undefined;
   readonly participantWallet?: string | undefined;
   readonly onProofReady: (proof: TaskSubmissionProof) => void;
+  /** 提交成功（非终态失败）后回调一次，触发上层刷新任务投影。 */
+  readonly onSubmitted?: (() => void) | undefined;
 }
 
 type PrepareState =
@@ -51,7 +63,13 @@ type PrepareState =
   | { readonly status: "prepared"; readonly prepared: PreparedSubmitView }
   | { readonly status: "submitting"; readonly prepared: PreparedSubmitView }
   | { readonly status: "confirmed"; readonly proof: TaskSubmissionProof; readonly unverifiedProofs: number }
-  | { readonly status: "failed"; readonly message: string; readonly prepared?: PreparedSubmitView | undefined };
+  | {
+      readonly status: "failed";
+      readonly message: string;
+      readonly prepared?: PreparedSubmitView | undefined;
+      /** 服务端终态（expired/replaced）：同一 prepareId 不可再签，只能重新准备。 */
+      readonly terminal: boolean;
+    };
 
 interface PreparedSubmitView {
   readonly prepareId: string;
@@ -67,7 +85,8 @@ export function EvidencePanel({
   order,
   task,
   participantWallet,
-  onProofReady
+  onProofReady,
+  onSubmitted
 }: EvidencePanelProps) {
   const [captures, setCaptures] = useState<Readonly<Record<string, CapturedEvidence>>>({});
   const [fieldValues, setFieldValues] = useState<Readonly<Record<string, string>>>({});
@@ -81,6 +100,11 @@ export function EvidencePanel({
   useLayoutEffect(() => {
     taskScopeRef.current = taskScopeKey;
   }, [taskScopeKey]);
+  // 同步互斥（zhixu-store submitInflightRef 同款）：prepare→签名→提交是长
+  // 链路，按钮的 pending 禁用要等状态落盘+重渲染才生效，同步 ref 挡住
+  // 重渲染前的第二次点击；ref 在单次请求收尾即释放，防重复提交的终态
+  // 闸由 confirmed 任务状态门（:235/:264 的准入检查）承担。
+  const submitInflightRef = useRef(false);
 
   useEffect(() => {
     setCaptures({});
@@ -117,9 +141,16 @@ export function EvidencePanel({
         hasInjectedWallet
       })
     : [];
-  const canPrepare = blockers.length === 0 && prepareState.status !== "preparing" && prepareState.status !== "submitting";
+  const canPrepare = blockers.length === 0 &&
+    prepareState.status !== "preparing" &&
+    prepareState.status !== "submitting" &&
+    // 终态闸：本次会话已成功提交后不再开放重投，重复提交只能经由刷新后的
+    // 任务投影状态改判（submitted/done 时 preflightBlockers 会关闭入口）。
+    prepareState.status !== "confirmed";
   const canSubmitSignature =
-    (prepareState.status === "prepared" || prepareState.status === "failed") &&
+    // failed 里的服务端终态（expired/replaced）不可再签；可重试失败
+    //（拒签/网络/预检错误）保留同一 prepareId 的重试入口。
+    (prepareState.status === "prepared" || (prepareState.status === "failed" && !prepareState.terminal)) &&
     canPrepare;
   const preparedForSummary =
     prepareState.status === "prepared" || prepareState.status === "submitting" || prepareState.status === "failed"
@@ -210,7 +241,7 @@ export function EvidencePanel({
   }
 
   async function handlePrepareSubmit() {
-    if (!task || blockers.length > 0) {
+    if (!task || blockers.length > 0 || submitInflightRef.current) {
       return;
     }
     const requestScopeKey = taskScopeRef.current;
@@ -233,16 +264,18 @@ export function EvidencePanel({
       }
       setPrepareState({
         status: "failed",
-        message: error instanceof Error ? error.message : "提交预检失败"
+        message: error instanceof Error ? error.message : "提交预检失败",
+        terminal: false
       });
     }
   }
 
   async function handleSubmitSignature(prepared: PreparedSubmitView) {
-    if (!task || !canSubmitSignature) {
+    if (!task || !canSubmitSignature || submitInflightRef.current) {
       return;
     }
     const requestScopeKey = taskScopeRef.current;
+    submitInflightRef.current = true;
     setPrepareState({ status: "submitting", prepared });
     try {
       if (!prepared.raw) {
@@ -250,7 +283,10 @@ export function EvidencePanel({
       }
       const signature = await actions.signProductSubmit({
         typedData: prepared.raw.typedData,
-        walletAddress: signingWallet.trim()
+        walletAddress: signingWallet.trim(),
+        // 域校验预期来自部署配置注入（独立来源），缺配置即拒签，不读同一
+        // BFF 响应里的地址，防被攻陷 BFF 换域让钱包照签。
+        ...submitSignExpectation()
       });
       if (taskScopeRef.current !== requestScopeKey) {
         return;
@@ -277,18 +313,27 @@ export function EvidencePanel({
         prepared,
         evidence: refreshed.evidence
       });
-      // 提交信封如实展示：failed 是失败，expired/replaced 是中间态。
-      if (submission.status === "failed") {
+      // 提交信封如实展示：expired/replaced 是服务端记录的不可重投终态，
+      // 同一 prepareId 禁止再签，只能重新准备；failed 信封保留重试入口。
+      if (submission.status === "failed" || submission.status === "expired" || submission.status === "replaced") {
         onProofReady(proof);
         setPrepareState({
           status: "failed",
-          message: `提交失败${submission.errorCode ? `（${submission.errorCode}）` : ""}，请核对后重试。`,
-          prepared
+          message: submission.status === "failed"
+            ? `提交失败${submission.errorCode ? `（${submission.errorCode}）` : ""}，请核对后重试。`
+            : submission.status === "expired"
+              ? "提交已过期未生效（终态），请重新准备提交。"
+              : "本次提交已被后续提交取代（终态），请以最新提交记录为准，勿盲目重投。",
+          prepared,
+          terminal: submission.status === "expired" || submission.status === "replaced"
         });
         return;
       }
       setPrepareState({ status: "confirmed", proof, unverifiedProofs: refreshed.failedChecks });
       onProofReady(proof);
+      // 刷新任务投影：confirmed 后由服务端状态（submitted/done）关闭提交
+      // 入口，面板内终态闸只是刷新落地前的过渡防线。
+      onSubmitted?.();
     } catch (error) {
       if (taskScopeRef.current !== requestScopeKey) {
         return;
@@ -296,8 +341,11 @@ export function EvidencePanel({
       setPrepareState({
         status: "failed",
         message: error instanceof Error ? error.message : "提交失败",
-        prepared
+        prepared,
+        terminal: false
       });
+    } finally {
+      submitInflightRef.current = false;
     }
   }
 
@@ -441,11 +489,16 @@ export function EvidencePanel({
         ) : null}
 
         {prepareState.status === "confirmed" ? (
-          <div className={`evidence-proof-handoff evidence-proof-handoff-${submissionHandoff(prepareState.proof).tone}`} role="status">
+          <div
+            className={`evidence-proof-handoff evidence-proof-handoff-${submissionHandoff(prepareState.proof).tone}`}
+            role={submissionHandoff(prepareState.proof).tone === "failed" ? "alert" : "status"}
+          >
             <div className="evidence-proof-handoff-title">
               {submissionHandoff(prepareState.proof).tone === "confirmed"
                 ? <CheckCircle2 aria-hidden="true" />
-                : <RefreshCw className="spin" aria-hidden="true" />}
+                : submissionHandoff(prepareState.proof).tone === "failed"
+                  ? <AlertTriangle aria-hidden="true" />
+                  : <RefreshCw className="spin" aria-hidden="true" />}
               {submissionHandoff(prepareState.proof).title}
             </div>
             <p>{submissionHandoff(prepareState.proof).text}</p>
@@ -624,15 +677,14 @@ async function uploadEvidenceCapture(input: {
     metadata: {
       businessLabel: input.requirement.label,
       documentType: input.requirement.documentType,
-      fields: {
-        ...input.metadataFields,
-        publicLabel: input.requirement.label,
+      fields: frameworkEvidenceMetadataFields(input.metadataFields, {
+        label: input.requirement.label,
         fileName: input.file.name,
-        fileSize: input.file.size
-      },
+        size: input.file.size
+      }),
       redactionPolicy: {
-        public: ["businessLabel", "documentType", "publicLabel"],
-        internalOnly: ["fileName", "fileSize"]
+        public: ["businessLabel", "documentType", FRAMEWORK_PUBLIC_LABEL_FIELD_KEY],
+        internalOnly: [FRAMEWORK_FILE_NAME_FIELD_KEY, FRAMEWORK_FILE_SIZE_FIELD_KEY]
       }
     }
   });
@@ -853,7 +905,7 @@ function formatBytes(size: number | undefined): string {
 }
 
 function submissionHandoff(proof: TaskSubmissionProof): {
-  readonly tone: "confirmed" | "pending";
+  readonly tone: "confirmed" | "pending" | "failed";
   readonly title: string;
   readonly text: string;
 } {
@@ -865,17 +917,26 @@ function submissionHandoff(proof: TaskSubmissionProof): {
     };
   }
   if (proof.status === "expired") {
+    // 服务端终态：expired 未生效且不可重投，不会进入索引——
+    // 如实按失败呈现并引导重新准备提交，不显示"仍在核对"。
     return {
-      tone: "pending",
-      title: "提交记录已过期",
-      text: "原提交可能仍在索引或已失效；请勿重复提交，稍后刷新查看最终状态。"
+      tone: "failed",
+      title: "提交已过期未生效（终态）",
+      text: "本次提交没有进入索引；请重新准备提交。"
     };
   }
   if (proof.status === "replaced") {
     return {
-      tone: "pending",
-      title: "本次提交已被后续提交取代",
-      text: "仍在索引核对中；请勿重复提交，稍后刷新查看最终状态。"
+      tone: "failed",
+      title: "本次提交已被后续提交取代（终态）",
+      text: "该提交不再进入索引；请以最新提交记录为准，勿盲目重投。"
+    };
+  }
+  if (proof.status === "failed") {
+    return {
+      tone: "failed",
+      title: "提交失败（终态）",
+      text: "本次提交没有生效；请核对阻断原因后重新准备提交。"
     };
   }
   if (proof.status === "indexing") {

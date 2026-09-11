@@ -16,7 +16,8 @@ type NotificationLoadState =
 
 export function useOrderAppNotifications(
   data: ProductHomeData | undefined,
-  session: ParticipantSession
+  session: ParticipantSession,
+  getSessionToken?: () => string | undefined
 ): {
   readonly loadState: NotificationLoadState;
   readonly unreadCount: number;
@@ -31,7 +32,8 @@ export function useOrderAppNotifications(
     }
     let cancelled = false;
     setLoadState({ status: "loading" });
-    void loadOrderAppNotifications(data, session)
+    // 通知请求与会话锚定身份同一通道（productApi 客户端持有的钱包会话）。
+    void loadOrderAppNotifications(data, session, undefined, { sessionToken: getSessionToken?.() })
       .then((nextData) => {
         if (cancelled) {
           return;
@@ -59,13 +61,15 @@ export function useOrderAppNotifications(
     return () => {
       cancelled = true;
     };
-  }, [data, session]);
+  }, [data, session, getSessionToken]);
 
   async function markRead(notification: OrderAppNotificationDTO): Promise<void> {
     if (!data) {
       return;
     }
-    const nextNotification = await markOrderAppNotificationRead(notification, data, session);
+    const nextNotification = await markOrderAppNotificationRead(notification, data, session, undefined, {
+      sessionToken: getSessionToken?.()
+    });
     setLoadState((current) => {
       if (current.status !== "ready" && current.status !== "error") {
         return current;
@@ -154,6 +158,11 @@ export function NotificationCenter({
                 <div className="notification-meta">
                   <span>{notification.orderTitle}</span>
                   {notification.stageLabel ? <span>{notification.stageLabel}</span> : null}
+                  {notification.invalidation?.status === "invalidated" ? (
+                    <span className="notification-invalidated-flag">
+                      状态：已失效{notification.invalidation.reason === "reorg_rolled_back" ? "（链上重组回滚）" : ""}
+                    </span>
+                  ) : null}
                   <span>{notification.privacy === "participant_only" ? "仅参与方可见" : ""}</span>
                 </div>
               </div>

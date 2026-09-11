@@ -204,7 +204,8 @@ export function requiredInputsForTask(task: ProductTaskDTO, plugin: TaskPlugin):
 
 export function pluginPresentationForTask(task: ProductTaskDTO, plugin: TaskPlugin = pluginForTask(task)): TaskPluginPresentation {
   const pluginKind = taskCapabilityPluginKind(task);
-  const defaults = defaultPresentationByKind[pluginKind];
+  // 缺能力插件类型的投影按通用提交插件展示（中性降级），渲染路径不 throw。
+  const defaults = pluginKind ? defaultPresentationByKind[pluginKind] : undefined;
   const manifest = addOnManifestForTask(task);
   // 允许的凭证类型单轨：有 evidenceSpec 时由发布者标签派生，否则用通用兜底文案。
   const specLabels = (task.evidenceSpec ?? [])
@@ -213,11 +214,11 @@ export function pluginPresentationForTask(task: ProductTaskDTO, plugin: TaskPlug
   return {
     kind: plugin.kind,
     ...(task.capabilityPlugin?.source ? { source: task.capabilityPlugin.source } : {}),
-    title: manifest?.title ?? task.capabilityPlugin?.title ?? defaults.title ?? plugin.title,
-    summary: manifest?.summary ?? task.capabilityPlugin?.summary ?? defaults.summary ?? plugin.summary,
+    title: manifest?.title ?? task.capabilityPlugin?.title ?? defaults?.title ?? plugin.title,
+    summary: manifest?.summary ?? task.capabilityPlugin?.summary ?? defaults?.summary ?? plugin.summary,
     primaryActionLabel: taskPrimaryActionLabel(task),
-    allowedEvidenceTypes: specLabels.length > 0 ? specLabels : defaults.allowedEvidenceTypes ?? plugin.allowedEvidenceTypes,
-    confirmationCopy: defaults.confirmationCopy ?? plugin.confirmationCopy
+    allowedEvidenceTypes: specLabels.length > 0 ? specLabels : defaults?.allowedEvidenceTypes ?? plugin.allowedEvidenceTypes,
+    confirmationCopy: defaults?.confirmationCopy ?? plugin.confirmationCopy
   };
 }
 
@@ -226,13 +227,12 @@ export function createInitialTaskPluginState(task: ProductTaskDTO, walletAddress
   const confirmations: Record<string, boolean> = {};
   const values: Record<string, string> = {};
 
+  // 完成态输入的"已完成"只由渲染层展示，不写进表单值：表单值是提交载荷
+  // （collectEvidenceIds → evidenceIds）的唯一来源，占位文本混进去会被
+  // parseEvidenceIds 解析成凭证 ID 发往 prepare-submit。
   for (const input of requiredInputsForTask(task, plugin)) {
-    if (input.completed) {
-      if (input.inputType === "confirmation" || input.inputType === "payment_placeholder") {
-        confirmations[input.inputId] = true;
-      } else {
-        values[input.inputId] = "已完成";
-      }
+    if (input.completed && (input.inputType === "confirmation" || input.inputType === "payment_placeholder")) {
+      confirmations[input.inputId] = true;
     }
   }
 

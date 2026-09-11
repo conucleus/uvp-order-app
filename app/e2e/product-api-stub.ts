@@ -175,6 +175,7 @@ const selectorAddOnManifest: ParticipantAddOnManifestDTO = {
             ] },
             { componentId: "selector-wallet", componentKind: "wallet", inputId: "selector.selectorWallet", label: "选择方钱包", required: true },
             { componentId: "executor-wallet", componentKind: "wallet", inputId: "selector.executorWallet", label: "履约者钱包", required: true },
+            { componentId: "previous-executor", componentKind: "wallet", inputId: "selector.previousExecutorWallet", label: "原履约者钱包" },
             { componentId: "executor-metadata-hash", componentKind: "hash", inputId: "selector.executorMetadataHash", label: "履约者元数据指纹", required: true },
             { componentId: "executor-reference", componentKind: "text", inputId: "selector.executorReference", label: "履约者参考" },
             { componentId: "metadata-uri", componentKind: "uri", inputId: "selector.metadataURI", label: "补充说明 URI", required: true },
@@ -195,6 +196,7 @@ const selectorAddOnManifest: ParticipantAddOnManifestDTO = {
         targetStageId: "selector.targetStageId",
         mode: "selector.mode",
         executorWallet: "selector.executorWallet",
+        previousExecutorWallet: "selector.previousExecutorWallet",
         executorMetadataHash: "selector.executorMetadataHash",
         metadataURI: "selector.metadataURI"
       }
@@ -268,7 +270,36 @@ const inspectionResourceRequirement: ProductResourceRequirementDTO = {
   }
 };
 
-// BFF 任务契约要求 capabilityPlugin.pluginKind（缺省会使前端 taskCapabilityPluginKind 直接抛错）。
+/** 切换资源键用例的第二资源：与检验证明不同的清单三元组。 */
+export const packingListResourceRequirement: ProductResourceRequirementDTO = {
+  resourceId: "packing_list",
+  resourceKey: "packing_list",
+  label: "装箱单",
+  required: true,
+  source: "resource_patch",
+  visibility: "protected",
+  manifestURI: "ipfs://bafyuvp-packing-manifest",
+  manifestHash: "0x6666666666666666666666666666666666666666666666666666666666666666",
+  accessPolicy: {
+    visibility: "protected",
+    readers: [],
+    writers: [],
+    controllers: [],
+    policyHash: "0x7777777777777777777777777777777777777777777777777777777777777777"
+  }
+};
+
+/** 不带清单三元组的裸资源：切换到它时上一资源的三元组必须被清空。 */
+export const bareNoteResourceRequirement: ProductResourceRequirementDTO = {
+  resourceId: "customs_note",
+  resourceKey: "customs_note",
+  label: "报关备注",
+  required: false,
+  source: "participant_input"
+};
+
+// BFF 任务契约随任务下发 capabilityPlugin.pluginKind（缺失时前端按通用提交
+// 插件中性降级，不中断渲染）。
 // 与 product-dto fixtures/customs.ts 的插件形态保持一致。
 const customsDeliveryPlugin = {
   pluginKind: "delivery_update",
@@ -633,6 +664,11 @@ export async function installProductApiStub(page: Page, options: StubOptions = {
     await page.addInitScript(({ signature, reject }) => {
       const provider = {
         request: async ({ method }: { readonly method: string; readonly params?: readonly unknown[] }) => {
+          // 桩 typedData 的 domain.chainId=31337（0x7a69）：签名前的
+          // eth_chainId 域核对需要钱包应答当前链。
+          if (method === "eth_chainId") {
+            return "0x7a69";
+          }
           if (method !== "eth_signTypedData_v4") {
             throw new Error(`unsupported wallet method ${method}`);
           }
@@ -737,6 +773,7 @@ export async function installProductApiStub(page: Page, options: StubOptions = {
         typedData: buildProductSubmitTypedData({
           chainId: 31337,
           verifyingContract: "0x8888888888888888888888888888888888888888",
+          planId: "0x1111111111111111111111111111111111111111111111111111111111111111",
           orderId: "0x0101010101010101010101010101010101010101010101010101010101010101",
           sourceId: "0x0202020202020202020202020202020202020202020202020202020202020202",
           signalId: "0x0303030303030303030303030303030303030303030303030303030303030303",
@@ -845,7 +882,8 @@ export async function installProductApiStub(page: Page, options: StubOptions = {
           taskTitle: task.title,
           targetStage: body.targetStageId,
           action: executorPatchModeLabel(mode),
-          validUntil: "2026-04-29T13:00:00.000Z"
+          validUntil: "2026-04-29T13:00:00.000Z",
+          verifyingContract: "0x8888888888888888888888888888888888888888"
         }
       });
       return;
@@ -949,7 +987,8 @@ export async function installProductApiStub(page: Page, options: StubOptions = {
           taskTitle: task.title,
           targetStage: body.targetStageId,
           action: "protected",
-          validUntil: "2026-04-29T13:00:00.000Z"
+          validUntil: "2026-04-29T13:00:00.000Z",
+          verifyingContract: "0x8888888888888888888888888888888888888888"
         }
       });
       return;
