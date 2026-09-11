@@ -59,8 +59,24 @@ describe("order app Product API boundary", () => {
   });
 
   it("times out hanging requests instead of loading forever", async () => {
-    // 注入的 fetcher 永不 settle：超时必须独立于 fetcher 是否消费 signal。
-    const hangingFetcher: ProductApiClientOptions["fetcher"] = () => new Promise<Response>(() => {});
+    // 注入的 fetcher 不主动 settle：超时必须独立于 fetcher 何时返回。
+    // 但与真实 fetch 同语义地消费 signal——signal 中止即 reject 并撤销
+    // keepAlive。keepAlive 定时器是必须的：AbortSignal.timeout 不持有
+    // 事件循环，而永不落定的 promise 也不持有——没有它，部分 node 版本
+    // 的 test runner 会在超时到来前排空循环，按未决 promise 取消整个
+    // 套件（CI node22 实测）。
+    const hangingFetcher: ProductApiClientOptions["fetcher"] = (_input, init) =>
+      new Promise<Response>((_resolve, reject) => {
+        const keepAlive = setInterval(() => {}, 50);
+        init?.signal?.addEventListener(
+          "abort",
+          () => {
+            clearInterval(keepAlive);
+            reject(new DOMException("This operation was aborted", "TimeoutError"));
+          },
+          { once: true }
+        );
+      });
     const client = createProductApiClient({
       baseUrl: "http://service.local",
       fetcher: hangingFetcher,
