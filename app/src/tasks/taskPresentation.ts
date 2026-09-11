@@ -1,4 +1,9 @@
-import type { FulfillmentPluginKind, FulfillmentRequiredInputDTO, ProductTaskDTO } from "@uvp-eth/product-dto";
+import type {
+  FulfillmentPluginKind,
+  FulfillmentRequiredInputDTO,
+  ParticipantAddOnManifestActionDTO,
+  ProductTaskDTO
+} from "@uvp-eth/product-dto";
 import {
   addOnManifestForTask,
   executorOverlayForTask,
@@ -30,15 +35,9 @@ export function taskAddOnKind(task: ProductTaskDTO): ParticipantAddOnKind {
   if (isParticipantAddOnKind(manifest?.addOnKind)) {
     return manifest.addOnKind;
   }
-
-  switch (taskCapabilityPluginKind(task)) {
-    case "validation_confirm":
-    case "dispute_material":
-    case "payment_placeholder":
-    case "delivery_update":
-    case "evidence_submission":
-      return "submit_signal";
-  }
+  // 无显式加成声明（含能力插件类型缺失的投影）统一按提交执行信号渲染，
+  // 收件箱/详情对缺字段数据中性降级，不 throw 白屏。
+  return "submit_signal";
 }
 
 export function taskAddOnLabel(kind: ParticipantAddOnKind): string {
@@ -52,12 +51,13 @@ export function taskAddOnLabel(kind: ParticipantAddOnKind): string {
   }
 }
 
-export function taskCapabilityPluginKind(task: ProductTaskDTO): FulfillmentPluginKind {
-  const pluginKind = task.capabilityPlugin?.pluginKind;
-  if (!pluginKind) {
-    throw new Error(`task ${task.taskId} is missing capabilityPlugin.pluginKind`);
-  }
-  return pluginKind;
+/**
+ * 能力插件类型（可选读取）：投影缺失该字段时返回 undefined，调用方按
+ * 中性兜底降级（zhixu-store workbenchSupport 同口径），渲染路径不因
+ * 缺字段 throw 白屏。
+ */
+export function taskCapabilityPluginKind(task: ProductTaskDTO): FulfillmentPluginKind | undefined {
+  return task.capabilityPlugin?.pluginKind;
 }
 
 export function taskPrimaryActionLabel(task: ProductTaskDTO, fallback?: string): string {
@@ -71,7 +71,7 @@ export function taskPrimaryActionLabel(task: ProductTaskDTO, fallback?: string):
 
 export type TaskSubmitIntent = "confirm_stage" | "reject_stage" | "raise_dispute" | "resolve_dispute";
 
-/** 提交意图单一来源：按能力插件类型推导，争议任务不得以 confirm_stage 提交。 */
+/** 无 manifest 声明时的兜底映射：争议任务不得以 confirm_stage 提交。 */
 const submitIntentByPluginKind: Readonly<Record<FulfillmentPluginKind, TaskSubmitIntent>> = {
   payment_placeholder: "confirm_stage",
   evidence_submission: "confirm_stage",
@@ -80,8 +80,32 @@ const submitIntentByPluginKind: Readonly<Record<FulfillmentPluginKind, TaskSubmi
   dispute_material: "raise_dispute"
 };
 
+/**
+ * 提交意图与 zhixu-store 同源同序：manifest 显式声明的 submit_signal intent
+ * 优先（发布者声明是权威），无 manifest 声明时按能力插件类型推导。
+ * 两端各自单源推导会在 manifest 与插件类型不一致时得出不同 intent。
+ */
 export function taskSubmitIntent(task: ProductTaskDTO): TaskSubmitIntent {
-  return submitIntentByPluginKind[taskCapabilityPluginKind(task)];
+  const submitActions = (addOnManifestForTask(task)?.actions ?? [])
+    .filter((action) => action.actionKind === "submit_signal");
+  const primary = submitActions.find((action) => action.primary) ?? submitActions[0];
+  return taskSubmitIntentForAction(primary, task);
+}
+
+/**
+ * manifest 驱动路径的提交意图（与 zhixu-store taskSubmitIntent 同源同序）：
+ * 动作显式声明优先；未声明时按能力插件类型推导——dispute_material 的
+ * 未声明动作不得兜底成 confirm_stage，否则争议任务会以确认口径提交。
+ */
+export function taskSubmitIntentForAction(
+  action: Pick<ParticipantAddOnManifestActionDTO, "intent"> | undefined,
+  task: Pick<ProductTaskDTO, "capabilityPlugin">
+): TaskSubmitIntent {
+  if (action?.intent) {
+    return action.intent;
+  }
+  const pluginKind = task.capabilityPlugin?.pluginKind;
+  return pluginKind ? submitIntentByPluginKind[pluginKind] ?? "confirm_stage" : "confirm_stage";
 }
 
 export function taskRequiredInputsFromCapability(

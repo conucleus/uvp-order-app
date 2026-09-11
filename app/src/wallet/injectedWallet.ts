@@ -86,29 +86,103 @@ export interface WalletConnector {
     readonly typedData: ProductSubmitTypedData;
     readonly walletAddress: string;
     readonly provider?: Eip1193Provider;
+    readonly expected?: TypedDataDomainExpectation | undefined;
   }): Promise<`0x${string}`>;
   signTypedData(input: {
     readonly typedData: GenericTypedData;
     readonly walletAddress: string;
     readonly provider?: Eip1193Provider;
+    readonly expected?: TypedDataDomainExpectation | undefined;
   }): Promise<`0x${string}`>;
+}
+
+/**
+ * 域校验预期：chainId/verifyingContract 是部署参数（随 prepare 的 typedData
+ * 下发），调用方有独立来源（如任务投影的 stateMachineAddress）时提供，
+ * 签名前严格比对，防止被攻陷 BFF 让参与者对无效域签名。
+ */
+export interface TypedDataDomainExpectation {
+  readonly chainId?: number | undefined;
+  readonly verifyingContract?: string | undefined;
 }
 
 export function getInjectedWalletProvider(): Eip1193Provider | undefined {
   return typeof window === "undefined" ? undefined : window.ethereum;
 }
 
+/** 请求当前连接地址（eth_requestAccounts）：邀请 accept 的会话签名前先核对连接地址。 */
+export async function requestInjectedWalletAddress(provider?: Eip1193Provider): Promise<string> {
+  const resolved = provider ?? getInjectedWalletProvider();
+  if (!resolved) {
+    throw new InjectedWalletError("missing_wallet", "未检测到浏览器钱包。");
+  }
+  try {
+    const accounts = await resolved.request({ method: "eth_requestAccounts" }) as unknown;
+    const first = Array.isArray(accounts) ? accounts[0] : undefined;
+    if (typeof first !== "string" || !/^0x[0-9a-fA-F]{40}$/u.test(first)) {
+      throw new InjectedWalletError("wallet_signature_failed", "钱包没有返回可用地址。");
+    }
+    return first;
+  } catch (error) {
+    if (error instanceof InjectedWalletError) {
+      throw error;
+    }
+    if (isUserRejectedRequest(error)) {
+      throw new InjectedWalletError("wallet_rejected", "连接钱包被拒绝。");
+    }
+    throw new InjectedWalletError(
+      "wallet_signature_failed",
+      error instanceof Error ? error.message : "连接钱包失败。"
+    );
+  }
+}
+
+/** 会话消息签名（personal_sign）：只证明地址控制权，不产生任何链上动作。 */
+export async function personalSignWithInjectedWallet(input: {
+  readonly address: string;
+  readonly message: string;
+  readonly provider?: Eip1193Provider;
+}): Promise<string> {
+  const provider = input.provider ?? getInjectedWalletProvider();
+  if (!provider) {
+    throw new InjectedWalletError("missing_wallet", "未检测到浏览器钱包，不能完成会话签名。");
+  }
+  try {
+    const signature = await provider.request({
+      method: "personal_sign",
+      params: [input.message, input.address]
+    });
+    if (typeof signature !== "string" || !signature.startsWith("0x")) {
+      throw new Error("wallet returned an invalid hex signature");
+    }
+    return signature;
+  } catch (error) {
+    if (error instanceof InjectedWalletError) {
+      throw error;
+    }
+    if (isUserRejectedRequest(error)) {
+      throw new InjectedWalletError("wallet_rejected", "钱包签名被拒绝，未创建会话。");
+    }
+    throw new InjectedWalletError(
+      "wallet_signature_failed",
+      error instanceof Error ? error.message : "会话签名失败。"
+    );
+  }
+}
+
 export async function signProductSubmitWithInjectedWallet(input: {
   readonly typedData: ProductSubmitTypedData;
   readonly walletAddress: string;
   readonly provider?: Eip1193Provider;
+  readonly expected?: TypedDataDomainExpectation | undefined;
 }): Promise<`0x${string}`> {
   const provider = input.provider ?? getInjectedWalletProvider();
   if (!provider) {
     throw new InjectedWalletError("missing_wallet", "未检测到浏览器钱包，不能创建业务签名。");
   }
   // executor-kit 只核对 submitter 一致性；域与结构在这里补齐同一签名边界。
-  assertTypedDataEnvelopeMatchesProtocol(input.typedData, input.walletAddress);
+  assertTypedDataEnvelopeMatchesProtocol(input.typedData, input.walletAddress, input.expected);
+  await ensureCurrentChainMatchesDomain(provider, input.typedData);
 
   try {
     return await requestProductSubmitSignature(provider, input.typedData, input.walletAddress);
@@ -130,6 +204,7 @@ export async function signTypedDataWithInjectedWallet(input: {
   readonly typedData: GenericTypedData;
   readonly walletAddress: string;
   readonly provider?: Eip1193Provider;
+  readonly expected?: TypedDataDomainExpectation | undefined;
 }): Promise<`0x${string}`> {
   const provider = input.provider ?? getInjectedWalletProvider();
   if (!provider) {
@@ -139,7 +214,8 @@ export async function signTypedDataWithInjectedWallet(input: {
   if (!signer) {
     throw new InjectedWalletError("wallet_signature_failed", "缺少签名钱包。");
   }
-  assertTypedDataEnvelopeMatchesProtocol(input.typedData, signer);
+  assertTypedDataEnvelopeMatchesProtocol(input.typedData, signer, input.expected);
+  await ensureCurrentChainMatchesDomain(provider, input.typedData);
 
   try {
     const signature = await provider.request({
@@ -166,11 +242,17 @@ export async function signTypedDataWithInjectedWallet(input: {
 
 /**
  * 签名前校验 typedData 的域与结构：primaryType 必须是协议信封之一，
- * domain.name/version/chainId/verifyingContract 与 protocol-bindings 常量一致，
- * 且 message 中的签名者字段（submitter/selector）就是本次请求的签名钱包。
+ * domain.name/version 与 protocol-bindings 常量一致，
+ * domain.chainId/verifyingContract 提供预期时严格比对（部署参数，
+ * 调用方从任务投影等独立来源取得），且 message 中的签名者字段
+ * （submitter/selector）就是本次请求的签名钱包。
  * 与 executor-kit / zhixu-store 的签名闸门同一口径，任何不一致都在调钱包前拒绝。
  */
-export function assertTypedDataEnvelopeMatchesProtocol(typedData: unknown, walletAddress: string): void {
+export function assertTypedDataEnvelopeMatchesProtocol(
+  typedData: unknown,
+  walletAddress: string,
+  expected?: TypedDataDomainExpectation | undefined
+): void {
   const record = requireRecord(typedData, "签名对象不是 EIP-712 结构");
   const primaryType = typeof record.primaryType === "string" ? record.primaryType : "";
   const expectation = envelopeExpectations[primaryType];
@@ -185,17 +267,20 @@ export function assertTypedDataEnvelopeMatchesProtocol(typedData: unknown, walle
   if (domain.version !== expectation.domainVersion) {
     throw mismatch(`domain.version ${String(domain.version)} 与协议 ${expectation.domainVersion} 不一致`);
   }
-  const chainId = domain.chainId;
-  const chainIdNumber = typeof chainId === "number"
-    ? chainId
-    : typeof chainId === "string" && chainId.trim() !== ""
-      ? Number(chainId)
-      : Number.NaN;
-  if (!Number.isSafeInteger(chainIdNumber) || chainIdNumber <= 0) {
-    throw mismatch(`domain.chainId ${String(chainId)} 不是有效链 ID`);
+  const chainIdNumber = parseDomainChainId(domain.chainId);
+  if (chainIdNumber === undefined) {
+    throw mismatch(`domain.chainId ${String(domain.chainId)} 不是有效链 ID`);
   }
-  if (!isEvmAddress(domain.verifyingContract)) {
+  if (expected?.chainId !== undefined && chainIdNumber !== expected.chainId) {
+    throw mismatch(`domain.chainId ${chainIdNumber} 与预期 ${expected.chainId} 不一致`);
+  }
+  const verifyingContract = domain.verifyingContract;
+  if (!isEvmAddress(verifyingContract)) {
     throw mismatch("domain.verifyingContract 缺失或不是有效地址");
+  }
+  if (expected?.verifyingContract !== undefined &&
+    verifyingContract.toLowerCase() !== expected.verifyingContract.trim().toLowerCase()) {
+    throw mismatch(`domain.verifyingContract ${verifyingContract} 与预期 ${expected.verifyingContract} 不一致`);
   }
 
   const types = requireRecord(record.types, "签名对象缺少有效 types");
@@ -212,6 +297,49 @@ export function assertTypedDataEnvelopeMatchesProtocol(typedData: unknown, walle
   if (signer.toLowerCase() !== walletAddress.trim().toLowerCase()) {
     throw mismatch(`message.${expectation.signerField} 与本次签名钱包不一致`);
   }
+}
+
+/**
+ * 签名前至少核对钱包当前连接链与 domain.chainId 一致：否则被攻陷的
+ * BFF 可以让参与者把签名签到另一条链的无效域上。
+ */
+async function ensureCurrentChainMatchesDomain(
+  provider: Eip1193Provider,
+  typedData: GenericTypedData | ProductSubmitTypedData
+): Promise<void> {
+  const domainChainId = parseDomainChainId((typedData as GenericTypedData).domain.chainId);
+  if (domainChainId === undefined) {
+    throw mismatch("domain.chainId 缺失，无法核对当前链");
+  }
+  let walletChainIdHex: unknown;
+  try {
+    walletChainIdHex = await provider.request({ method: "eth_chainId" });
+  } catch (error) {
+    if (isUserRejectedRequest(error)) {
+      throw new InjectedWalletError("wallet_rejected", "钱包签名被拒绝，未创建提交。");
+    }
+    throw new InjectedWalletError(
+      "wallet_signature_failed",
+      error instanceof Error ? error.message : "读取钱包当前链失败。"
+    );
+  }
+  const walletChainId = typeof walletChainIdHex === "string"
+    ? Number.parseInt(walletChainIdHex, 16)
+    : Number.NaN;
+  if (walletChainId !== domainChainId) {
+    throw mismatch(
+      `钱包当前连接链 ${Number.isNaN(walletChainId) ? String(walletChainIdHex) : walletChainId} 与签名域 chainId ${domainChainId} 不一致，请切换到部署链后再签名`
+    );
+  }
+}
+
+function parseDomainChainId(value: unknown): number | undefined {
+  const parsed = typeof value === "number"
+    ? value
+    : typeof value === "string" && /^\d+$/u.test(value.trim())
+      ? Number(value.trim())
+      : Number.NaN;
+  return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : undefined;
 }
 
 export const evmInjectedWalletConnector: WalletConnector = {

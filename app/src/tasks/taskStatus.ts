@@ -1,4 +1,5 @@
 import type { ProductTaskDTO } from "@uvp-eth/product-dto";
+import { parseDeadlineUtcMs } from "./taskUtils";
 
 export type ParticipantTaskDisplayState =
   | "ready"
@@ -103,8 +104,10 @@ export function taskDisplay(task: ProductTaskDTO, now: Date = new Date()): Parti
   const isOverdue = task.status === "open" && isDeadlineOverdue(task.deadline, now);
 
   // done/confirmed 是链上最终态：早先失败尝试残留的 errorCode 不再把
-  // 已完成任务展示为"提交失败"。
-  if (task.status === "done" || rawStatus === "confirmed") {
+  // 已完成任务展示为"提交失败"。投影残留的 confirmed 只在任务已进入
+  // submitted（等待索引）时作为索引超前的展示；不得改写权威 open/blocked
+  // 态（同函数对 submissionStatus/errorCode 的裁定：投影残留不覆盖权威态）。
+  if (task.status === "done" || (task.status === "submitted" && rawStatus === "confirmed")) {
     return {
       state: "confirmed",
       label: "已确认",
@@ -114,16 +117,8 @@ export function taskDisplay(task: ProductTaskDTO, now: Date = new Date()): Parti
     };
   }
 
-  if (rawStatus === "failed" || extension.errorCode) {
-    return {
-      state: "failed",
-      label: "提交失败",
-      bucketLabel: "提交失败",
-      rank: 4,
-      isOverdue
-    };
-  }
-
+  // blocked/open 是服务端权威任务态，先于失败判定：投影残留的
+  // submissionStatus/errorCode 扩展不得把可重试或受阻的任务改写成"提交失败"。
   if (task.status === "blocked") {
     return {
       state: "blocked",
@@ -135,6 +130,15 @@ export function taskDisplay(task: ProductTaskDTO, now: Date = new Date()): Parti
   }
 
   if (task.status === "submitted") {
+    if (rawStatus === "failed" || extension.errorCode) {
+      return {
+        state: "failed",
+        label: "提交失败",
+        bucketLabel: "提交失败",
+        rank: 4,
+        isOverdue
+      };
+    }
     return {
       state: rawStatus === "indexing" ? "indexing" : "submitted",
       label: "等待链上确认",
@@ -169,9 +173,7 @@ function isDeadlineOverdue(deadline: string, now: Date): boolean {
 }
 
 function deadlineTime(deadline: string): number {
-  const normalized = deadline.trim().replace(" ", "T");
-  const timestamp = Date.parse(normalized);
-  return Number.isFinite(timestamp) ? timestamp : Number.MAX_SAFE_INTEGER;
+  return parseDeadlineUtcMs(deadline) ?? Number.MAX_SAFE_INTEGER;
 }
 
 function normalizeWallet(walletAddress: string | undefined): string | undefined {

@@ -41,8 +41,21 @@ export interface ProductApiClient {
   getOrder(orderId: string): Promise<ProductOrderDTO>;
   getTask(taskId: string, input?: ParticipantQueryInput): Promise<ProductTaskDTO>;
   previewInvite(inviteId: string, input?: ParticipantQueryInput): Promise<ProductInvitePreviewDTO>;
-  acceptInvite(inviteId: string, input: AcceptInviteInput): Promise<ProductInviteAcceptanceDTO>;
+  acceptInvite(inviteId: string, input: AcceptInviteInput, options?: InviteRequestOptions): Promise<ProductInviteAcceptanceDTO>;
   rejectInvite(inviteId: string, input?: RejectInviteInput): Promise<ProductInviteAcceptanceDTO>;
+  /**
+   * 服务端认可的钱包控制证明：/store/auth challenge → 钱包 personal_sign →
+   * verify 换取会话 token（x-uvp-store-session）。accept 邀请在非 local
+   * 运行时必须携带该会话；签名者由调用方注入。
+   */
+  proveWalletControl(input: { readonly address: string }): Promise<WalletSessionProof>;
+  /** 客户端当前持有的钱包会话 token（proveWalletControl 成功后留存），供通知等旁路请求复用同一会话锚定。 */
+  currentSessionToken(): string | undefined;
+  /**
+   * 恢复/清除钱包会话 token（页面刷新时从 sessionStorage 恢复；服务端
+   * 判定会话失效时清除）。返回是否真的改变了客户端持有的 token。
+   */
+  restoreSessionToken(token: string | undefined): boolean;
   prepareTaskSubmit(taskId: string, input: PrepareTaskSubmitInput): Promise<PreparedTaskSubmitDTO>;
   submitTask(taskId: string, input: SubmitTaskInput): Promise<ProductSubmissionDTO>;
   prepareStageExecutorPatch(taskId: string, input: PrepareStageExecutorPatchInput): Promise<PreparedStageExecutorPatchDTO>;
@@ -55,6 +68,21 @@ export interface ProductApiClient {
 
 export interface ParticipantQueryInput {
   readonly walletAddress?: string | undefined;
+  /** 一次性邀请令牌：预览（GET /product/invites/:id）与 accept/reject 一样按 token 哈希比对，缺失 403。 */
+  readonly token?: string | undefined;
+}
+
+/** 钱包消息签名器：与会话 challenge 报文配套（personal_sign 口径）。 */
+export type PersonalSigner = (address: string, message: string) => Promise<string>;
+
+export interface WalletSessionProof {
+  readonly sessionToken: string;
+  readonly anchoredAddress: string;
+}
+
+export interface InviteRequestOptions {
+  /** 已证明控制的钱包会话 token；服务端以其锚定 accept 身份。 */
+  readonly sessionToken?: string | undefined;
 }
 
 export interface ProductApiClientOptions {
@@ -64,15 +92,21 @@ export interface ProductApiClientOptions {
   readonly timeoutMs?: number | undefined;
   /** 证据上传等大载荷请求的超时毫秒数；默认 60s。 */
   readonly uploadTimeoutMs?: number | undefined;
+  /** proveWalletControl 用的钱包签名器；缺省直接抛错而不是静默走自报身份。 */
+  readonly personalSign?: PersonalSigner | undefined;
 }
 
 export interface AcceptInviteInput {
   readonly displayName: string;
   readonly walletAddress: string;
   readonly contact: string;
+  /** 一次性邀请令牌（创建邀请时下发，随邀请链接送达）；服务端做哈希比对。 */
+  readonly token: string;
 }
 
 export interface RejectInviteInput {
+  /** 一次性邀请令牌；reject 同样强制回呈。 */
+  readonly token: string;
   readonly displayName?: string | undefined;
   readonly contact?: string | undefined;
 }
@@ -127,7 +161,6 @@ export interface ProductInvitePreviewDTO {
 }
 
 export type ProductSubmitIntent = "confirm_stage" | "reject_stage" | "raise_dispute" | "resolve_dispute";
-export type ProductStageExecutorPatchMode = ProductExecutorPatchMode | "replace";
 
 export interface PrepareTaskSubmitInput {
   readonly evidenceIds: readonly string[];
@@ -147,7 +180,7 @@ export interface PrepareStageExecutorPatchInput {
   readonly executorWallet: string;
   readonly executorMetadataHash: Hex | string;
   readonly metadataURI: string;
-  readonly mode?: ProductStageExecutorPatchMode | undefined;
+  readonly mode?: ProductExecutorPatchMode | undefined;
   readonly previousExecutorWallet?: string | undefined;
   readonly approval?: unknown | undefined;
   readonly executorReference?: string | undefined;
@@ -159,7 +192,7 @@ export interface SubmitStageExecutorPatchInput {
   readonly typedData?: Eip712TypedDataDTO | undefined;
   readonly signature: string;
   readonly patch?: PreparedStageExecutorPatchDTO | undefined;
-  readonly mode?: ProductStageExecutorPatchMode | undefined;
+  readonly mode?: ProductExecutorPatchMode | undefined;
   readonly previousExecutorWallet?: string | undefined;
   readonly previousExecutorSignature?: string | undefined;
 }
@@ -243,6 +276,8 @@ export interface PreparedStageExecutorPatchDTO {
     readonly targetStage?: string;
     readonly action?: string;
     readonly validUntil?: string;
+    /** 补丁 EIP-712 域的验签合约（UVPStagePatchModule 地址），与 typedData.domain 交叉核对。 */
+    readonly verifyingContract?: string;
   };
 }
 
@@ -283,6 +318,8 @@ export interface PreparedStageResourcePatchDTO {
     readonly resourceLabel?: string;
     readonly action?: string;
     readonly validUntil?: string;
+    /** 补丁 EIP-712 域的验签合约（UVPStagePatchModule 地址），与 typedData.domain 交叉核对。 */
+    readonly verifyingContract?: string;
   };
 }
 
@@ -361,14 +398,52 @@ export interface EvidenceProofDTO {
 
 export class ProductApiError extends Error {
   override readonly name = "ProductApiError";
+  /** 服务端错误体的 `error` 短码（如 wallet_identity_required）；非 JSON 体为空。 */
+  readonly errorCode?: string;
 
   constructor(
     readonly status: number,
     readonly endpoint: string,
-    message: string
+    message: string,
+    errorCode?: string
   ) {
     super(message);
+    if (errorCode !== undefined) {
+      this.errorCode = errorCode;
+    }
   }
+}
+
+/** 401 + 该码表示参与者面请求缺有效钱包会话：界面据此切换到钱包登录入口。 */
+export const WALLET_IDENTITY_REQUIRED_CODE = "wallet_identity_required";
+
+/** 钱包会话 token 的会话级持久化键：刷新页面可恢复会话，关标签页即失效。 */
+const WALLET_SESSION_STORAGE_KEY = "uvp-order-app:wallet-session";
+
+export function readPersistedWalletSessionToken(): string | undefined {
+  try {
+    return globalThis.sessionStorage?.getItem(WALLET_SESSION_STORAGE_KEY) ?? undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+export function persistWalletSessionToken(token: string | undefined): void {
+  try {
+    if (token === undefined) {
+      globalThis.sessionStorage?.removeItem(WALLET_SESSION_STORAGE_KEY);
+    } else {
+      globalThis.sessionStorage?.setItem(WALLET_SESSION_STORAGE_KEY, token);
+    }
+  } catch {
+    // 存储不可用（隐私模式/测试环境）只损失刷新恢复，登录流程本身不受影响。
+  }
+}
+
+export function isWalletIdentityRequired(error: unknown): error is ProductApiError {
+  return error instanceof ProductApiError
+    && error.status === 401
+    && error.errorCode === WALLET_IDENTITY_REQUIRED_CODE;
 }
 
 export function createProductApiClient(options: ProductApiClientOptions = {}): ProductApiClient {
@@ -382,7 +457,8 @@ export function createProductApiClient(options: ProductApiClientOptions = {}): P
     baseUrl,
     fetcher: options.fetcher ?? globalThis.fetch.bind(globalThis),
     timeoutMs: options.timeoutMs ?? runtimeTimeoutMs("VITE_UVP_ORDER_APP_FETCH_TIMEOUT_MS") ?? DEFAULT_FETCH_TIMEOUT_MS,
-    uploadTimeoutMs: options.uploadTimeoutMs ?? runtimeTimeoutMs("VITE_UVP_ORDER_APP_UPLOAD_TIMEOUT_MS") ?? DEFAULT_UPLOAD_TIMEOUT_MS
+    uploadTimeoutMs: options.uploadTimeoutMs ?? runtimeTimeoutMs("VITE_UVP_ORDER_APP_UPLOAD_TIMEOUT_MS") ?? DEFAULT_UPLOAD_TIMEOUT_MS,
+    personalSign: options.personalSign
   });
 }
 
@@ -392,14 +468,32 @@ const DEFAULT_FETCH_TIMEOUT_MS = 6000;
 const DEFAULT_UPLOAD_TIMEOUT_MS = 60_000;
 
 class BrowserProductApiClient implements ProductApiClient {
+  /**
+   * 钱包会话 token（proveWalletControl 成功后留存）：所有参与者面请求统一
+   * 携带 x-uvp-store-session（与 acceptInvite 的会话通道同款）——非 local
+   * 运行时服务端对参与者面读写强制会话锚定，仅 query 自报钱包会 401。
+   */
+  private walletSessionToken: string | undefined;
+
   constructor(
     private readonly config: {
       readonly baseUrl: string;
       readonly fetcher: Fetcher;
       readonly timeoutMs: number;
       readonly uploadTimeoutMs: number;
+      readonly personalSign?: PersonalSigner | undefined;
     }
   ) {}
+
+  currentSessionToken(): string | undefined {
+    return this.walletSessionToken;
+  }
+
+  restoreSessionToken(token: string | undefined): boolean {
+    const changed = this.walletSessionToken !== token;
+    this.walletSessionToken = token;
+    return changed;
+  }
 
   async loadParticipantHome(input: ParticipantQueryInput = {}): Promise<ProductHomeData> {
     const [meResponse, ordersResponse, tasksResponse] = await Promise.all([
@@ -448,12 +542,57 @@ class BrowserProductApiClient implements ProductApiClient {
     );
   }
 
-  async acceptInvite(inviteId: string, input: AcceptInviteInput): Promise<ProductInviteAcceptanceDTO> {
-    return await this.postJson<ProductInviteAcceptanceDTO>(`/product/invites/${encodeURIComponent(inviteId)}/accept`, input);
+  async acceptInvite(
+    inviteId: string,
+    input: AcceptInviteInput,
+    options: InviteRequestOptions = {}
+  ): Promise<ProductInviteAcceptanceDTO> {
+    // 身份双通道（服务端 participant-identity 契约）：x-uvp-store-session
+    // 是锚定身份；query walletAddress 是声明值，与会话锚定不一致即 403，
+    // local 运行时才允许作为自报身份兜底。
+    return await this.requestJson<ProductInviteAcceptanceDTO>(
+      "POST",
+      participantPath(`/product/invites/${encodeURIComponent(inviteId)}/accept`, { walletAddress: input.walletAddress }),
+      input,
+      this.config.timeoutMs,
+      options.sessionToken ? { "x-uvp-store-session": options.sessionToken } : {}
+    );
   }
 
-  async rejectInvite(inviteId: string, input: RejectInviteInput = {}): Promise<ProductInviteAcceptanceDTO> {
+  async rejectInvite(inviteId: string, input: RejectInviteInput): Promise<ProductInviteAcceptanceDTO> {
     return await this.postJson<ProductInviteAcceptanceDTO>(`/product/invites/${encodeURIComponent(inviteId)}/reject`, input);
+  }
+
+  async proveWalletControl(input: { readonly address: string }): Promise<WalletSessionProof> {
+    const signer = this.config.personalSign;
+    if (!signer) {
+      throw new ProductApiError(
+        0,
+        "/store/auth/challenge",
+        "未配置钱包签名器：接受邀请需要先连接浏览器钱包完成会话签名。"
+      );
+    }
+    const address = input.address.trim();
+    if (!/^0x[0-9a-fA-F]{40}$/u.test(address)) {
+      throw new ProductApiError(0, "/store/auth/challenge", "钱包地址格式不合法，无法发起会话签名。");
+    }
+    const challenge = await this.postJson<{
+      readonly challenge: { readonly nonce: string; readonly message: string; readonly address: string };
+    }>("/store/auth/challenge", { address, intent: "login" });
+    const signature = await signer(address, challenge.challenge.message);
+    const verified = await this.postJson<{
+      readonly token: string;
+      readonly session: { readonly anchoredAddress?: string | undefined };
+    }>("/store/auth/verify", { nonce: challenge.challenge.nonce, signature });
+    // 会话留存：后续 me/tasks/orders/prepare-submit/evidence 请求统一携带，
+    // 不再退化为只有 accept 邀请才有会话锚定身份；会话级持久化让刷新后
+    // 无需重新签名（服务端 TTL 是会话真实有效期，过期即重新登录）。
+    this.walletSessionToken = verified.token;
+    persistWalletSessionToken(verified.token);
+    return {
+      sessionToken: verified.token,
+      anchoredAddress: verified.session.anchoredAddress ?? address
+    };
   }
 
   async prepareTaskSubmit(taskId: string, input: PrepareTaskSubmitInput): Promise<PreparedTaskSubmitDTO> {
@@ -526,16 +665,31 @@ class BrowserProductApiClient implements ProductApiClient {
     return await this.requestJson<TResponse>("POST", pathname, body, timeoutMs);
   }
 
-  private async requestJson<TResponse>(method: string, pathname: string, body: unknown, timeoutMs: number): Promise<TResponse> {
+  private async requestJson<TResponse>(
+    method: string,
+    pathname: string,
+    body: unknown,
+    timeoutMs: number,
+    extraHeaders: Readonly<Record<string, string>> = {}
+  ): Promise<TResponse> {
     const signal = AbortSignal.timeout(timeoutMs);
+    // 会话头与调用方显式传入的头合并：显式值（如 accept 邀请的新会话）优先。
+    const sessionHeaders = this.walletSessionToken
+      ? { "x-uvp-store-session": this.walletSessionToken }
+      : {};
     let response: Response;
     try {
       response = await withTimeout(this.config.fetcher(joinUrl(this.config.baseUrl, pathname), {
         method,
         headers: {
-          "content-type": "application/json"
+          "content-type": "application/json",
+          ...sessionHeaders,
+          ...extraHeaders
         },
         ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+        // 禁止跟随重定向（executor-kit 同款）：这些请求携带钱包会话头，
+        // 3xx 会让凭据头随重定向重放到 Location 指向的任意主机。
+        redirect: "manual",
         signal
       }), signal);
     } catch (error) {
@@ -544,10 +698,33 @@ class BrowserProductApiClient implements ProductApiClient {
       }
       throw error;
     }
-    if (!response.ok) {
-      throw new ProductApiError(response.status, pathname, await responseText(response));
+    // manual 模式下浏览器的跨源重定向是 status 0 的 opaqueredirect：与所有
+    // 3xx 一样按错误处理（executor-kit isProductApiRedirectStatus 同口径）。
+    if (response.status === 0 || (response.status >= 300 && response.status < 400)) {
+      throw new ProductApiError(response.status, pathname, `redirect_refused:${response.status}`);
     }
-    return await response.json() as TResponse;
+    if (!response.ok) {
+      const text = await responseText(response);
+      // 服务端错误体是 {error: 短码, message?}：短码进 errorCode 供界面
+      // 分支（如钱包会话缺失切换登录入口），文本整体留作展示。
+      let errorCode: string | undefined;
+      try {
+        const parsed = JSON.parse(text) as { readonly error?: unknown };
+        if (typeof parsed.error === "string") {
+          errorCode = parsed.error;
+        }
+      } catch {
+        // 非 JSON 错误体只有文本可用。
+      }
+      throw new ProductApiError(response.status, pathname, text, errorCode);
+    }
+    try {
+      return await response.json() as TResponse;
+    } catch (error) {
+      // 2xx 但不是 JSON：归入统一错误链（与 zhixu-store 同口径），而不是
+      // 把裸 SyntaxError 直接抛给界面。
+      throw new ProductApiError(response.status, pathname, error instanceof Error ? error.message : "response_not_json");
+    }
   }
 }
 
@@ -614,11 +791,15 @@ function sortOrders(orders: readonly ProductOrderDTO[]): readonly ProductOrderDT
 }
 
 function participantPath(pathname: string, input: ParticipantQueryInput): string {
-  if (!input.walletAddress) {
-    return pathname;
+  const query = new URLSearchParams();
+  if (input.walletAddress) {
+    query.set("walletAddress", input.walletAddress);
   }
-  const query = new URLSearchParams({ walletAddress: input.walletAddress });
-  return `${pathname}?${query.toString()}`;
+  if (input.token) {
+    query.set("token", input.token);
+  }
+  const serialized = query.toString();
+  return serialized.length > 0 ? `${pathname}?${serialized}` : pathname;
 }
 
 function joinUrl(baseUrl: string, pathname: string): string {
@@ -630,14 +811,17 @@ function normalizeBaseUrl(baseUrl: string | undefined): string | undefined {
   return trimmed && trimmed.length > 0 ? trimmed : undefined;
 }
 
+// API 基地址与超时来自构建期注入的静态值（import.meta.env.VITE_X 静态成员
+// 访问，Vite 构建时内联）。传入整个 env 对象会把键名查找留在运行期，
+// 形成随包分发的环境开关。
 function runtimeEnv(): string | undefined {
-  const env = import.meta.env as Readonly<Record<string, string | undefined>> | undefined;
-  return env?.VITE_UVP_CHAIN_SERVICES_URL;
+  return import.meta.env?.VITE_UVP_CHAIN_SERVICES_URL;
 }
 
-function runtimeTimeoutMs(name: string): number | undefined {
-  const env = import.meta.env as Readonly<Record<string, string | undefined>> | undefined;
-  const raw = env?.[name];
+function runtimeTimeoutMs(name: "VITE_UVP_ORDER_APP_FETCH_TIMEOUT_MS" | "VITE_UVP_ORDER_APP_UPLOAD_TIMEOUT_MS"): number | undefined {
+  const raw = name === "VITE_UVP_ORDER_APP_FETCH_TIMEOUT_MS"
+    ? import.meta.env?.VITE_UVP_ORDER_APP_FETCH_TIMEOUT_MS
+    : import.meta.env?.VITE_UVP_ORDER_APP_UPLOAD_TIMEOUT_MS;
   const parsed = raw ? Number(raw) : Number.NaN;
   return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : undefined;
 }

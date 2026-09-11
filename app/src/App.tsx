@@ -11,13 +11,30 @@ import {
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { ReactElement } from "react";
 import type { ProductOrderDTO, ProductTaskDTO } from "@uvp-eth/product-dto";
-import { createProductApiClient, type ProductApiClient, type ProductHomeData } from "./api/productApi";
+import {
+  createProductApiClient,
+  isWalletIdentityRequired,
+  persistWalletSessionToken,
+  readPersistedWalletSessionToken,
+  type ProductApiClient,
+  type ProductHomeData
+} from "./api/productApi";
 import { createOrderAppActions } from "./actions/orderAppActions";
 import { participantQueryFromSession, readParticipantSession, shortWallet } from "./auth/participant";
 import { NotificationCenter, useOrderAppNotifications } from "./notifications/NotificationCenter";
 import type { OrderAppNotificationDTO } from "./notifications/types";
 import { InviteOnboarding } from "./onboarding/InviteOnboarding";
-import { readOrderAppRoute, routeHash, type OrderAppRoute, type OrderAppSection } from "./routes/appRoutes";
+import { WalletLoginPanel } from "./onboarding/WalletLoginPanel";
+import {
+  clearInviteSearchParams,
+  readInviteEntryFromSearch,
+  readOrderAppRoute,
+  routeHash,
+  type InviteEntry,
+  type OrderAppRoute,
+  type OrderAppSection
+} from "./routes/appRoutes";
+import { personalSignWithInjectedWallet } from "./wallet/injectedWallet";
 import type { TaskSubmissionProof } from "./task-model";
 import { TaskWorkspace } from "./workspace/TaskWorkspace";
 import "./app/collaboration-notifications.css";
@@ -25,12 +42,19 @@ import "./app/collaboration-notifications.css";
 type LoadState =
   | { readonly status: "loading" }
   | { readonly status: "ready"; readonly data: ProductHomeData }
-  | { readonly status: "error"; readonly message: string };
+  | { readonly status: "error"; readonly message: string }
+  /** 非 local 部署缺有效钱包会话：切换到钱包登录入口而不是报错死路。 */
+  | { readonly status: "unauthenticated"; readonly message: string };
 
 export default function App() {
   const clientState = useMemo<{ readonly api?: ProductApiClient; readonly message?: string }>(() => {
     try {
-      return { api: createProductApiClient() };
+      return {
+        api: createProductApiClient({
+          // accept 邀请的钱包控制证明走服务端会话（challenge → personal_sign → verify）。
+          personalSign: (address, message) => personalSignWithInjectedWallet({ address, message })
+        })
+      };
     } catch (error) {
       return {
         message: error instanceof Error ? error.message : "参与者服务地址未配置。"
@@ -75,7 +99,16 @@ function AppShell({ api }: { readonly api: ProductApiClient }) {
   const actions = useMemo(() => createOrderAppActions(api), [api]);
   const [session] = useState(() => readParticipantSession());
   const [loadState, setLoadState] = useState<LoadState>({ status: "loading" });
+  // 会话恢复：proveWalletControl 留存的 token 会话级持久化，刷新页面时
+  // 先恢复再请求——非 local 部署没有会话锚定身份的请求一律 401。
+  const [sessionRestored] = useState(() => api.restoreSessionToken(readPersistedWalletSessionToken()));
   const [route, setRoute] = useState<OrderAppRoute>(() => readOrderAppRoute());
+  // ?invite=&inviteToken= 只作为进入应用的邀请入口读取进 state；地址栏上的
+  // 一次性令牌保留到流程终态（accept/reject 成功或明确离开）才清除——
+  // 中途失败/刷新必须能重新读到令牌重试，挂载即清会把可重试失败变成死路。
+  // 路由只认 hash，search 残留不会在 hash 导航后还原邀请面板；渲染条件是
+  // route.inviteId || inviteEntry，离开流程时两者同步清掉，工作区恢复可达。
+  const [inviteEntry, setInviteEntry] = useState<InviteEntry | undefined>(() => readInviteEntryFromSearch());
   const [submissionProofs, setSubmissionProofs] = useState<Readonly<Record<string, TaskSubmissionProof>>>({});
   const [notificationsOpen, setNotificationsOpen] = useState(false);
   // 慢网下旧响应不得覆盖新响应：所有 loadParticipantHome 调用共用单调序号。
@@ -91,12 +124,16 @@ function AppShell({ api }: { readonly api: ProductApiClient }) {
 
   useEffect(() => {
     loadParticipantHome();
-  }, [api, session]);
+  }, [api, session, sessionRestored]);
 
-  function loadParticipantHome() {
+  function loadParticipantHome(options: { readonly silent?: boolean } = {}) {
     const sequence = loadSequenceRef.current + 1;
     loadSequenceRef.current = sequence;
-    setLoadState({ status: "loading" });
+    // 静默刷新（提交成功后的投影刷新）不退回整页 loading：工作区保持挂载，
+    // 提交确认结果不被卸载清掉；新数据到达后原地替换。
+    if (!options.silent) {
+      setLoadState({ status: "loading" });
+    }
     void api.loadParticipantHome(participantQueryFromSession(session))
       .then((data) => {
         if (loadSequenceRef.current === sequence) {
@@ -104,13 +141,28 @@ function AppShell({ api }: { readonly api: ProductApiClient }) {
         }
       })
       .catch((error) => {
-        if (loadSequenceRef.current === sequence) {
-          setLoadState({
-            status: "error",
-            message: error instanceof Error ? error.message : "参与者服务加载失败"
-          });
+        if (loadSequenceRef.current !== sequence) {
+          return;
         }
+        if (isWalletIdentityRequired(error)) {
+          // 持久化的会话已失效（或从未建立）：清掉残留 token，给出登录
+          // 入口——重发同一无会话请求只会再吃一次 401。
+          persistWalletSessionToken(undefined);
+          api.restoreSessionToken(undefined);
+          setLoadState({ status: "unauthenticated", message: error.message });
+          return;
+        }
+        setLoadState({
+          status: "error",
+          message: error instanceof Error ? error.message : "参与者服务加载失败"
+        });
       });
+  }
+
+  async function handleWalletLogin(): Promise<void> {
+    const address = await actions.requestWalletAddress();
+    await actions.proveWalletControl({ address });
+    loadParticipantHome();
   }
 
   const data = loadState.status === "ready" ? loadState.data : undefined;
@@ -120,15 +172,18 @@ function AppShell({ api }: { readonly api: ProductApiClient }) {
     [data?.orders, route.orderId, selectedTask]
   );
   const selectedSubmissionProof = selectedTask ? submissionProofs[selectedTask.taskId] : undefined;
-  const notificationState = useOrderAppNotifications(data, session);
+  // 通知中心与主客户端共用同一钱包会话（会话锚定身份单一来源）；
+  // 取值器按 api 记忆，避免每次渲染都触发通知 effect 重跑。
+  const notificationSessionToken = useMemo(() => () => api.currentSessionToken(), [api]);
+  const notificationState = useOrderAppNotifications(data, session, notificationSessionToken);
 
   function navigate(nextRoute: OrderAppRoute) {
     window.location.hash = routeHash(nextRoute);
     setRoute(nextRoute);
   }
 
-  function handleRefresh() {
-    loadParticipantHome();
+  function handleRefresh(options: { readonly silent?: boolean } = {}) {
+    loadParticipantHome(options);
   }
 
   function handleOpenNotification(notification: OrderAppNotificationDTO) {
@@ -139,6 +194,19 @@ function AppShell({ api }: { readonly api: ProductApiClient }) {
       taskId: notification.taskId
     });
     setNotificationsOpen(false);
+  }
+
+  /** accept 终态成功：服务端已消费一次性令牌，立即从地址栏清除并刷新待办。 */
+  function handleInviteAccepted() {
+    clearInviteSearchParams();
+    handleRefresh();
+  }
+
+  function dismissInviteEntry() {
+    // 明确离开邀请流程（放弃，或终态成功后的返回）才消费 URL 上的令牌。
+    clearInviteSearchParams();
+    setInviteEntry(undefined);
+    navigate({ section: "tasks" });
   }
 
   return (
@@ -155,7 +223,7 @@ function AppShell({ api }: { readonly api: ProductApiClient }) {
         </div>
         <div className="topbar-actions">
           <SourceBadge source={data?.source} loading={loadState.status === "loading"} />
-          <button className="icon-button" onClick={handleRefresh} type="button" aria-label="刷新">
+          <button className="icon-button" onClick={() => handleRefresh()} type="button" aria-label="刷新">
             <RefreshCw aria-hidden="true" />
           </button>
         </div>
@@ -165,14 +233,20 @@ function AppShell({ api }: { readonly api: ProductApiClient }) {
         <SystemBanner tone="error" title="参与者服务加载失败" text={loadState.message} />
       ) : null}
 
-      {route.inviteId ? (
+      {route.inviteId || inviteEntry ? (
         <InviteOnboarding
-          inviteId={route.inviteId}
+          inviteId={route.inviteId ?? inviteEntry?.inviteId ?? ""}
+          inviteToken={inviteEntry?.inviteToken}
           actions={actions}
           session={session}
-          onAccepted={handleRefresh}
-          onDismiss={() => navigate({ section: "tasks" })}
+          onAccepted={handleInviteAccepted}
+          onRejected={clearInviteSearchParams}
+          onDismiss={dismissInviteEntry}
         />
+      ) : loadState.status === "unauthenticated" ? (
+        // 非 local 部署的无会话态：登录是唯一可用入口，不渲染待办工作区
+        //（渲染了也只是一整屏 401 派生错误）。
+        <WalletLoginPanel hasWallet={actions.hasInjectedWallet()} onLogin={handleWalletLogin} />
       ) : (
         <>
           <section className="participant-strip" aria-label="参与者信息">
@@ -264,7 +338,7 @@ function AppShell({ api }: { readonly api: ProductApiClient }) {
                   ...current,
                   [proof.taskId]: proof
                 }))}
-                onSubmitted={handleRefresh}
+                onSubmitted={() => handleRefresh({ silent: true })}
               />
             )}
           </section>

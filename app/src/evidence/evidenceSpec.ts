@@ -1,14 +1,15 @@
 import type { ProductTaskDTO } from "@uvp-eth/product-dto";
 import { validateTaskEvidenceSpec } from "@uvp-eth/product-dto";
+import { compareByCodePoint } from "./hashing";
 import { resourceRequirementDisplays } from "../task-model";
 import type { EvidenceRequirement } from "../task-model";
 
 /**
- * 证据规则单轨：槽位只来自 BFF 下发的 evidenceSpec（含 text/date 必填字段），
- * spec 缺失或非法即无凭证槽位（纯字段确认或按业务约定线下提交），不从声明
- * 文本臆造通用槽位；资源要求是服务端结构化数据，其上传槽位保留。前端不
- * 维护行业关键词→documentType 匹配表，也不维护硬编码格式白名单。与
- * zhixu-store planTaskEvidence 同口径。
+ * 证据规则单轨：spec 槽位只来自 BFF 下发的 evidenceSpec（含 text/date 必填字段），
+ * 不从声明文本臆造通用槽位，也不维护行业关键词→documentType 匹配表或硬编码
+ * 格式白名单。spec 缺失或非法时不渲染任何 spec 条目（防止重复 key 渲染出
+ * 双份必填槽位），保留服务端结构化资源要求的上传槽位（metadata 型除外）。
+ * 与 zhixu-store planTaskEvidence 同口径。
  */
 export interface TaskEvidencePlan {
   readonly mode: "spec" | "none";
@@ -17,6 +18,34 @@ export interface TaskEvidencePlan {
 
 /** 与后端证据服务一致的解码上限（HTTP body 上限 16MB）。 */
 export const EVIDENCE_MAX_FILE_BYTES = 10 * 1024 * 1024;
+
+/**
+ * 框架保留键命名空间：上传元数据 fields 与下发 spec 字段共用一层 Record，
+ * spec 可声明任意 key（包括 fileName 这类通用词）。框架自带的注入键必须加
+ * 前缀且后写覆盖不到 spec 同名字段，否则 spec 字段值会被顶掉并进入签名指纹。
+ * 与 zhixu-store 的 FRAMEWORK_METADATA_PREFIX 同口径。
+ */
+export const FRAMEWORK_METADATA_PREFIX = "uvp_framework_";
+export const FRAMEWORK_PUBLIC_LABEL_FIELD_KEY = `${FRAMEWORK_METADATA_PREFIX}publicLabel`;
+export const FRAMEWORK_FILE_NAME_FIELD_KEY = `${FRAMEWORK_METADATA_PREFIX}fileName`;
+export const FRAMEWORK_FILE_SIZE_FIELD_KEY = `${FRAMEWORK_METADATA_PREFIX}fileSize`;
+
+/**
+ * 上传元数据 fields：spec 字段在前，框架注入键带命名空间前缀在后。
+ * 若框架键不带前缀，spec 声明的同名键（如 fileName）会被后写覆盖，
+ * 顶掉的值和真实文件信息一起进入签名指纹。
+ */
+export function frameworkEvidenceMetadataFields(
+  metadataFields: Readonly<Record<string, string>>,
+  framework: { readonly label: string; readonly fileName: string; readonly size: number }
+): Readonly<Record<string, string>> {
+  return {
+    ...metadataFields,
+    [FRAMEWORK_PUBLIC_LABEL_FIELD_KEY]: framework.label,
+    [FRAMEWORK_FILE_NAME_FIELD_KEY]: framework.fileName,
+    [FRAMEWORK_FILE_SIZE_FIELD_KEY]: String(framework.size)
+  };
+}
 
 export function planTaskEvidence(task: ProductTaskDTO): TaskEvidencePlan {
   const spec = task.evidenceSpec;
@@ -112,8 +141,26 @@ export function acceptAllowsFile(accept: readonly string[], file: EvidenceFileMe
   const mime = file.type.trim().toLowerCase();
   const extension = extensionOf(file.name);
   return rules.some((rule) =>
-    (mime.length > 0 && rule === mime) || (extension.length > 0 && rule === extension)
+    ruleAcceptsMime(rule, mime) || (extension.length > 0 && rule === extension)
   );
+}
+
+/**
+ * MIME 条目按全等或 <type>/* 通配命中。协议校验器放行通配 MIME（如 image/*），
+ * 若前端只做全等匹配，该槽位任何文件都匹配不上，永远无法上传。
+ */
+function ruleAcceptsMime(rule: string, mime: string): boolean {
+  if (mime.length === 0) {
+    return false;
+  }
+  if (rule === mime) {
+    return true;
+  }
+  if (!rule.endsWith("/*")) {
+    return false;
+  }
+  const typePrefix = rule.slice(0, -1);
+  return typePrefix === "*/" || mime.startsWith(typePrefix);
 }
 
 const PDF_MIME = "application/pdf";
@@ -228,6 +275,8 @@ export function evidenceMetadataSignature(fields: Readonly<Record<string, string
       entries.push([key, trimmed]);
     }
   }
-  entries.sort(([left], [right]) => (left < right ? -1 : left > right ? 1 : 0));
+  // 键序用码点序，与同仓 stableStringify/manifest 的 canonical 口径一致；
+  // UTF-16 码元序会让增补平面字符的键排错位，跨端指纹对不上。
+  entries.sort(([left], [right]) => compareByCodePoint(left, right));
   return JSON.stringify(entries);
 }

@@ -1,10 +1,12 @@
 import { expect, test } from "@playwright/test";
 import {
   installProductApiStub,
+  bareNoteResourceRequirement,
   customsEvidenceTask,
   executorMetadataHash,
   handoffSelectorTask,
   manifestTask,
+  packingListResourceRequirement,
   participantWallet,
   previousExecutorWallet,
   readinessTask,
@@ -163,6 +165,33 @@ test.describe("UVP Order App production readiness negatives", () => {
     await expect(page.getByText("StageExecutorPatchApplied")).toBeVisible();
   });
 
+  test("manifest executor patch handoff collects the previous executor signature before submit", async ({ page }) => {
+    // handoff 必须回呈原履约者对同一补丁 typedData 的加签（服务端强制
+    // previousExecutorSignature）：manifest 驱动路径与内置面板同一门槛，
+    // 缺签名时提交按钮禁用，不发注定 400 的请求。
+    await installProductApiStub(page, { task: manifestTask("task-selector-customs-001") });
+    await page.goto("/");
+
+    await page.getByLabel("处理方式").selectOption("handoff");
+    await page.getByRole("textbox", { name: "履约者钱包", exact: true }).fill("0x0000000000000000000000000000000000000002");
+    await page.getByLabel("原履约者钱包").fill(previousExecutorWallet);
+    await page.getByLabel("履约者元数据指纹").fill(executorMetadataHash);
+    await page.getByLabel("补充说明 URI").fill("ipfs://manifest/executor-handoff");
+    await page.getByRole("button", { name: "选择履约者", exact: true }).click();
+
+    await expect(page.getByText("浏览器钱包只签署当前附加能力动作")).toBeVisible();
+    await expect(page.getByLabel("原履约者签名")).toBeVisible();
+    await expect(page.getByRole("button", { name: "使用钱包签名并提交" })).toBeDisabled();
+
+    await page.getByLabel("原履约者签名").fill(`0x${"cc".repeat(65)}`);
+    await page.getByRole("button", { name: "使用钱包签名并提交" }).click();
+
+    await expect(page.getByText("最近提交：选择履约者，包含交易哈希和凭证指纹摘要。")).toBeVisible();
+    await page.getByRole("button", { name: "查看证明" }).last().click();
+    await expect(page.getByText("StageExecutorPatchApplied")).toBeVisible();
+    await expect(page.getByText("原履约者", { exact: true }).first()).toBeVisible();
+  });
+
   test("manifest resource patch add-on prepares a resource patch", async ({ page }) => {
     await installProductApiStub(page, { task: manifestTask("task-resource-controller-001") });
     await page.goto("/");
@@ -297,6 +326,71 @@ test.describe("UVP Order App production readiness negatives", () => {
 
     await page.getByRole("button", { name: "查看证明" }).last().click();
     await expect(page.getByText("StageResourcePatchApplied")).toBeVisible();
+  });
+
+  test("resource patch switching resource keys resets the previous manifest triple", async ({ page }) => {
+    // 切换资源键不得残留上一资源的清单三元组：新资源未声明某字段时
+    // 显式清空（updateTarget/updateMode 同口径），否则会提交两份资源
+    // 混合的指纹。
+    await installProductApiStub(page, {
+      task: resourcePatchTask({
+        selectableTargets: [{
+          targetStageId: "inspection",
+          targetStageName: "检验阶段",
+          allowed: true,
+          resourceRequirements: [
+            {
+              resourceId: "inspection_report",
+              resourceKey: "inspection_report",
+              label: "第三方检验证明",
+              required: true,
+              source: "resource_patch",
+              manifestURI: "ipfs://bafyuvp-inspection-manifest",
+              manifestHash: "0x5555555555555555555555555555555555555555555555555555555555555555",
+              accessPolicy: {
+                visibility: "protected",
+                readers: [],
+                writers: [],
+                controllers: [],
+                policyHash: "0x8888888888888888888888888888888888888888888888888888888888888888"
+              }
+            },
+            packingListResourceRequirement,
+            bareNoteResourceRequirement
+          ]
+        }]
+      })
+    });
+    await page.goto("/");
+
+    await expect(page.getByLabel("资源清单 URI")).toHaveValue("ipfs://bafyuvp-inspection-manifest");
+    await page.getByLabel("资源键").selectOption({ label: "装箱单" });
+    await expect(page.getByLabel("资源清单 URI")).toHaveValue("ipfs://bafyuvp-packing-manifest");
+    await expect(page.getByLabel("清单指纹")).toHaveValue("0x6666666666666666666666666666666666666666666666666666666666666666");
+    await expect(page.getByLabel("权限指纹")).toHaveValue("0x7777777777777777777777777777777777777777777777777777777777777777");
+
+    // 切到不带三元组的裸资源：三个字段全部清空，不残留装箱单指纹。
+    await page.getByLabel("资源键").selectOption({ label: "报关备注" });
+    await expect(page.getByLabel("资源清单 URI")).toHaveValue("");
+    await expect(page.getByLabel("清单指纹")).toHaveValue("");
+    await expect(page.getByLabel("权限指纹")).toHaveValue("");
+  });
+
+  test("evidence submission confirms once and the terminal gate blocks re-submission", async ({ page }) => {
+    // 终态闸三件套：提交成功后（确认信封）刷新投影（onSubmitted）+ 面板
+    // 同步互斥 + confirmed 终态门槛——成功后"准备提交"保持禁用，重复提交
+    // 只能经由投影状态改判。
+    await installProductApiStub(page, { task: customsEvidenceTask() });
+    await page.goto("/");
+
+    await page.getByLabel("签名钱包").fill(participantWallet);
+    await uploadCustomsPdf(page);
+    await page.getByRole("button", { name: "准备提交" }).click();
+    await expect(page.getByText("预检编号")).toBeVisible();
+    await page.getByRole("button", { name: "使用钱包签名并提交" }).click();
+
+    await expect(page.getByText("提交已确认", { exact: false })).toBeVisible();
+    await expect(page.getByRole("button", { name: "准备提交" })).toBeDisabled();
   });
 
   test("executor patch action blocks wrong wallet before executor patch prepare", async ({ page }) => {

@@ -317,8 +317,17 @@ function shouldRetryTasksWithoutOrderId(status: number): boolean {
   return status === 400 || status === 404;
 }
 
-async function loadOrder(request: APIRequestContext, orderId: string): Promise<ChainBackedProductOrderDTO> {
-  const response = await request.get(`${summary.chainServicesUrl}/product/orders/${encodeURIComponent(orderId)}`);
+async function loadOrder(
+  request: APIRequestContext,
+  orderId: string,
+  walletAddress: string = summary.selectorWallet
+): Promise<ChainBackedProductOrderDTO> {
+  // 订单详情带参与者身份门（chain-services participant-identity）：匿名直调
+  // 401。local 运行时的自报通道按 CS 契约取 x-uvp-wallet-address 头
+  //（会话锚定部署中自报值仅作一致性核验）；读取视角用订单参与者钱包。
+  const response = await request.get(`${summary.chainServicesUrl}/product/orders/${encodeURIComponent(orderId)}`, {
+    headers: { "x-uvp-wallet-address": walletAddress }
+  });
   expect(response.ok(), await response.text()).toBe(true);
   return ((await response.json()) as OrderResponse).order;
 }
@@ -388,6 +397,10 @@ async function installSigningWallet(page: Page, allowedWallets: readonly string[
   await page.addInitScript(() => {
     const provider = {
       request: async ({ method, params }: { readonly method: string; readonly params?: readonly unknown[] }) => {
+        // 签名前的 eth_chainId 域核对需要钱包应答当前链（桩域 chainId=31337）。
+        if (method === "eth_chainId") {
+          return "0x7a69";
+        }
         if (method !== "eth_signTypedData_v4") {
           throw new Error(`unsupported wallet method ${method}`);
         }
