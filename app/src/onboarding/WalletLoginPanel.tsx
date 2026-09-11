@@ -3,9 +3,8 @@ import { useState } from "react";
 
 /**
  * 非 local 部署的参与者面登录入口：服务端对参与者读写强制钱包会话锚定，
- * 没有会话时首屏请求 401。此前唯一能触发控制证明的入口藏在邀请流程里，
- * 普通进入/刷新/会话过期的参与者没有任何登录通道——这里补上独立的
- * 钱包登录：连接钱包 → challenge → personal_sign → verify → 重载待办。
+ * 没有会话时首屏请求 401。这里独立于邀请流程提供钱包登录通道：
+ * 连接钱包 → challenge → personal_sign → verify → 重载待办。
  */
 export function WalletLoginPanel({
   hasWallet,

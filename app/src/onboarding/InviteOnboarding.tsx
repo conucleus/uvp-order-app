@@ -1,16 +1,17 @@
 import { AlertCircle, CheckCircle2, ShieldCheck, Wallet, XCircle } from "lucide-react";
 import { useEffect, useState } from "react";
-import type { ProductInvitePreviewDTO } from "../api/productApi";
+import { ProductApiError, type ProductInvitePreviewDTO } from "../api/productApi";
 import type { OrderAppActions } from "../actions/orderAppActions";
 import type { ParticipantSession } from "../auth/participant";
 import { shortWallet } from "../auth/participant";
+import { InjectedWalletError } from "../wallet/injectedWallet";
 
 type InviteLoadState =
   | { readonly status: "loading" }
   | { readonly status: "ready"; readonly invite: ProductInvitePreviewDTO }
   | { readonly status: "accepted"; readonly invite: ProductInvitePreviewDTO }
   | { readonly status: "rejected" }
-  | { readonly status: "error"; readonly message: string };
+  | { readonly status: "error"; readonly message: string; readonly retryable: boolean };
 
 interface InviteOnboardingProps {
   readonly inviteId: string;
@@ -19,6 +20,7 @@ interface InviteOnboardingProps {
   readonly actions: OrderAppActions;
   readonly session: ParticipantSession;
   readonly onAccepted: () => void;
+  readonly onRejected?: (() => void) | undefined;
   readonly onDismiss: () => void;
 }
 
@@ -28,11 +30,44 @@ function isEvmWalletAddress(value: string): boolean {
   return /^0x[0-9a-fA-F]{40}$/u.test(value);
 }
 
-export function InviteOnboarding({ inviteId, inviteToken, actions, session, onAccepted, onDismiss }: InviteOnboardingProps) {
+/**
+ * 终态失败判定：令牌比对失败 / 邀请不存在或已过期（403/404/410）时同一
+ * 链接重试不可能成功；其余失败（拒签、网络闪断、超时、会话未建立）都
+ * 允许在当前步骤重试——一次性令牌只在服务端 accept/reject 成功时消费。
+ */
+function isTerminalInviteFailure(error: unknown): boolean {
+  return error instanceof ProductApiError
+    && (error.status === 403 || error.status === 404 || error.status === 410);
+}
+
+function inviteFailureMessage(error: unknown, fallback: string): string {
+  return error instanceof Error && error.message.trim().length > 0 ? error.message : fallback;
+}
+
+/** 可重试失败如实展示：拒签提示可重签，网络/服务端闪断提示可重试。 */
+function retryableInviteFailureCopy(error: unknown, fallback: string): string {
+  const message = inviteFailureMessage(error, fallback);
+  if (error instanceof InjectedWalletError && error.code === "wallet_rejected") {
+    return `${message}本次操作未提交，可重新点击再次发起钱包签名。`;
+  }
+  return `${message}本次操作未提交，可直接重试。`;
+}
+
+function terminalInviteFailureCopy(error: unknown): string {
+  return `${inviteFailureMessage(error, "邀请令牌无效。")}该邀请已不可重试，请联系邀请方重新发送邀请链接。`;
+}
+
+export function InviteOnboarding({ inviteId, inviteToken, actions, session, onAccepted, onRejected, onDismiss }: InviteOnboardingProps) {
   const [walletAddress, setWalletAddress] = useState(session.walletAddress ?? "");
   const [displayName, setDisplayName] = useState("");
   const [contact, setContact] = useState("");
   const [loadState, setLoadState] = useState<InviteLoadState>({ status: "loading" });
+  // accept/reject 长链路（challenge→签名→verify→提交）在途时保持表单挂载，
+  // 失败后用户输入原样保留，直接重试当前动作。
+  const [busy, setBusy] = useState(false);
+  const [actionError, setActionError] = useState<string | undefined>();
+  // 预览加载失败后的手动重试计数：递增即重跑加载 effect。
+  const [previewAttempt, setPreviewAttempt] = useState(0);
   // 受控输入只进防抖值；只有 0x 格式合法的地址才触发服务端 alreadyBound 探测。
   const [probedWalletAddress, setProbedWalletAddress] = useState(() => {
     const initial = (session.walletAddress ?? "").trim();
@@ -69,14 +104,15 @@ export function InviteOnboarding({ inviteId, inviteToken, actions, session, onAc
         if (!cancelled) {
           setLoadState({
             status: "error",
-            message: error instanceof Error ? error.message : "邀请加载失败"
+            message: inviteFailureMessage(error, "邀请加载失败"),
+            retryable: !isTerminalInviteFailure(error)
           });
         }
       });
     return () => {
       cancelled = true;
     };
-  }, [actions, inviteId, inviteToken, probedWalletAddress]);
+  }, [actions, inviteId, inviteToken, probedWalletAddress, previewAttempt]);
 
   const invite = loadState.status === "ready" || loadState.status === "accepted" ? loadState.invite : undefined;
   const walletFormatOk = isEvmWalletAddress(walletAddress.trim());
@@ -102,46 +138,56 @@ export function InviteOnboarding({ inviteId, inviteToken, actions, session, onAc
     return { sessionToken: proof.sessionToken };
   }
 
-  function handleAccept() {
-    if (!invite || !canAccept) {
+  async function handleAccept() {
+    if (!invite || !canAccept || busy) {
       return;
     }
-    setLoadState({ status: "loading" });
-    void (async () => {
+    setBusy(true);
+    setActionError(undefined);
+    try {
       const options = await ensureWalletSessionProof(walletAddress.trim());
-      return actions.acceptInvite(inviteId, {
+      await actions.acceptInvite(inviteId, {
         displayName: displayName.trim(),
         walletAddress: walletAddress.trim(),
         contact: contact.trim(),
         token: inviteToken ?? ""
       }, options);
-    })()
-      .then(() => {
-        setLoadState({ status: "accepted", invite });
-        onAccepted();
-      })
-      .catch((error) => {
-        setLoadState({
-          status: "error",
-          message: error instanceof Error ? error.message : "接受邀请失败"
-        });
-      });
+      setLoadState({ status: "accepted", invite });
+      onAccepted();
+    } catch (error) {
+      if (isTerminalInviteFailure(error)) {
+        setLoadState({ status: "error", message: terminalInviteFailureCopy(error), retryable: false });
+        return;
+      }
+      setActionError(retryableInviteFailureCopy(error, "接受邀请失败"));
+    } finally {
+      setBusy(false);
+    }
   }
 
-  function handleReject() {
-    setLoadState({ status: "loading" });
-    void actions.rejectInvite(inviteId, {
-      token: inviteToken ?? "",
-      displayName: displayName.trim() || undefined,
-      contact: contact.trim() || undefined
-    })
-      .then(() => setLoadState({ status: "rejected" }))
-      .catch((error) => {
-        setLoadState({
-          status: "error",
-          message: error instanceof Error ? error.message : "拒绝邀请失败"
-        });
+  async function handleReject() {
+    if (busy || tokenMissing) {
+      return;
+    }
+    setBusy(true);
+    setActionError(undefined);
+    try {
+      await actions.rejectInvite(inviteId, {
+        token: inviteToken ?? "",
+        displayName: displayName.trim() || undefined,
+        contact: contact.trim() || undefined
       });
+      setLoadState({ status: "rejected" });
+      onRejected?.();
+    } catch (error) {
+      if (isTerminalInviteFailure(error)) {
+        setLoadState({ status: "error", message: terminalInviteFailureCopy(error), retryable: false });
+        return;
+      }
+      setActionError(retryableInviteFailureCopy(error, "拒绝邀请失败"));
+    } finally {
+      setBusy(false);
+    }
   }
 
   if (loadState.status === "loading") {
@@ -157,8 +203,17 @@ export function InviteOnboarding({ inviteId, inviteToken, actions, session, onAc
     return (
       <section className="invite-panel invite-panel-error" role="alert">
         <AlertCircle aria-hidden="true" />
-        <h2>邀请不可用</h2>
+        <h2>{loadState.retryable ? "邀请加载失败" : "邀请不可用"}</h2>
         <p>{loadState.message}</p>
+        {loadState.retryable ? (
+          <button
+            className="primary-button"
+            type="button"
+            onClick={() => setPreviewAttempt((attempt) => attempt + 1)}
+          >
+            重试加载
+          </button>
+        ) : null}
         <button className="quiet-button" type="button" onClick={onDismiss}>返回待办</button>
       </section>
     );
@@ -241,9 +296,14 @@ export function InviteOnboarding({ inviteId, inviteToken, actions, session, onAc
         <div className="invite-actions">
           {/* reject 同样强制回呈 token（服务端哈希比对）：缺令牌时禁用，
               不发出注定 403 的请求；提示已在上方 tokenMissing 文案给出。 */}
-          <button className="quiet-button" type="button" disabled={tokenMissing} onClick={handleReject}>拒绝</button>
-          <button className="primary-button" type="button" disabled={!canAccept} onClick={handleAccept}>接受角色</button>
+          <button className="quiet-button" type="button" disabled={tokenMissing || busy} onClick={() => void handleReject()}>
+            {busy ? "正在提交…" : "拒绝"}
+          </button>
+          <button className="primary-button" type="button" disabled={!canAccept || busy} onClick={() => void handleAccept()}>
+            {busy ? "正在提交…" : "接受角色"}
+          </button>
         </div>
+        {actionError ? <p className="blocked-copy" role="alert">{actionError}</p> : null}
       </div>
     </section>
   );

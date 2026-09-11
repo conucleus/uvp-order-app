@@ -4,8 +4,9 @@ import { productApiBaseUrl, participantWallet } from "./product-api-stub";
 
 /**
  * 邀请入口 e2e（api-stub 桩）：
- * - ?invite=&inviteToken= 只在进入时读取一次，随后从地址栏清除，
- *   "返回待办"不会因 search 残留把邀请面板还原（路由只认 hash）。
+ * - ?invite=&inviteToken= 进入时读取进应用状态；地址栏上的一次性令牌保留
+ *   到流程终态（accept 成功）才清除——中途失败/刷新仍可重试。路由只认
+ *   hash，"返回待办"不会因 search 残留把邀请面板还原。
  * - accept 走服务端契约：先完成 /store/auth 会话（personal_sign 证明钱包
  *   控制），再携带 x-uvp-store-session + query walletAddress + body token。
  * - 缺少 inviteToken 时如实阻断，不得发出注定失败的请求。
@@ -153,14 +154,17 @@ test("invite entry accepts through the server contract and returns to tasks", as
   await page.goto(`/?invite=${INVITE_ID}&inviteToken=${INVITE_TOKEN}`);
 
   await expect(page.getByRole("heading", { name: "邀请验收订单" })).toBeVisible();
-  // 邀请搜索参数在读取后被清除，不再钉住应用。
-  expect(new URL(page.url()).searchParams.get("invite")).toBeNull();
-  expect(new URL(page.url()).searchParams.get("inviteToken")).toBeNull();
+  // 一次性令牌在流程终态前保留在地址栏：中途失败/刷新后仍可凭 URL 重试。
+  expect(new URL(page.url()).searchParams.get("invite")).toBe(INVITE_ID);
+  expect(new URL(page.url()).searchParams.get("inviteToken")).toBe(INVITE_TOKEN);
 
   await page.getByLabel("绑定钱包").fill(participantWallet);
   await page.getByRole("button", { name: "接受角色" }).click();
 
   await expect(page.getByRole("heading", { name: "角色已绑定" })).toBeVisible();
+  // accept 终态成功（服务端已消费令牌）后，搜索参数才从地址栏清除。
+  expect(new URL(page.url()).searchParams.get("invite")).toBeNull();
+  expect(new URL(page.url()).searchParams.get("inviteToken")).toBeNull();
 
   const accept = requests.find((request) => request.url.includes(`/product/invites/${INVITE_ID}/accept`));
   assert.ok(accept, "accept request captured");

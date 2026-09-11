@@ -103,21 +103,16 @@ function AppShell({ api }: { readonly api: ProductApiClient }) {
   // 先恢复再请求——非 local 部署没有会话锚定身份的请求一律 401。
   const [sessionRestored] = useState(() => api.restoreSessionToken(readPersistedWalletSessionToken()));
   const [route, setRoute] = useState<OrderAppRoute>(() => readOrderAppRoute());
-  // ?invite=&inviteToken= 只作为进入应用的邀请入口读取一次；
-  // 读取后立刻从地址栏清除，否则 hash 导航（只改 hash 不清 search）
-  // 会在每次 hashchange 后把邀请面板还原，"返回待办"全部失效。
-  // 入口消费后必须同步清掉本地 state：渲染条件是 route.inviteId || inviteEntry，
-  // 只改 route 不清 inviteEntry 会让邀请面板在 accept/reject/关闭后仍然钉死，
-  // 工作区永远不可达。
+  // ?invite=&inviteToken= 只作为进入应用的邀请入口读取进 state；地址栏上的
+  // 一次性令牌保留到流程终态（accept/reject 成功或明确离开）才清除——
+  // 中途失败/刷新必须能重新读到令牌重试，挂载即清会把可重试失败变成死路。
+  // 路由只认 hash，search 残留不会在 hash 导航后还原邀请面板；渲染条件是
+  // route.inviteId || inviteEntry，离开流程时两者同步清掉，工作区恢复可达。
   const [inviteEntry, setInviteEntry] = useState<InviteEntry | undefined>(() => readInviteEntryFromSearch());
   const [submissionProofs, setSubmissionProofs] = useState<Readonly<Record<string, TaskSubmissionProof>>>({});
   const [notificationsOpen, setNotificationsOpen] = useState(false);
   // 慢网下旧响应不得覆盖新响应：所有 loadParticipantHome 调用共用单调序号。
   const loadSequenceRef = useRef(0);
-
-  useEffect(() => {
-    clearInviteSearchParams();
-  }, []);
 
   useEffect(() => {
     function handleHashChange() {
@@ -201,7 +196,15 @@ function AppShell({ api }: { readonly api: ProductApiClient }) {
     setNotificationsOpen(false);
   }
 
+  /** accept 终态成功：服务端已消费一次性令牌，立即从地址栏清除并刷新待办。 */
+  function handleInviteAccepted() {
+    clearInviteSearchParams();
+    handleRefresh();
+  }
+
   function dismissInviteEntry() {
+    // 明确离开邀请流程（放弃，或终态成功后的返回）才消费 URL 上的令牌。
+    clearInviteSearchParams();
     setInviteEntry(undefined);
     navigate({ section: "tasks" });
   }
@@ -236,7 +239,8 @@ function AppShell({ api }: { readonly api: ProductApiClient }) {
           inviteToken={inviteEntry?.inviteToken}
           actions={actions}
           session={session}
-          onAccepted={handleRefresh}
+          onAccepted={handleInviteAccepted}
+          onRejected={clearInviteSearchParams}
           onDismiss={dismissInviteEntry}
         />
       ) : loadState.status === "unauthenticated" ? (

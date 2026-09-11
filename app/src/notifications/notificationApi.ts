@@ -142,8 +142,8 @@ export async function markOrderAppNotificationRead(
     }
     if (!response.ok) {
       if (isPermanentReadReceiptFailure(response.status)) {
-        // 4xx 是服务端对该回执的明确拒绝（通知不存在/形态非法）：重试永远
-        // 不会成功，本地已读保留，但不进重试队列，也不保留既有排队项。
+        // 资源已不存在（404/410）：重试永远不会成功，本地已读保留，但
+        // 不进重试队列，也不保留既有排队项。
         clearPendingRead(session, notification.notificationId);
         return { ...notification, readStatus: "read", readAt };
       }
@@ -162,9 +162,9 @@ export async function markOrderAppNotificationRead(
 
 /**
  * Replays read receipts that failed to reach the server earlier. Transient
- * failures (5xx / network) stay queued for the next pass; a 4xx rejection is
- * permanent and evicts the entry instead of retrying forever. The local read
- * state is never rolled back either way.
+ * failures (5xx / network / recoverable 401-403) stay queued for the next
+ * pass; only a 404/410 (notification gone) permanently evicts the entry. The
+ * local read state is never rolled back either way.
  */
 export async function syncPendingNotificationReads(
   data: ProductHomeData,
@@ -204,9 +204,13 @@ function isRedirectStatus(status: number): boolean {
   return status === 0 || (status >= 300 && status < 400);
 }
 
-/** 4xx：回执本身被服务端拒绝，重试不可能转为成功；5xx/网络错误才是可重试的。 */
+/**
+ * 永久失败仅限资源已不存在（404/410）：重试不可能转为成功。401/403 是
+ * 鉴权类可恢复失败（会话过期后重新登录即可补投），留在重试队列；5xx 与
+ * 网络错误同样可重试。
+ */
 function isPermanentReadReceiptFailure(status: number): boolean {
-  return status >= 400 && status < 500;
+  return status === 404 || status === 410;
 }
 
 function postReadReceipt(

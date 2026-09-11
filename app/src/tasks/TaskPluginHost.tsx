@@ -238,6 +238,10 @@ export function TaskPluginHost({
   const [submission, setSubmission] = useState<ProductSubmission | undefined>();
   const [submittedNotice, setSubmittedNotice] = useState<string | undefined>();
   const [error, setError] = useState<string | undefined>();
+  // 同步互斥（EvidencePanel submitInflightRef 同款）：签名+提交是长链路，
+  // 按钮 pending 禁用要等状态落盘重渲染才生效，ref 同步挡住重渲染前的
+  // 第二次点击；ref 在请求收尾即释放，终态后的重投由 submitted 相位闸承担。
+  const submitInflightRef = useRef(false);
 
   useEffect(() => {
     setState(createInitialTaskPluginState(task, participantWallet));
@@ -312,10 +316,11 @@ export function TaskPluginHost({
   }
 
   async function submitPrepared() {
-    if (!prepared) {
+    if (!prepared || phase === "submitted" || submitInflightRef.current) {
       return;
     }
     const requestScopeKey = taskScopeRef.current;
+    submitInflightRef.current = true;
     setPhase("submitting");
     setError(undefined);
     try {
@@ -367,6 +372,8 @@ export function TaskPluginHost({
       }
       setError(caught instanceof Error ? caught.message : "签名提交失败");
       setPhase("error");
+    } finally {
+      submitInflightRef.current = false;
     }
   }
 
@@ -514,7 +521,7 @@ export function TaskPluginHost({
               </dl>
               <button
                 className="primary-button"
-                disabled={phase === "submitting" || !participantWallet}
+                disabled={phase === "submitting" || phase === "submitted" || !participantWallet}
                 onClick={submitPrepared}
                 type="button"
               >
@@ -601,6 +608,9 @@ function ManifestAddOnPanel({
   // 交接（handoff）模式的原履约者加签：签名对象是 prepare 返回的补丁
   // typedData，只能在 prepare 之后填写，提交前与服务端强制口径对齐。
   const [previousExecutorSignature, setPreviousExecutorSignature] = useState("");
+  // 同步互斥（EvidencePanel submitInflightRef 同款）：重渲染前的第二次点击
+  // 由 ref 挡住；终态后的重投由 submitted 相位闸承担。
+  const submitInflightRef = useRef(false);
   // manifest 每次投影刷新都是新对象：按内容身份（稳定序列化）做重置依据，
   // 同内容的刷新不重置；内容真正变化（动作/组件集变了）才重置表单。
   const manifestKey = useMemo(() => stableStringify(manifest), [manifest]);
@@ -704,10 +714,11 @@ function ManifestAddOnPanel({
   }
 
   async function submitPreparedAction() {
-    if (!prepared) {
+    if (!prepared || phase === "submitted" || submitInflightRef.current) {
       return;
     }
     const requestScopeKey = taskScopeRef.current;
+    submitInflightRef.current = true;
     setPhase("submitting");
     setError(undefined);
     try {
@@ -816,6 +827,8 @@ function ManifestAddOnPanel({
       }
       setError(caught instanceof Error ? caught.message : "签名提交失败");
       setPhase("error");
+    } finally {
+      submitInflightRef.current = false;
     }
   }
 
@@ -918,7 +931,7 @@ function ManifestAddOnPanel({
           ) : null}
           <button
             className="primary-button"
-            disabled={phase === "submitting" || (handoffSignatureRequired && !effectivePreviousExecutorSignature.trim())}
+            disabled={phase === "submitting" || phase === "submitted" || (handoffSignatureRequired && !effectivePreviousExecutorSignature.trim())}
             onClick={() => void submitPreparedAction()}
             type="button"
           >
@@ -1185,6 +1198,9 @@ function ExecutorPatchPanel({
   const [prepared, setPrepared] = useState<PreparedStageExecutorPatchDTO | undefined>();
   const [submission, setSubmission] = useState<StageExecutorPatchSubmissionDTO | undefined>();
   const [error, setError] = useState<string | undefined>();
+  // 同步互斥（EvidencePanel submitInflightRef 同款）：重渲染前的第二次点击
+  // 由 ref 挡住；终态后的重投由 submitted 相位闸承担。
+  const submitInflightRef = useRef(false);
   const selectedTarget = targets.find((target) => selectableTargetStageId(target) === draft.targetStageId) ?? targets[0];
   const modeOptions = executorPatchModeOptionsForTarget(selectedTarget);
   const selectedMode = modeOptions.find((mode) => mode.mode === draft.mode) ?? modeOptions[0];
@@ -1290,10 +1306,11 @@ function ExecutorPatchPanel({
   }
 
   async function submitExecutorPatch() {
-    if (!prepared) {
+    if (!prepared || phase === "submitted" || submitInflightRef.current) {
       return;
     }
     const requestScopeKey = taskScopeRef.current;
+    submitInflightRef.current = true;
     setPhase("submitting");
     setError(undefined);
     try {
@@ -1348,6 +1365,8 @@ function ExecutorPatchPanel({
       }
       setError(caught instanceof Error ? caught.message : "签名提交失败");
       setPhase("error");
+    } finally {
+      submitInflightRef.current = false;
     }
   }
 
@@ -1588,7 +1607,7 @@ function ExecutorPatchPanel({
           ) : null}
           <button
             className="primary-button"
-            disabled={phase === "submitting" || !draft.selectorWallet.trim() || (selectedMode?.requiresPreviousExecutorSignature === true && !draft.previousExecutorSignature.trim())}
+            disabled={phase === "submitting" || phase === "submitted" || !draft.selectorWallet.trim() || (selectedMode?.requiresPreviousExecutorSignature === true && !draft.previousExecutorSignature.trim())}
             onClick={() => void submitExecutorPatch()}
             type="button"
           >
@@ -1636,6 +1655,9 @@ function ResourcePatchPanel({
   const [prepared, setPrepared] = useState<PreparedStageResourcePatchDTO | undefined>();
   const [submission, setSubmission] = useState<StageResourcePatchSubmissionDTO | undefined>();
   const [error, setError] = useState<string | undefined>();
+  // 同步互斥（EvidencePanel submitInflightRef 同款）：重渲染前的第二次点击
+  // 由 ref 挡住；终态后的重投由 submitted 相位闸承担。
+  const submitInflightRef = useRef(false);
   const selectedTarget = targets.find((target) => selectableTargetStageId(target) === draft.targetStageId) ?? targets[0];
   const resourceOptions = targetResourceOptions(task, selectedTarget);
   const blockers = resourcePatchBlockers({
@@ -1723,10 +1745,11 @@ function ResourcePatchPanel({
   }
 
   async function submitResourcePatch() {
-    if (!prepared) {
+    if (!prepared || phase === "submitted" || submitInflightRef.current) {
       return;
     }
     const requestScopeKey = taskScopeRef.current;
+    submitInflightRef.current = true;
     setPhase("submitting");
     setError(undefined);
     try {
@@ -1778,6 +1801,8 @@ function ResourcePatchPanel({
       }
       setError(caught instanceof Error ? caught.message : "签名提交失败");
       setPhase("error");
+    } finally {
+      submitInflightRef.current = false;
     }
   }
 
@@ -1941,7 +1966,7 @@ function ResourcePatchPanel({
           </dl>
           <button
             className="primary-button"
-            disabled={phase === "submitting" || !draft.selectorWallet.trim()}
+            disabled={phase === "submitting" || phase === "submitted" || !draft.selectorWallet.trim()}
             onClick={() => void submitResourcePatch()}
             type="button"
           >

@@ -35,15 +35,9 @@ export function taskAddOnKind(task: ProductTaskDTO): ParticipantAddOnKind {
   if (isParticipantAddOnKind(manifest?.addOnKind)) {
     return manifest.addOnKind;
   }
-
-  switch (taskCapabilityPluginKind(task)) {
-    case "validation_confirm":
-    case "dispute_material":
-    case "payment_placeholder":
-    case "delivery_update":
-    case "evidence_submission":
-      return "submit_signal";
-  }
+  // 无显式加成声明（含能力插件类型缺失的投影）统一按提交执行信号渲染，
+  // 收件箱/详情对缺字段数据中性降级，不 throw 白屏。
+  return "submit_signal";
 }
 
 export function taskAddOnLabel(kind: ParticipantAddOnKind): string {
@@ -57,12 +51,13 @@ export function taskAddOnLabel(kind: ParticipantAddOnKind): string {
   }
 }
 
-export function taskCapabilityPluginKind(task: ProductTaskDTO): FulfillmentPluginKind {
-  const pluginKind = task.capabilityPlugin?.pluginKind;
-  if (!pluginKind) {
-    throw new Error(`task ${task.taskId} is missing capabilityPlugin.pluginKind`);
-  }
-  return pluginKind;
+/**
+ * 能力插件类型（可选读取）：投影缺失该字段时返回 undefined，调用方按
+ * 中性兜底降级（zhixu-store workbenchSupport 同口径），渲染路径不因
+ * 缺字段 throw 白屏。
+ */
+export function taskCapabilityPluginKind(task: ProductTaskDTO): FulfillmentPluginKind | undefined {
+  return task.capabilityPlugin?.pluginKind;
 }
 
 export function taskPrimaryActionLabel(task: ProductTaskDTO, fallback?: string): string {

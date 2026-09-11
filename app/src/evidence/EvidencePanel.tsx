@@ -63,7 +63,13 @@ type PrepareState =
   | { readonly status: "prepared"; readonly prepared: PreparedSubmitView }
   | { readonly status: "submitting"; readonly prepared: PreparedSubmitView }
   | { readonly status: "confirmed"; readonly proof: TaskSubmissionProof; readonly unverifiedProofs: number }
-  | { readonly status: "failed"; readonly message: string; readonly prepared?: PreparedSubmitView | undefined };
+  | {
+      readonly status: "failed";
+      readonly message: string;
+      readonly prepared?: PreparedSubmitView | undefined;
+      /** 服务端终态（expired/replaced）：同一 prepareId 不可再签，只能重新准备。 */
+      readonly terminal: boolean;
+    };
 
 interface PreparedSubmitView {
   readonly prepareId: string;
@@ -142,7 +148,9 @@ export function EvidencePanel({
     // 任务投影状态改判（submitted/done 时 preflightBlockers 会关闭入口）。
     prepareState.status !== "confirmed";
   const canSubmitSignature =
-    (prepareState.status === "prepared" || prepareState.status === "failed") &&
+    // failed 里的服务端终态（expired/replaced）不可再签；可重试失败
+    //（拒签/网络/预检错误）保留同一 prepareId 的重试入口。
+    (prepareState.status === "prepared" || (prepareState.status === "failed" && !prepareState.terminal)) &&
     canPrepare;
   const preparedForSummary =
     prepareState.status === "prepared" || prepareState.status === "submitting" || prepareState.status === "failed"
@@ -256,7 +264,8 @@ export function EvidencePanel({
       }
       setPrepareState({
         status: "failed",
-        message: error instanceof Error ? error.message : "提交预检失败"
+        message: error instanceof Error ? error.message : "提交预检失败",
+        terminal: false
       });
     }
   }
@@ -304,8 +313,8 @@ export function EvidencePanel({
         prepared,
         evidence: refreshed.evidence
       });
-      // 提交信封如实展示：failed/expired/replaced 都是服务端记录的终态，
-      // 按失败呈现并引导重新准备（submissionHandoff 同口径）。
+      // 提交信封如实展示：expired/replaced 是服务端记录的不可重投终态，
+      // 同一 prepareId 禁止再签，只能重新准备；failed 信封保留重试入口。
       if (submission.status === "failed" || submission.status === "expired" || submission.status === "replaced") {
         onProofReady(proof);
         setPrepareState({
@@ -315,7 +324,8 @@ export function EvidencePanel({
             : submission.status === "expired"
               ? "提交已过期未生效（终态），请重新准备提交。"
               : "本次提交已被后续提交取代（终态），请以最新提交记录为准，勿盲目重投。",
-          prepared
+          prepared,
+          terminal: submission.status === "expired" || submission.status === "replaced"
         });
         return;
       }
@@ -331,7 +341,8 @@ export function EvidencePanel({
       setPrepareState({
         status: "failed",
         message: error instanceof Error ? error.message : "提交失败",
-        prepared
+        prepared,
+        terminal: false
       });
     } finally {
       submitInflightRef.current = false;

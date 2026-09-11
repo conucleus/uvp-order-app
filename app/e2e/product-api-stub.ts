@@ -298,7 +298,8 @@ export const bareNoteResourceRequirement: ProductResourceRequirementDTO = {
   source: "participant_input"
 };
 
-// BFF 任务契约要求 capabilityPlugin.pluginKind（缺省会使前端 taskCapabilityPluginKind 直接抛错）。
+// BFF 任务契约随任务下发 capabilityPlugin.pluginKind（缺失时前端按通用提交
+// 插件中性降级，不中断渲染）。
 // 与 product-dto fixtures/customs.ts 的插件形态保持一致。
 const customsDeliveryPlugin = {
   pluginKind: "delivery_update",

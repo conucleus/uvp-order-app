@@ -20,6 +20,7 @@ import {
   validateAddOnManifestAction
 } from "./addOnManifestRuntime.js";
 import {
+  createInitialTaskPluginState,
   pluginPresentationForTask,
   pluginForTask,
   requiredInputsForTask,
@@ -152,10 +153,27 @@ describe("task plugin runtime", () => {
     assert.doesNotMatch(copy, /escrow released|funds held|资金已划转|资金已释放/u);
   });
 
-  it("rejects tasks without an explicit capability plugin kind", () => {
+  it("renders tasks without an explicit capability plugin kind via the neutral submit fallback", () => {
     const task = taskFixture("payment_placeholder", { capabilityPlugin: undefined });
 
-    assert.throws(() => pluginForTask(task), /missing capabilityPlugin\.pluginKind/);
+    // 缺能力插件类型的投影按通用提交信号渲染（中性降级），渲染路径不 throw。
+    assert.equal(taskCapabilityPluginKind(task), undefined);
+    assert.equal(pluginForTask(task).kind, "submit_signal");
+    assert.doesNotThrow(() => pluginPresentationForTask(task));
+  });
+
+  it("keeps completed-input placeholders out of the prepare-submit evidence payload", () => {
+    const task = taskFixture("evidence_submission", {
+      requiredInputs: [
+        { inputId: "evidence", label: "凭证指纹", inputType: "evidence", required: true, completed: true },
+        { inputId: "confirmation", label: "提交确认", inputType: "confirmation", required: true, completed: true }
+      ]
+    });
+    const plugin = pluginForTask(task);
+    const state = createInitialTaskPluginState(task, wallet);
+
+    // "已完成"只是展示占位：完成态输入不得向 prepare-submit 贡献 evidenceIds。
+    assert.deepEqual(plugin.buildPrepareSubmit(state).evidenceIds, []);
   });
 
   it("uses executor patch action targets for executor patch capable tasks", () => {
