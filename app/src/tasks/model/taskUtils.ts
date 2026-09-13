@@ -14,6 +14,11 @@ export function sameAddress(left: string, right: string): boolean {
   return left.trim().toLowerCase() === right.trim().toLowerCase();
 }
 
+/** 补丁面板共用的 0x 指纹预检（履约者/清单/权限指纹，提交前表单阻断用）。 */
+export function looksLikeHash(value: string): boolean {
+  return /^0x[0-9a-fA-F]{64}$/u.test(value.trim());
+}
+
 const HAS_ZONE_DESIGNATOR = /[Zz]$|[+-]\d{2}:?\d{2}$/;
 
 /**

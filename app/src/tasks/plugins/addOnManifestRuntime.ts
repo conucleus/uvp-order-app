@@ -8,18 +8,18 @@ import type {
 import type {
   PrepareStageExecutorPatchInput,
   PrepareStageResourcePatchInput
-} from "../api/productApi";
+} from "../../api/productApi";
 import type { ProductExecutorPatchMode } from "@uvp-eth/product-dto";
-import { shortWallet } from "../auth/participant";
+import { shortWallet } from "../../auth/participant";
 import {
   addOnManifestForTask,
   executorPatchWorkStarted,
   selectableTargetsForTask,
   targetStageId
-} from "./addOnTypes";
+} from "../model/addOnTypes";
 import type { PrepareSubmitInput } from "./pluginRuntime";
-import { taskSubmitIntentForAction } from "./taskPresentation";
-import { parseEvidenceIds, isContentAddressedReference, sameAddress } from "./taskUtils";
+import { taskSubmitIntentForAction } from "../model/taskPresentation";
+import { parseEvidenceIds, isContentAddressedReference, sameAddress } from "../model/taskUtils";
 
 export interface AddOnManifestRuntimeState {
   readonly task: ProductTaskDTO;

@@ -16,9 +16,9 @@ import type {
   ProductTaskDTO,
   StageStatus
 } from "@uvp-eth/product-dto";
-import { taskExecutorDisplay } from "../tasks/taskPresentation";
-import { taskDisplay } from "../tasks/taskStatus";
-import { deadlineSortMs, formatDeadlineUtc, parseDeadlineUtcMs } from "../tasks/taskUtils";
+import { taskExecutorDisplay } from "../tasks/model/taskPresentation";
+import { taskDisplay } from "../tasks/model/taskStatus";
+import { deadlineSortMs, formatDeadlineUtc, parseDeadlineUtcMs } from "../tasks/model/taskUtils";
 import "./orderRoom.css";
 
 interface OrderRoomProps {

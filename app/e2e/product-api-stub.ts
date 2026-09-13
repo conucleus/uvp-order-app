@@ -12,7 +12,7 @@ import {
   STAGE_EXECUTOR_PATCH_DOMAIN_NAME,
   STAGE_EXECUTOR_PATCH_DOMAIN_VERSION
 } from "@uvp-eth/executor-kit/participant";
-import type { ProductTaskWithAddOns, SelectableTargetStageDTO } from "../src/tasks/addOnTypes";
+import type { ProductTaskWithAddOns, SelectableTargetStageDTO } from "../src/tasks/model/addOnTypes";
 
 export type { ProductTaskWithAddOns };
 

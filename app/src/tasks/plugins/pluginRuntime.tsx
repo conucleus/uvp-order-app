@@ -14,7 +14,7 @@ import {
   selectableTargetsForTask,
   targetStageLabel,
   type ParticipantAddOnKind
-} from "./addOnTypes";
+} from "../model/addOnTypes";
 import {
   taskAddOnKind,
   taskAddOnLabel,
@@ -24,8 +24,8 @@ import {
   taskRequiredInputsFromCapability,
   taskSubmitIntent,
   type TaskSubmitIntent
-} from "./taskPresentation";
-import { parseEvidenceIds } from "./taskUtils";
+} from "../model/taskPresentation";
+import { parseEvidenceIds } from "../model/taskUtils";
 
 export type { TaskSubmitIntent };
 

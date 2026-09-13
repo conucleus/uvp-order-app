@@ -6,7 +6,7 @@ import {
   type ProductTaskDTO
 } from "@uvp-eth/product-dto";
 import type { ProductSubmitTypedData } from "@uvp-eth/executor-kit/participant";
-import { deadlineSortMs } from "../tasks/taskUtils";
+import { deadlineSortMs } from "../tasks/model/taskUtils";
 
 type Hex = `0x${string}`;
 type Fetcher = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;

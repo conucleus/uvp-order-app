@@ -13,12 +13,12 @@ import {
   selectableTargetsForTask,
   type ParticipantAddOnKind,
   type ProductTaskWithAddOns
-} from "./addOnTypes.js";
+} from "./model/addOnTypes.js";
 import {
   buildAddOnManifestPrepareInput,
   createInitialAddOnManifestState,
   validateAddOnManifestAction
-} from "./addOnManifestRuntime.js";
+} from "./plugins/addOnManifestRuntime.js";
 import {
   createInitialTaskPluginState,
   pluginPresentationForTask,
@@ -27,21 +27,21 @@ import {
   supportedTaskAddOnKinds,
   supportedTaskPluginKinds,
   type TaskPluginState
-} from "./pluginRuntime.js";
+} from "./plugins/pluginRuntime.js";
 import {
   taskAddOnKind,
   taskCapabilityPluginKind,
   taskExecutorDisplay,
   taskPrimaryActionLabel,
   taskSubmitIntent
-} from "./taskPresentation.js";
-import { signalContainerForTask } from "./signalContainer.js";
+} from "./model/taskPresentation.js";
+import { signalContainerForTask } from "./model/signalContainer.js";
 import {
   filterParticipantTasksForWallet,
   sortParticipantTasks,
   taskDisplay,
   taskWalletHint
-} from "./taskStatus.js";
+} from "./model/taskStatus.js";
 
 const wallet = "0x9d8A62f656a8d1615C1294FD71E9cfB3e4855A4F";
 

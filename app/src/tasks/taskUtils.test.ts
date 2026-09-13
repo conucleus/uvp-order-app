@@ -9,7 +9,7 @@ import {
   stagePatchSignExpectation,
   submitSignExpectation,
   type SignDomainEnv
-} from "./taskUtils.js";
+} from "./model/taskUtils.js";
 
 describe("task utility helpers", () => {
   it("normalizes shared task strings and wallet comparisons", () => {

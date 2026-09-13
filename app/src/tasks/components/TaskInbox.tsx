@@ -1,7 +1,7 @@
 import { AlertTriangle, CheckCircle2, Clock3, FileCheck2, PackageCheck, ShieldCheck, WalletCards } from "lucide-react";
 import type { ReactNode } from "react";
 import type { ProductTaskDTO } from "@uvp-eth/product-dto";
-import { shortWallet, walletOverrideAllowed } from "../auth/participant";
+import { shortWallet, walletOverrideAllowed } from "../../auth/participant";
 import {
   filterParticipantTasksForWallet,
   groupParticipantTasksByOrder,
@@ -9,10 +9,10 @@ import {
   taskWalletHint,
   type ParticipantTaskDisplayState,
   type TaskFilterResult
-} from "./taskStatus";
-import { taskAddOnKind, taskAddOnLabel, taskExecutorDisplay } from "./taskPresentation";
-import { formatDeadlineUtc } from "./taskUtils";
-import { signalContainerForTask } from "./signalContainer";
+} from "../model/taskStatus";
+import { taskAddOnKind, taskAddOnLabel, taskExecutorDisplay } from "../model/taskPresentation";
+import { formatDeadlineUtc } from "../model/taskUtils";
+import { signalContainerForTask } from "../model/signalContainer";
 import "./taskRuntime.css";
 
 interface TaskInboxProps {
