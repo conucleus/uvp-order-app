@@ -1,5 +1,5 @@
 import type { ProductTaskDTO } from "@uvp-eth/product-dto";
-import { parseDeadlineUtcMs } from "./taskUtils";
+import { deadlineSortMs } from "./taskUtils";
 
 export type ParticipantTaskDisplayState =
   | "ready"
@@ -92,7 +92,7 @@ export function sortParticipantTasks(
     const leftDisplay = taskDisplay(left, now);
     const rightDisplay = taskDisplay(right, now);
     return leftDisplay.rank - rightDisplay.rank ||
-      deadlineTime(left.deadline) - deadlineTime(right.deadline) ||
+      deadlineSortMs(left.deadline) - deadlineSortMs(right.deadline) ||
       left.orderTitle.localeCompare(right.orderTitle) ||
       left.taskId.localeCompare(right.taskId);
   });
@@ -168,12 +168,8 @@ export function taskDisplay(task: ProductTaskDTO, now: Date = new Date()): Parti
 }
 
 function isDeadlineOverdue(deadline: string, now: Date): boolean {
-  const timestamp = deadlineTime(deadline);
+  const timestamp = deadlineSortMs(deadline);
   return Number.isFinite(timestamp) && timestamp < now.getTime();
-}
-
-function deadlineTime(deadline: string): number {
-  return parseDeadlineUtcMs(deadline) ?? Number.MAX_SAFE_INTEGER;
 }
 
 function normalizeWallet(walletAddress: string | undefined): string | undefined {

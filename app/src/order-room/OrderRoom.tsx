@@ -18,7 +18,7 @@ import type {
 } from "@uvp-eth/product-dto";
 import { taskExecutorDisplay } from "../tasks/taskPresentation";
 import { taskDisplay } from "../tasks/taskStatus";
-import { parseDeadlineUtcMs } from "../tasks/taskUtils";
+import { deadlineSortMs, formatDeadlineUtc, parseDeadlineUtcMs } from "../tasks/taskUtils";
 import "./orderRoom.css";
 
 interface OrderRoomProps {
@@ -191,7 +191,7 @@ export function OrderRoom({ order, task, tasks = [] }: OrderRoomProps) {
                   </div>
                   <div>
                     <dt>截止时间</dt>
-                    <dd>{row.task.deadline}</dd>
+                    <dd>{formatDeadlineUtc(row.task.deadline)}</dd>
                   </div>
                   <div>
                     <dt>依赖</dt>
@@ -488,6 +488,7 @@ function compareTasks(left: ProductTaskDTO, right: ProductTaskDTO): number {
     done: 3
   };
   return rank[left.status] - rank[right.status] ||
-    left.deadline.localeCompare(right.deadline) ||
+    // deadline 排序统一 UTC 解析口径（deadlineSortMs），不随字符串序漂移。
+    deadlineSortMs(left.deadline) - deadlineSortMs(right.deadline) ||
     left.taskId.localeCompare(right.taskId);
 }

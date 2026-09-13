@@ -6,6 +6,7 @@ import {
   type ProductTaskDTO
 } from "@uvp-eth/product-dto";
 import type { ProductSubmitTypedData } from "@uvp-eth/executor-kit/participant";
+import { deadlineSortMs } from "../tasks/taskUtils";
 
 type Hex = `0x${string}`;
 type Fetcher = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
@@ -68,7 +69,7 @@ export interface ProductApiClient {
 
 export interface ParticipantQueryInput {
   readonly walletAddress?: string | undefined;
-  /** 一次性邀请令牌：预览（GET /product/invites/:id）与 accept/reject 一样按 token 哈希比对，缺失 403。 */
+  /** 一次性邀请令牌：预览（POST /product/invites/:id body）与 accept/reject 一样按 token 哈希比对，缺失即拒。 */
   readonly token?: string | undefined;
 }
 
@@ -400,16 +401,22 @@ export class ProductApiError extends Error {
   override readonly name = "ProductApiError";
   /** 服务端错误体的 `error` 短码（如 wallet_identity_required）；非 JSON 体为空。 */
   readonly errorCode?: string;
+  /** 服务端错误体原文：message 已提取为人类可读文案时保留原始 JSON 供展开核对。 */
+  readonly bodyText?: string | undefined;
 
   constructor(
     readonly status: number,
     readonly endpoint: string,
     message: string,
-    errorCode?: string
+    errorCode?: string,
+    bodyText?: string
   ) {
     super(message);
     if (errorCode !== undefined) {
       this.errorCode = errorCode;
+    }
+    if (bodyText !== undefined) {
+      this.bodyText = bodyText;
     }
   }
 }
@@ -537,8 +544,14 @@ class BrowserProductApiClient implements ProductApiClient {
   }
 
   async previewInvite(inviteId: string, input: ParticipantQueryInput = {}): Promise<ProductInvitePreviewDTO> {
-    return await this.getJson<ProductInvitePreviewDTO>(
-      participantPath(`/product/invites/${encodeURIComponent(inviteId)}`, input)
+    // 与 accept/reject 同一请求形态：token 是与 accept 同权的一次性凭据，
+    // 走 body 而不是 URL query（query 会随 URL/Referer/代理日志留痕）；
+    // walletAddress 仍走 query 声明通道，由服务端与会话锚定地址核验。
+    return await this.requestJson<ProductInvitePreviewDTO>(
+      "POST",
+      participantPath(`/product/invites/${encodeURIComponent(inviteId)}`, { walletAddress: input.walletAddress }),
+      { token: input.token },
+      this.config.timeoutMs
     );
   }
 
@@ -706,17 +719,29 @@ class BrowserProductApiClient implements ProductApiClient {
     if (!response.ok) {
       const text = await responseText(response);
       // 服务端错误体是 {error: 短码, message?}：短码进 errorCode 供界面
-      // 分支（如钱包会话缺失切换登录入口），文本整体留作展示。
+      // 分支（如钱包会话缺失切换登录入口）；message 提取为用户可读的
+      // 错误文案，原始体留 bodyText 供展开核对——原始 JSON 直出给用户
+      // 既不可读也不诚实。
       let errorCode: string | undefined;
+      let serverMessage: string | undefined;
       try {
-        const parsed = JSON.parse(text) as { readonly error?: unknown };
+        const parsed = JSON.parse(text) as { readonly error?: unknown; readonly message?: unknown };
         if (typeof parsed.error === "string") {
           errorCode = parsed.error;
+        }
+        if (typeof parsed.message === "string" && parsed.message.trim().length > 0) {
+          serverMessage = parsed.message;
         }
       } catch {
         // 非 JSON 错误体只有文本可用。
       }
-      throw new ProductApiError(response.status, pathname, text, errorCode);
+      throw new ProductApiError(
+        response.status,
+        pathname,
+        serverMessage ?? text,
+        errorCode,
+        serverMessage !== undefined ? text : undefined
+      );
     }
     try {
       return await response.json() as TResponse;
@@ -775,7 +800,9 @@ function sortTasks(tasks: readonly ProductTaskDTO[]): readonly ProductTaskDTO[] 
   };
   return [...tasks].sort((left, right) =>
     statusRank[left.status] - statusRank[right.status] ||
-    left.deadline.localeCompare(right.deadline) ||
+    // deadline 排序与收件箱/任务状态同一 UTC 解析口径（deadlineSortMs）：
+    // localeCompare 的字符串序在混合格式/时区符下与时间序漂移。
+    deadlineSortMs(left.deadline) - deadlineSortMs(right.deadline) ||
     left.taskId.localeCompare(right.taskId)
   );
 }

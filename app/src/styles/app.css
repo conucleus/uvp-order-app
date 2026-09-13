@@ -671,6 +671,29 @@
   color: var(--app-green);
 }
 
+/* 服务端错误体原文（message 已提取为可读文案）的展开核对出口。 */
+.invite-error-body {
+  text-align: left;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+}
+
+.invite-error-body pre,
+.error-boundary-stack pre {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  text-align: left;
+  font-size: 12px;
+  color: var(--app-muted);
+}
+
+/* 应用级错误边界的堆栈展开（默认收起，不把原始堆栈糊一脸）。 */
+.error-boundary-stack {
+  max-width: 100%;
+  overflow-wrap: anywhere;
+  text-align: left;
+}
+
 .participant-ok {
   border-color: #a8dec9;
   background: var(--app-green-soft);

@@ -189,7 +189,8 @@ describe("order app Product API boundary", () => {
     });
 
     const preview = await client.previewInvite("invite-1", {
-      walletAddress: "0x9d8A62f656a8d1615C1294FD71E9cfB3e4855A4F"
+      walletAddress: "0x9d8A62f656a8d1615C1294FD71E9cfB3e4855A4F",
+      token: "invite-token-plaintext"
     });
     const accepted = await client.acceptInvite("invite-1", {
       displayName: "交付方",
@@ -201,7 +202,13 @@ describe("order app Product API boundary", () => {
 
     assert.equal(preview.acceptance?.status, "can_accept");
     assert.equal(accepted.invite && (accepted.invite as { readonly status: string }).status, "accepted");
-    assert.ok(requested.some((request) => request.method === "GET" && request.url.includes("walletAddress=")));
+    // 服务端契约：预览与 accept/reject 同形态——POST + body token（一次性
+    // 凭据不落 URL query），walletAddress 仍是 query 声明通道。
+    const previewRequest = requested.find((request) => request.method === "POST" && request.url.includes("/product/invites/invite-1?"));
+    assert.ok(previewRequest, "preview request captured");
+    assert.ok(previewRequest.url.includes("walletAddress="));
+    assert.ok(!previewRequest.url.includes("token="), "invite token must not leak into the preview URL");
+    assert.deepEqual(JSON.parse(previewRequest.body ?? "{}"), { token: "invite-token-plaintext" });
     // 服务端契约：accept 必须带一次性 token、query 声明钱包和会话头；reject 也必须带 token。
     const acceptRequest = requested.find((request) => request.method === "POST" && request.url.includes("/accept"));
     assert.ok(acceptRequest);
@@ -264,10 +271,11 @@ describe("order app Product API boundary", () => {
   });
 
   it("carries the invite token on preview requests (server token-hash gate)", async () => {
-    const requested: string[] = [];
-    const fetcher: ProductApiClientOptions["fetcher"] = async (input) => {
+    const requested: Array<{ readonly url: string; readonly method: string; readonly body?: string }> = [];
+    const fetcher: ProductApiClientOptions["fetcher"] = async (input, init) => {
       const url = String(input);
-      requested.push(url);
+      const body = init?.body as string | undefined;
+      requested.push({ url, method: init?.method ?? "GET", ...(body ? { body } : {}) });
       if (url.includes("/product/invites/invite-9")) {
         return jsonResponse({
           invite: { inviteId: "invite-9", status: "active", expiresAt: "2026-05-01T00:00:00.000Z" },
@@ -287,9 +295,13 @@ describe("order app Product API boundary", () => {
 
     await client.previewInvite("invite-9", { token: "one-time-token" });
 
-    const previewUrl = requested.find((url) => url.includes("/product/invites/invite-9?"));
-    assert.ok(previewUrl, "preview request captured");
-    assert.ok(previewUrl.includes("token=one-time-token"));
+    // 预览是 POST /product/invites/:id：token 在 body（与 accept/reject 同
+    // 形态），一次性凭据不得落 URL query。
+    const previewRequest = requested.find((request) => request.url.includes("/product/invites/invite-9"));
+    assert.ok(previewRequest, "preview request captured");
+    assert.equal(previewRequest.method, "POST");
+    assert.ok(!previewRequest.url.includes("token="), "invite token must not leak into the preview URL");
+    assert.deepEqual(JSON.parse(previewRequest.body ?? "{}"), { token: "one-time-token" });
   });
 
   it("keeps the proven wallet session on subsequent participant-scoped requests", async () => {

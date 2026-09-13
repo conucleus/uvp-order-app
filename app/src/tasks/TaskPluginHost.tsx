@@ -65,7 +65,7 @@ import {
   signalContainerForTask,
   type TaskSignalContainerSummary
 } from "./signalContainer";
-import { cleanString, isContentAddressedReference, sameAddress, stagePatchSignExpectation, submitSignExpectation } from "./taskUtils";
+import { cleanString, formatDeadlineUtc, isContentAddressedReference, sameAddress, stagePatchSignExpectation, submitSignExpectation } from "./taskUtils";
 import { taskExecutorDisplay } from "./taskPresentation";
 import { taskDisplay } from "./taskStatus";
 import "./taskRuntime.css";
@@ -106,6 +106,14 @@ export interface TaskPluginHostProps {
   readonly participantWallet?: string | undefined;
   readonly source?: ProductApiSource | undefined;
   readonly standardEvidencePanel?: ReactNode | undefined;
+  /**
+   * 凭证面板持有提交边界（任务有 evidenceSpec/资源文件槽位，由调用方用
+   * planTaskEvidence 同一单源判定——tasks/ 不得反向 import evidence/，
+   * 导入边界由 importBoundaries.test 强制）。为真时本组件不渲染自带的
+   * "提交确认"边界：两个独立 prepareId/phase 同屏互不知情，且插件边界
+   * 校验不含槽位，会放出直出服务端 400 的第二提交入口。
+   */
+  readonly evidenceSubmissionOwned?: boolean | undefined;
   readonly onPrepareSubmit: (taskId: string, input: PrepareSubmitInput) => Promise<PreparedTaskSubmit>;
   readonly onProofReady: (proof: TaskSubmissionProof) => void;
   readonly onSubmitted?: (() => void) | undefined;
@@ -214,6 +222,16 @@ function submissionPendingText(status: string): string {
   return "已提交，等待链上确认。";
 }
 
+/**
+ * expired/replaced 是该 prepareId 的服务端终态：信封不可再签（EvidencePanel
+ * terminal 闸同口径）。调用方据此清掉 prepared——对已消费 prepareId 的再签
+ * 路径（签名框）随之消失，"重新准备"重新可用，否则死信封只剩"再签一次"的
+ * 假出口。failed 信封不是该 prepareId 的终态，保留同 prepareId 重试入口。
+ */
+function isTerminalSubmissionEnvelope(status: string): boolean {
+  return status === "expired" || status === "replaced";
+}
+
 export function TaskPluginHost({
   actions,
   task,
@@ -221,6 +239,7 @@ export function TaskPluginHost({
   participantWallet,
   source,
   standardEvidencePanel,
+  evidenceSubmissionOwned,
   onPrepareSubmit,
   onProofReady,
   onSubmitted,
@@ -266,6 +285,10 @@ export function TaskPluginHost({
   const usesExecutorPatchFlow = !usesManifestFlow && plugin.kind === "stage_executor_patch" && patchTargets.length > 0;
   const usesResourcePatchFlow = !usesManifestFlow && plugin.kind === "stage_resource_patch" && patchTargets.length > 0;
   const usesPatchFlow = usesExecutorPatchFlow || usesResourcePatchFlow;
+  // 凭证槽位（evidenceSpec 或资源要求）存在时，EvidencePanel 自带完整的
+  // 准备→签名→提交边界且校验槽位；与插件"提交确认"边界互斥渲染（判定由
+  // 调用方以 planTaskEvidence 同一单源传入）。
+  const usesEvidenceFlow = !usesPatchFlow && !usesManifestFlow && evidenceSubmissionOwned === true;
 
   function updateValue(inputId: string, value: string) {
     setPrepared(undefined);
@@ -359,6 +382,9 @@ export function TaskPluginHost({
       });
       const failure = submissionFailureText(result.status, result.errorCode);
       if (failure) {
+        if (isTerminalSubmissionEnvelope(result.status)) {
+          setPrepared(undefined);
+        }
         setError(failure);
         setPhase("error");
         return;
@@ -396,7 +422,7 @@ export function TaskPluginHost({
           <Detail label="权限来源" value={executorDisplay.authorizationLabel} />
           <Detail label="执行方钱包" value={signalContainer.executingWalletLabel} />
           <Detail label="阶段" value={task.stageName} />
-          <Detail label="截止时间" value={task.deadline} />
+          <Detail label="截止时间" value={formatDeadlineUtc(task.deadline)} />
           <Detail label="影响" value={task.fundingImpact} />
           <Detail label="订单" value={order?.title ?? task.orderTitle} />
           <Detail label="必填项" value={signalContainer.requiredSummary} />
@@ -431,7 +457,8 @@ export function TaskPluginHost({
           task,
           state: runtimeState,
           onValueChange: updateValue,
-          onConfirmationChange: updateConfirmation
+          onConfirmationChange: updateConfirmation,
+          submissionOwnedByEvidenceFlow: usesEvidenceFlow
         })}
 
       {usesExecutorPatchFlow ? (
@@ -462,7 +489,7 @@ export function TaskPluginHost({
         />
       ) : null}
 
-      {!usesPatchFlow && !usesManifestFlow ? standardEvidencePanel : null}
+      {usesEvidenceFlow ? standardEvidencePanel : null}
 
       <section className="workspace-block" aria-labelledby="responsibility-title">
         <div className="section-heading compact">
@@ -479,7 +506,7 @@ export function TaskPluginHost({
         </ul>
       </section>
 
-      {!usesPatchFlow && !usesManifestFlow ? (
+      {!usesPatchFlow && !usesManifestFlow && !usesEvidenceFlow ? (
         <section className="workspace-block submit-boundary" aria-labelledby="submit-boundary-title">
           <div className="section-heading">
             <Send aria-hidden="true" />
@@ -537,7 +564,7 @@ export function TaskPluginHost({
             </p>
           ) : null}
           {error ? (
-            <p className="blocked-copy">{error}</p>
+            <p className="blocked-copy" role="alert">{error}</p>
           ) : null}
         </section>
       ) : null}
@@ -814,6 +841,12 @@ function ManifestAddOnPanel({
       }
       const failure = submissionFailureText(result.status, result.errorCode);
       if (failure) {
+        if (isTerminalSubmissionEnvelope(result.status)) {
+          // 终态清 prepared 连带清 handoff 本地加签：旧签名只对已消费的
+          // typedData 有效，残留会在重新准备后被原样提交到新补丁上。
+          setPrepared(undefined);
+          setPreviousExecutorSignature("");
+        }
         setError(failure);
         setPhase("error");
         return;
@@ -1353,6 +1386,12 @@ function ExecutorPatchPanel({
       });
       const failure = submissionFailureText(result.status, result.errorCode);
       if (failure) {
+        if (isTerminalSubmissionEnvelope(result.status)) {
+          // 终态清 prepared 连带清 handoff 加签：旧签名只对已消费的补丁
+          // typedData 有效，残留会在重新准备后被原样提交到新补丁上。
+          setPrepared(undefined);
+          setDraft((current) => ({ ...current, previousExecutorSignature: "" }));
+        }
         setError(failure);
         setPhase("error");
         return;
@@ -1789,6 +1828,9 @@ function ResourcePatchPanel({
       });
       const failure = submissionFailureText(result.status, result.errorCode);
       if (failure) {
+        if (isTerminalSubmissionEnvelope(result.status)) {
+          setPrepared(undefined);
+        }
         setError(failure);
         setPhase("error");
         return;

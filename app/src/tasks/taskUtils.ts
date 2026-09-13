@@ -45,6 +45,28 @@ export function parseDeadlineUtcMs(value: string): number | undefined {
 }
 
 /**
+ * 排序用 deadline 毫秒（UTC 解析，同 parseDeadlineUtcMs 口径）：解析不了
+ * 排最后。任务排序统一走本函数，deadline 的 localeCompare 字符串序在
+ * 混合格式/时区符下会漂移（api 载入、收件箱分组、订单室三处共用）。
+ */
+export function deadlineSortMs(deadline: string): number {
+  return parseDeadlineUtcMs(deadline) ?? Number.MAX_SAFE_INTEGER;
+}
+
+/**
+ * deadline 展示：解析按 UTC（同 parseDeadlineUtcMs），展示必须带时区标
+ * 注——服务端下发的朴素串直显会让 UTC+8 用户把截止时间读晚 8 小时。
+ * 解析不了的串原样返回（不臆造时刻）。
+ */
+export function formatDeadlineUtc(deadline: string): string {
+  const ms = parseDeadlineUtcMs(deadline);
+  if (ms === undefined) {
+    return deadline;
+  }
+  return `${new Date(ms).toISOString().slice(0, 16).replace("T", " ")} UTC`;
+}
+
+/**
  * 签名域交叉核对的预期值独立来源：构建期部署配置注入（Vite 内联的静态
  * import.meta.env 成员），不来自被核对的同一 BFF 响应——被攻陷的 BFF 可以
  * 让 typedData.domain 与 prepare 信封/humanSummary 自洽，但改不了部署配置。
