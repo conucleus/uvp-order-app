@@ -284,6 +284,9 @@ export function EvidencePanel({
       const signature = await actions.signProductSubmit({
         typedData: prepared.raw.typedData,
         walletAddress: signingWallet.trim(),
+        // prepared 记录声明的提交方参与签名前交叉核对（三端签名闸门
+        // 最强集）：被攻陷 BFF 换成其他 principal 的 prepared 信封时拒签。
+        preparedSubmitters: [prepared.raw.submitter],
         // 域校验预期来自部署配置注入（独立来源），缺配置即拒签，不读同一
         // BFF 响应里的地址，防被攻陷 BFF 换域让钱包照签。
         ...submitSignExpectation()

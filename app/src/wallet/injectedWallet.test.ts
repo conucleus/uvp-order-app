@@ -216,4 +216,29 @@ describe("typed-data envelope gate before signing", () => {
       (error) => error instanceof InjectedWalletError && error.code === "typed_data_mismatch" && /submitter/.test(error.message)
     );
   });
+
+  it("refuses to sign when the prepared record names a different submitter (cross-check from the strongest gate set)", async () => {
+    // 被攻陷 BFF 把别的 principal 的 prepared 信封换给本钱包：message.submitter
+    // 虽与签名钱包一致，但与 prepare 记录声明的 submitter 不一致，必须在调
+    // 钱包前拒绝（此前 order-app 缺失该校验，zhixu-store 已有）。
+    await assert.rejects(
+      signProductSubmitWithInjectedWallet({
+        typedData,
+        walletAddress,
+        provider: acceptAllProvider(),
+        preparedSubmitters: ["0x000000000000000000000000000000000000dead"]
+      }),
+      (error) => error instanceof InjectedWalletError &&
+        error.code === "typed_data_mismatch" &&
+        /prepare 记录声明的提交方/.test(error.message)
+    );
+    // prepared 声明一致（大小写不敏感）时放行；undefined 条目跳过。
+    const signature = await signProductSubmitWithInjectedWallet({
+      typedData,
+      walletAddress,
+      provider: acceptAllProvider(),
+      preparedSubmitters: [undefined, walletAddress.toUpperCase()]
+    });
+    assert.equal(signature, `0x${"aa".repeat(65)}`);
+  });
 });

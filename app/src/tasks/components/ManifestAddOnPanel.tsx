@@ -212,6 +212,9 @@ export function ManifestAddOnPanel({
         const signature = await actions.signProductSubmit({
           typedData: prepared.prepared.typedData,
           walletAddress: prepared.input.walletAddress,
+          // prepared 记录声明的提交方参与签名前交叉核对（同 EvidencePanel
+          // submit 边界）：换签名对象在调钱包前拒绝。
+          preparedSubmitters: [prepared.prepared.submitter],
           // 预期值来自部署配置注入（独立来源），缺配置即拒签（同 submit 边界）。
           ...submitSignExpectation()
         });

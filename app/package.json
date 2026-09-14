@@ -22,6 +22,7 @@
   "dependencies": {
     "@uvp-eth/executor-kit": "workspace:*",
     "@uvp-eth/product-dto": "workspace:*",
+    "@uvp-eth/protocol-bindings": "workspace:*",
     "lucide-react": "^1.7.0",
     "react": "^19.2.5",
     "react-dom": "^19.2.5"

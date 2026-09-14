@@ -41,11 +41,14 @@ export interface OrderAppActions {
     readonly typedData: ProductSubmitTypedData;
     readonly walletAddress: string;
     readonly expected?: TypedDataDomainExpectation | undefined;
+    /** prepare 记录声明的提交方（prepared.submitter）：签名前交叉核对，可选。 */
+    readonly preparedSubmitters?: readonly (string | undefined)[] | undefined;
   }): Promise<string>;
   signTypedData(input: {
     readonly typedData: Eip712TypedDataDTO;
     readonly walletAddress: string;
     readonly expected?: TypedDataDomainExpectation | undefined;
+    readonly preparedSubmitters?: readonly (string | undefined)[] | undefined;
   }): Promise<string>;
   prepareTaskSubmit(taskId: string, input: PrepareProductTaskSubmitInput): Promise<PreparedTaskSubmitDTO>;
   submitTask(taskId: string, input: SubmitProductTaskInput): Promise<ProductSubmissionDTO>;
