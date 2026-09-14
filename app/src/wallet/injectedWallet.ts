@@ -16,7 +16,7 @@ import {
   isUserRejectedRequestError,
   validateTypedDataForSigning,
 } from "@uvp-eth/protocol-bindings";
-import { connectWalletAddress } from "../shared/chain/wallet/connect";
+import { connectWalletAddress, personalSignWithProvider } from "../shared/chain/wallet/connect";
 import { ChainWalletError } from "../shared/chain/wallet/errors";
 import type { WalletErrorCode } from "../shared/chain/wallet/errors";
 import { getBrowserEthereumProvider, walletConnectorFor } from "../shared/chain/wallet/provider";
@@ -25,9 +25,8 @@ import {
   assertTypedDataEnvelopeMatches,
   ensureCurrentChainMatchesDomain,
   requestTypedDataSignature
-} from "../shared/chain/wallet/sign-typed-data";
-import type { TypedDataMismatchTexts } from "../shared/chain/wallet/mismatch";
-import { personalSignWithProvider } from "../shared/chain/wallet/personal-sign";
+} from "../shared/chain/wallet/typed-data";
+import type { TypedDataMismatchTexts } from "../shared/chain/wallet/typed-data";
 
 export type { Eip1193Provider, ProductSubmitTypedData };
 export type WalletTarget = "evm" | "solana";
