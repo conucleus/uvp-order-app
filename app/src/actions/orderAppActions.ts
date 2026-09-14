@@ -7,7 +7,7 @@ import type {
   InviteRequestOptions,
   PrepareStageExecutorPatchInput,
   PrepareStageResourcePatchInput,
-  PrepareTaskSubmitInput,
+  PrepareProductTaskSubmitInput,
   PreparedStageExecutorPatchDTO,
   PreparedStageResourcePatchDTO,
   PreparedTaskSubmitDTO,
@@ -21,7 +21,7 @@ import type {
   StageResourcePatchSubmissionDTO,
   SubmitStageExecutorPatchInput,
   SubmitStageResourcePatchInput,
-  SubmitTaskInput,
+  SubmitProductTaskInput,
   ParticipantQueryInput,
   WalletSessionProof
 } from "../api/productApi";
@@ -47,8 +47,8 @@ export interface OrderAppActions {
     readonly walletAddress: string;
     readonly expected?: TypedDataDomainExpectation | undefined;
   }): Promise<string>;
-  prepareTaskSubmit(taskId: string, input: PrepareTaskSubmitInput): Promise<PreparedTaskSubmitDTO>;
-  submitTask(taskId: string, input: SubmitTaskInput): Promise<ProductSubmissionDTO>;
+  prepareTaskSubmit(taskId: string, input: PrepareProductTaskSubmitInput): Promise<PreparedTaskSubmitDTO>;
+  submitTask(taskId: string, input: SubmitProductTaskInput): Promise<ProductSubmissionDTO>;
   uploadEvidence(input: CreateEvidenceInput): Promise<EvidenceUploadResponseDTO>;
   getEvidenceProof(evidenceId: string): Promise<EvidenceProofDTO>;
   previewInvite(inviteId: string, input?: ParticipantQueryInput): Promise<ProductInvitePreviewDTO>;

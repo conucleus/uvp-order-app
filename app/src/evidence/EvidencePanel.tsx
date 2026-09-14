@@ -787,9 +787,11 @@ function evidenceFromProof(item: CapturedEvidence, proof: EvidenceProofDTO): Cap
     contentHash: proof.contentHash,
     metadataHash: proof.metadataHash,
     payloadHash: proof.payloadHash,
-    payloadRef: proof.payloadRef ?? item.payloadRef,
+    // payloadRef/storageURI 为服务端恒产出（product-dto 写侧契约必填），
+    // 刷新证明时采用服务端当前值，不再回退上传时的本地快照。
+    payloadRef: proof.payloadRef,
+    storageURI: proof.storageURI,
     verificationStatus: proof.verificationStatus,
-    storageURI: item.storageURI,
     status: proof.verificationStatus === "mismatch" || proof.verificationStatus === "missing_file" ? "quarantined" : item.status,
     error: proof.verificationStatus === "mismatch" || proof.verificationStatus === "missing_file"
       ? "凭证证明未匹配，不能继续作为有效业务凭证。"

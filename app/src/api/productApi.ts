@@ -1,12 +1,32 @@
 import {
   type ChainProofRowDTO,
+  type EvidenceProofDTO,
+  type PrepareProductTaskSubmitInput,
   type ProductExecutorPatchMode,
   type ProductOrderDTO,
   type ProductParticipantProfileDTO,
-  type ProductTaskDTO
+  type ProductSubmissionDTO,
+  type ProductSubmissionStatus,
+  type ProductSubmitIntent,
+  type ProductTaskDTO,
+  type SubmitProductTaskInput
 } from "@uvp-eth/product-dto";
 import type { ProductSubmitTypedData } from "@uvp-eth/executor-kit/participant";
 import { deadlineSortMs } from "../tasks/model/taskUtils";
+
+// 写侧契约单源（治理审计 §1.1 P1-1）：提交意图、prepare/submit 请求体、
+// 提交回执与证据证明以 @uvp-eth/product-dto 为唯一出处（形状按
+// uvp-chain-services 服务端真身裁定——statusLabel 与 EvidenceProofDTO 的
+// evidenceId/payloadRef/storageURI 服务端恒产出，为必填），本模块只做
+// transport，不再手写镜像。
+export type {
+  EvidenceProofDTO,
+  PrepareProductTaskSubmitInput,
+  ProductSubmissionDTO,
+  ProductSubmissionStatus,
+  ProductSubmitIntent,
+  SubmitProductTaskInput
+} from "@uvp-eth/product-dto";
 
 type Hex = `0x${string}`;
 type Fetcher = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
@@ -57,8 +77,8 @@ export interface ProductApiClient {
    * 判定会话失效时清除）。返回是否真的改变了客户端持有的 token。
    */
   restoreSessionToken(token: string | undefined): boolean;
-  prepareTaskSubmit(taskId: string, input: PrepareTaskSubmitInput): Promise<PreparedTaskSubmitDTO>;
-  submitTask(taskId: string, input: SubmitTaskInput): Promise<ProductSubmissionDTO>;
+  prepareTaskSubmit(taskId: string, input: PrepareProductTaskSubmitInput): Promise<PreparedTaskSubmitDTO>;
+  submitTask(taskId: string, input: SubmitProductTaskInput): Promise<ProductSubmissionDTO>;
   prepareStageExecutorPatch(taskId: string, input: PrepareStageExecutorPatchInput): Promise<PreparedStageExecutorPatchDTO>;
   submitStageExecutorPatch(taskId: string, input: SubmitStageExecutorPatchInput): Promise<StageExecutorPatchSubmissionDTO>;
   prepareStageResourcePatch(taskId: string, input: PrepareStageResourcePatchInput): Promise<PreparedStageResourcePatchDTO>;
@@ -161,20 +181,6 @@ export interface ProductInvitePreviewDTO {
   };
 }
 
-export type ProductSubmitIntent = "confirm_stage" | "reject_stage" | "raise_dispute" | "resolve_dispute";
-
-export interface PrepareTaskSubmitInput {
-  readonly evidenceIds: readonly string[];
-  readonly walletAddress: string;
-  readonly intent: ProductSubmitIntent;
-}
-
-export interface SubmitTaskInput {
-  readonly prepareId: string;
-  readonly signature: string;
-  readonly walletAddress: string;
-}
-
 export interface PrepareStageExecutorPatchInput {
   readonly selectorWallet: string;
   readonly targetStageId: string;
@@ -232,30 +238,6 @@ export interface PreparedTaskSubmitDTO {
   };
   readonly typedData: ProductSubmitTypedData;
   readonly evidence: readonly unknown[];
-}
-
-export type ProductSubmissionStatus =
-  | "prepared"
-  | "signature_received"
-  | "broadcasting"
-  | "submitted"
-  | "indexing"
-  | "confirmed"
-  | "failed"
-  | "expired"
-  | "replaced";
-
-export interface ProductSubmissionDTO {
-  readonly submissionId: string;
-  readonly prepareId: string;
-  readonly taskId: string;
-  readonly orderId: string;
-  readonly status: ProductSubmissionStatus;
-  readonly txHash?: Hex;
-  readonly blockNumber?: string;
-  readonly errorCode?: string;
-  readonly retryable: boolean;
-  readonly proofRows: readonly ChainProofRowDTO[];
 }
 
 export interface PreparedStageExecutorPatchDTO {
@@ -383,18 +365,6 @@ export interface EvidenceUploadResponseDTO {
   readonly evidence: EvidenceObjectDTO;
   readonly payloadHash?: Hex;
   readonly payloadRef?: string;
-}
-
-export interface EvidenceProofDTO {
-  readonly evidenceId?: string;
-  readonly payloadHash: Hex;
-  readonly contentHash: Hex;
-  readonly metadataHash: Hex;
-  readonly payloadRef?: string;
-  readonly boundSignalTxHash?: Hex;
-  readonly blockNumber?: string;
-  readonly submitter?: string;
-  readonly verificationStatus: "unbound" | "matched" | "mismatch" | "missing_file";
 }
 
 export class ProductApiError extends Error {
@@ -608,14 +578,14 @@ class BrowserProductApiClient implements ProductApiClient {
     };
   }
 
-  async prepareTaskSubmit(taskId: string, input: PrepareTaskSubmitInput): Promise<PreparedTaskSubmitDTO> {
+  async prepareTaskSubmit(taskId: string, input: PrepareProductTaskSubmitInput): Promise<PreparedTaskSubmitDTO> {
     return await this.postJson<PreparedTaskSubmitDTO>(
       `/product/tasks/${encodeURIComponent(taskId)}/prepare-submit`,
       input
     );
   }
 
-  async submitTask(taskId: string, input: SubmitTaskInput): Promise<ProductSubmissionDTO> {
+  async submitTask(taskId: string, input: SubmitProductTaskInput): Promise<ProductSubmissionDTO> {
     return await this.postJson<ProductSubmissionDTO>(`/product/tasks/${encodeURIComponent(taskId)}/submit`, input);
   }
 
