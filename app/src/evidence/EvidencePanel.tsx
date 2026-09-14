@@ -45,6 +45,7 @@ import {
 } from "../task-model";
 import { shortWallet } from "../auth/participant";
 import "./evidence.css";
+import { createInflightGuard } from "../shared/chain/submission/inflight";
 
 interface EvidencePanelProps {
   readonly actions: OrderAppActions;
@@ -104,7 +105,7 @@ export function EvidencePanel({
   // 链路，按钮的 pending 禁用要等状态落盘+重渲染才生效，同步 ref 挡住
   // 重渲染前的第二次点击；ref 在单次请求收尾即释放，防重复提交的终态
   // 闸由 confirmed 任务状态门（:235/:264 的准入检查）承担。
-  const submitInflightRef = useRef(false);
+  const submitInflightRef = useRef(createInflightGuard());
 
   useEffect(() => {
     setCaptures({});
@@ -241,7 +242,7 @@ export function EvidencePanel({
   }
 
   async function handlePrepareSubmit() {
-    if (!task || blockers.length > 0 || submitInflightRef.current) {
+    if (!task || blockers.length > 0 || submitInflightRef.current.locked) {
       return;
     }
     const requestScopeKey = taskScopeRef.current;
@@ -271,11 +272,11 @@ export function EvidencePanel({
   }
 
   async function handleSubmitSignature(prepared: PreparedSubmitView) {
-    if (!task || !canSubmitSignature || submitInflightRef.current) {
+    if (!task || !canSubmitSignature || submitInflightRef.current.locked) {
       return;
     }
     const requestScopeKey = taskScopeRef.current;
-    submitInflightRef.current = true;
+    submitInflightRef.current.tryAcquire();
     setPrepareState({ status: "submitting", prepared });
     try {
       if (!prepared.raw) {
@@ -348,7 +349,7 @@ export function EvidencePanel({
         terminal: false
       });
     } finally {
-      submitInflightRef.current = false;
+      submitInflightRef.current.release();
     }
   }
 

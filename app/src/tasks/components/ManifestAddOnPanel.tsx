@@ -15,7 +15,7 @@ import type {
 } from "../../api/productApi";
 import type { OrderAppActions } from "../../actions/orderAppActions";
 import type { TaskSubmissionProof } from "../../task-model";
-import { stableStringify } from "../../shared/canonical";
+import { stableStringify } from "../../shared/chain/canonical";
 import {
   resourceRequirementDisplays,
   selectableTargetsForTask,
@@ -37,6 +37,7 @@ import { stagePatchSignExpectation, submitSignExpectation } from "../model/taskU
 import { isTerminalSubmissionEnvelope, submissionFailureText, submissionPendingText } from "../submission/submissionEnvelope";
 import type { PreparedTaskSubmit, ProductSubmission, RuntimePhase, SubmitPreparedInput } from "../submission/types";
 import { ProofRow } from "./ProofRow";
+import { createInflightGuard } from "../../shared/chain/submission/inflight";
 
 type ManifestPreparedState =
   | {
@@ -95,7 +96,7 @@ export function ManifestAddOnPanel({
   const [previousExecutorSignature, setPreviousExecutorSignature] = useState("");
   // 同步互斥（EvidencePanel submitInflightRef 同款）：重渲染前的第二次点击
   // 由 ref 挡住；终态后的重投由 submitted 相位闸承担。
-  const submitInflightRef = useRef(false);
+  const submitInflightRef = useRef(createInflightGuard());
   // manifest 每次投影刷新都是新对象：按内容身份（稳定序列化）做重置依据，
   // 同内容的刷新不重置；内容真正变化（动作/组件集变了）才重置表单。
   const manifestKey = useMemo(() => stableStringify(manifest), [manifest]);
@@ -199,11 +200,11 @@ export function ManifestAddOnPanel({
   }
 
   async function submitPreparedAction() {
-    if (!prepared || phase === "submitted" || submitInflightRef.current) {
+    if (!prepared || phase === "submitted" || submitInflightRef.current.locked) {
       return;
     }
     const requestScopeKey = taskScopeRef.current;
-    submitInflightRef.current = true;
+    submitInflightRef.current.tryAcquire();
     setPhase("submitting");
     setError(undefined);
     try {
@@ -322,7 +323,7 @@ export function ManifestAddOnPanel({
       setError(caught instanceof Error ? caught.message : "签名提交失败");
       setPhase("error");
     } finally {
-      submitInflightRef.current = false;
+      submitInflightRef.current.release();
     }
   }
 

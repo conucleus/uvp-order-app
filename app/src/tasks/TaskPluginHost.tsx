@@ -41,6 +41,7 @@ import { ManifestAddOnPanel } from "./components/ManifestAddOnPanel";
 import { ExecutorPatchPanel } from "./components/ExecutorPatchPanel";
 import { ResourcePatchPanel } from "./components/ResourcePatchPanel";
 import "./components/taskRuntime.css";
+import { createInflightGuard } from "../shared/chain/submission/inflight";
 
 export interface TaskPluginHostProps {
   readonly actions: OrderAppActions;
@@ -91,7 +92,7 @@ export function TaskPluginHost({
   // 同步互斥（EvidencePanel submitInflightRef 同款）：签名+提交是长链路，
   // 按钮 pending 禁用要等状态落盘重渲染才生效，ref 同步挡住重渲染前的
   // 第二次点击；ref 在请求收尾即释放，终态后的重投由 submitted 相位闸承担。
-  const submitInflightRef = useRef(false);
+  const submitInflightRef = useRef(createInflightGuard());
 
   useEffect(() => {
     setState(createInitialTaskPluginState(task, participantWallet));
@@ -170,11 +171,11 @@ export function TaskPluginHost({
   }
 
   async function submitPrepared() {
-    if (!prepared || phase === "submitted" || submitInflightRef.current) {
+    if (!prepared || phase === "submitted" || submitInflightRef.current.locked) {
       return;
     }
     const requestScopeKey = taskScopeRef.current;
-    submitInflightRef.current = true;
+    submitInflightRef.current.tryAcquire();
     setPhase("submitting");
     setError(undefined);
     try {
@@ -230,7 +231,7 @@ export function TaskPluginHost({
       setError(caught instanceof Error ? caught.message : "签名提交失败");
       setPhase("error");
     } finally {
-      submitInflightRef.current = false;
+      submitInflightRef.current.release();
     }
   }
 

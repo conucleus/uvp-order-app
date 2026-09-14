@@ -9,7 +9,7 @@
     "typecheck": "tsc --noEmit",
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview",
-    "test": "tsx --test src/**/*.test.ts",
+    "test": "tsx --test \"src/**/*.test.ts\"",
     "test:full-mode-gate": "tsx --test src/testing/orderAppFullModeGate.test.ts",
     "test:e2e": "playwright test e2e/order-app.smoke.spec.ts e2e/evidence-proof.spec.ts",
     "test:e2e:api-stub": "UVP_ORDER_APP_E2E_PROFILE=api-stub UVP_ORDER_APP_E2E_PORT=4184 playwright test e2e/order-app.readiness.spec.ts",

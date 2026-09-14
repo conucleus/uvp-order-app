@@ -21,6 +21,7 @@ import { cleanString, isContentAddressedReference, looksLikeHash, sameAddress, s
 import { isTerminalSubmissionEnvelope, submissionFailureText } from "../submission/submissionEnvelope";
 import type { PatchPhase } from "../submission/types";
 import { ProofRow } from "./ProofRow";
+import { createInflightGuard } from "../../shared/chain/submission/inflight";
 
 interface ResourcePatchDraftState {
   readonly selectorWallet: string;
@@ -60,7 +61,7 @@ export function ResourcePatchPanel({
   const [error, setError] = useState<string | undefined>();
   // 同步互斥（EvidencePanel submitInflightRef 同款）：重渲染前的第二次点击
   // 由 ref 挡住；终态后的重投由 submitted 相位闸承担。
-  const submitInflightRef = useRef(false);
+  const submitInflightRef = useRef(createInflightGuard());
   const selectedTarget = targets.find((target) => selectableTargetStageId(target) === draft.targetStageId) ?? targets[0];
   const resourceOptions = targetResourceOptions(task, selectedTarget);
   const blockers = resourcePatchBlockers({
@@ -148,11 +149,11 @@ export function ResourcePatchPanel({
   }
 
   async function submitResourcePatch() {
-    if (!prepared || phase === "submitted" || submitInflightRef.current) {
+    if (!prepared || phase === "submitted" || submitInflightRef.current.locked) {
       return;
     }
     const requestScopeKey = taskScopeRef.current;
-    submitInflightRef.current = true;
+    submitInflightRef.current.tryAcquire();
     setPhase("submitting");
     setError(undefined);
     try {
@@ -208,7 +209,7 @@ export function ResourcePatchPanel({
       setError(caught instanceof Error ? caught.message : "签名提交失败");
       setPhase("error");
     } finally {
-      submitInflightRef.current = false;
+      submitInflightRef.current.release();
     }
   }
 

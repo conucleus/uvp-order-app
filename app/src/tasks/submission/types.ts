@@ -1,5 +1,6 @@
 import type { ChainProofRowDTO } from "@uvp-eth/product-dto";
 import type { ProductSubmitTypedData } from "@uvp-eth/executor-kit/participant";
+import type { SubmissionPhase } from "../../shared/chain/submission/phase-machine";
 
 export interface PreparedTaskSubmit {
   readonly prepareId: string;
@@ -36,5 +37,11 @@ export interface SubmitPreparedInput {
   readonly walletAddress: string;
 }
 
-export type RuntimePhase = "idle" | "preparing" | "prepared" | "submitting" | "submitted" | "error";
-export type PatchPhase = "idle" | "preparing" | "prepared" | "submitting" | "submitted" | "error";
+/**
+ * 提交相位枚举已上收 chain 轨（SubmissionPhase，两端单源）；迁移归约
+ * submissionPhaseReducer 同在 shared/chain/submission/phase-machine
+ * （submitted 终态闸/reset 语义）。本端组件的直接 setPhase 调用保持
+ * 原样（最小行为变化），别名保留既有类型名。
+ */
+export type RuntimePhase = SubmissionPhase;
+export type PatchPhase = SubmissionPhase;
