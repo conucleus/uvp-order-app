@@ -1,4 +1,4 @@
-import { compareByCodePoint, stableStringify } from "../shared/canonical";
+import { compareByCodePoint, stableStringify } from "../shared/chain/canonical";
 
 export { stableStringify, compareByCodePoint };
 export async function sha256Hex(input: ArrayBuffer | Uint8Array<ArrayBufferLike> | string): Promise<`0x${string}`> {

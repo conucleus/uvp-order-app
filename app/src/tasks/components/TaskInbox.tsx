@@ -1,7 +1,7 @@
 import { AlertTriangle, CheckCircle2, Clock3, FileCheck2, PackageCheck, ShieldCheck, WalletCards } from "lucide-react";
 import type { ReactNode } from "react";
 import type { ProductTaskDTO } from "@uvp-eth/product-dto";
-import { shortWallet, walletOverrideAllowed } from "../auth/participant";
+import { shortWallet, walletOverrideAllowed } from "../../auth/participant";
 import {
   filterParticipantTasksForWallet,
   groupParticipantTasksByOrder,
@@ -9,9 +9,10 @@ import {
   taskWalletHint,
   type ParticipantTaskDisplayState,
   type TaskFilterResult
-} from "./taskStatus";
-import { taskAddOnKind, taskAddOnLabel, taskExecutorDisplay } from "./taskPresentation";
-import { signalContainerForTask } from "./signalContainer";
+} from "../model/taskStatus";
+import { taskAddOnKind, taskAddOnLabel, taskExecutorDisplay } from "../model/taskPresentation";
+import { formatDeadlineUtc } from "../model/taskUtils";
+import { signalContainerForTask } from "../model/signalContainer";
 import "./taskRuntime.css";
 
 interface TaskInboxProps {
@@ -39,7 +40,9 @@ export function TaskInbox({ tasks, participantWallet, selectedTaskId, onSelectTa
     <section className="task-list" aria-label="我的待办">
       <div className="task-list-toolbar" aria-hidden="true">
         <span>按订单分组</span>
-        <span>最新优先</span>
+        {/* 实际排序是状态分桶后按截止时间升序（sortParticipantTasks 的 UTC
+            解析序）：文案如实描述，不写"最新优先"。 */}
+        <span>临近截止优先</span>
       </div>
       {groups.map((group) => (
         <div className="task-group" key={group.orderId}>
@@ -76,7 +79,7 @@ export function TaskInbox({ tasks, participantWallet, selectedTaskId, onSelectTa
                   <span className="task-card-facts">
                     <span>
                       <Clock3 aria-hidden="true" />
-                      截止 {task.deadline}
+                      截止 {formatDeadlineUtc(task.deadline)}
                     </span>
                     <span>
                       <WalletCards aria-hidden="true" />

@@ -45,6 +45,7 @@ import {
 } from "../task-model";
 import { shortWallet } from "../auth/participant";
 import "./evidence.css";
+import { createInflightGuard } from "../shared/chain/submission/inflight";
 
 interface EvidencePanelProps {
   readonly actions: OrderAppActions;
@@ -104,7 +105,7 @@ export function EvidencePanel({
   // 链路，按钮的 pending 禁用要等状态落盘+重渲染才生效，同步 ref 挡住
   // 重渲染前的第二次点击；ref 在单次请求收尾即释放，防重复提交的终态
   // 闸由 confirmed 任务状态门（:235/:264 的准入检查）承担。
-  const submitInflightRef = useRef(false);
+  const submitInflightRef = useRef(createInflightGuard());
 
   useEffect(() => {
     setCaptures({});
@@ -241,7 +242,7 @@ export function EvidencePanel({
   }
 
   async function handlePrepareSubmit() {
-    if (!task || blockers.length > 0 || submitInflightRef.current) {
+    if (!task || blockers.length > 0 || submitInflightRef.current.locked) {
       return;
     }
     const requestScopeKey = taskScopeRef.current;
@@ -271,11 +272,11 @@ export function EvidencePanel({
   }
 
   async function handleSubmitSignature(prepared: PreparedSubmitView) {
-    if (!task || !canSubmitSignature || submitInflightRef.current) {
+    if (!task || !canSubmitSignature || submitInflightRef.current.locked) {
       return;
     }
     const requestScopeKey = taskScopeRef.current;
-    submitInflightRef.current = true;
+    submitInflightRef.current.tryAcquire();
     setPrepareState({ status: "submitting", prepared });
     try {
       if (!prepared.raw) {
@@ -284,6 +285,9 @@ export function EvidencePanel({
       const signature = await actions.signProductSubmit({
         typedData: prepared.raw.typedData,
         walletAddress: signingWallet.trim(),
+        // prepared 记录声明的提交方参与签名前交叉核对（三端签名闸门
+        // 最强集）：被攻陷 BFF 换成其他 principal 的 prepared 信封时拒签。
+        preparedSubmitters: [prepared.raw.submitter],
         // 域校验预期来自部署配置注入（独立来源），缺配置即拒签，不读同一
         // BFF 响应里的地址，防被攻陷 BFF 换域让钱包照签。
         ...submitSignExpectation()
@@ -345,7 +349,7 @@ export function EvidencePanel({
         terminal: false
       });
     } finally {
-      submitInflightRef.current = false;
+      submitInflightRef.current.release();
     }
   }
 
@@ -787,9 +791,11 @@ function evidenceFromProof(item: CapturedEvidence, proof: EvidenceProofDTO): Cap
     contentHash: proof.contentHash,
     metadataHash: proof.metadataHash,
     payloadHash: proof.payloadHash,
-    payloadRef: proof.payloadRef ?? item.payloadRef,
+    // payloadRef/storageURI 为服务端恒产出（product-dto 写侧契约必填），
+    // 刷新证明时采用服务端当前值，不再回退上传时的本地快照。
+    payloadRef: proof.payloadRef,
+    storageURI: proof.storageURI,
     verificationStatus: proof.verificationStatus,
-    storageURI: item.storageURI,
     status: proof.verificationStatus === "mismatch" || proof.verificationStatus === "missing_file" ? "quarantined" : item.status,
     error: proof.verificationStatus === "mismatch" || proof.verificationStatus === "missing_file"
       ? "凭证证明未匹配，不能继续作为有效业务凭证。"

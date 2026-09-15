@@ -14,6 +14,11 @@ export function sameAddress(left: string, right: string): boolean {
   return left.trim().toLowerCase() === right.trim().toLowerCase();
 }
 
+/** 补丁面板共用的 0x 指纹预检（履约者/清单/权限指纹，提交前表单阻断用）。 */
+export function looksLikeHash(value: string): boolean {
+  return /^0x[0-9a-fA-F]{64}$/u.test(value.trim());
+}
+
 const HAS_ZONE_DESIGNATOR = /[Zz]$|[+-]\d{2}:?\d{2}$/;
 
 /**
@@ -42,6 +47,28 @@ export function parseDeadlineUtcMs(value: string): number | undefined {
   const withZone = HAS_ZONE_DESIGNATOR.test(normalized) ? normalized : `${normalized}Z`;
   const parsed = Date.parse(withZone);
   return Number.isFinite(parsed) ? parsed : undefined;
+}
+
+/**
+ * 排序用 deadline 毫秒（UTC 解析，同 parseDeadlineUtcMs 口径）：解析不了
+ * 排最后。任务排序统一走本函数，deadline 的 localeCompare 字符串序在
+ * 混合格式/时区符下会漂移（api 载入、收件箱分组、订单室三处共用）。
+ */
+export function deadlineSortMs(deadline: string): number {
+  return parseDeadlineUtcMs(deadline) ?? Number.MAX_SAFE_INTEGER;
+}
+
+/**
+ * deadline 展示：解析按 UTC（同 parseDeadlineUtcMs），展示必须带时区标
+ * 注——服务端下发的朴素串直显会让 UTC+8 用户把截止时间读晚 8 小时。
+ * 解析不了的串原样返回（不臆造时刻）。
+ */
+export function formatDeadlineUtc(deadline: string): string {
+  const ms = parseDeadlineUtcMs(deadline);
+  if (ms === undefined) {
+    return deadline;
+  }
+  return `${new Date(ms).toISOString().slice(0, 16).replace("T", " ")} UTC`;
 }
 
 /**

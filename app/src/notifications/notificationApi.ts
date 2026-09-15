@@ -1,7 +1,7 @@
 import type { ProductOrderDTO, ProductTaskDTO } from "@uvp-eth/product-dto";
 import type { ParticipantSession } from "../auth/participant";
 import type { ProductApiSource, ProductHomeData } from "../api/productApi";
-import { parseDeadlineUtcMs } from "../tasks/taskUtils";
+import { parseDeadlineUtcMs } from "../tasks/model/taskUtils";
 import type {
   OrderAppNotificationDTO,
   OrderAppNotificationKind,

@@ -7,7 +7,7 @@ import type {
   InviteRequestOptions,
   PrepareStageExecutorPatchInput,
   PrepareStageResourcePatchInput,
-  PrepareTaskSubmitInput,
+  PrepareProductTaskSubmitInput,
   PreparedStageExecutorPatchDTO,
   PreparedStageResourcePatchDTO,
   PreparedTaskSubmitDTO,
@@ -21,7 +21,7 @@ import type {
   StageResourcePatchSubmissionDTO,
   SubmitStageExecutorPatchInput,
   SubmitStageResourcePatchInput,
-  SubmitTaskInput,
+  SubmitProductTaskInput,
   ParticipantQueryInput,
   WalletSessionProof
 } from "../api/productApi";
@@ -41,14 +41,17 @@ export interface OrderAppActions {
     readonly typedData: ProductSubmitTypedData;
     readonly walletAddress: string;
     readonly expected?: TypedDataDomainExpectation | undefined;
+    /** prepare 记录声明的提交方（prepared.submitter）：签名前交叉核对，可选。 */
+    readonly preparedSubmitters?: readonly (string | undefined)[] | undefined;
   }): Promise<string>;
   signTypedData(input: {
     readonly typedData: Eip712TypedDataDTO;
     readonly walletAddress: string;
     readonly expected?: TypedDataDomainExpectation | undefined;
+    readonly preparedSubmitters?: readonly (string | undefined)[] | undefined;
   }): Promise<string>;
-  prepareTaskSubmit(taskId: string, input: PrepareTaskSubmitInput): Promise<PreparedTaskSubmitDTO>;
-  submitTask(taskId: string, input: SubmitTaskInput): Promise<ProductSubmissionDTO>;
+  prepareTaskSubmit(taskId: string, input: PrepareProductTaskSubmitInput): Promise<PreparedTaskSubmitDTO>;
+  submitTask(taskId: string, input: SubmitProductTaskInput): Promise<ProductSubmissionDTO>;
   uploadEvidence(input: CreateEvidenceInput): Promise<EvidenceUploadResponseDTO>;
   getEvidenceProof(evidenceId: string): Promise<EvidenceProofDTO>;
   previewInvite(inviteId: string, input?: ParticipantQueryInput): Promise<ProductInvitePreviewDTO>;

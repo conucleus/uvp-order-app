@@ -7,6 +7,8 @@ import { productApiBaseUrl, participantWallet } from "./product-api-stub";
  * - ?invite=&inviteToken= 进入时读取进应用状态；地址栏上的一次性令牌保留
  *   到流程终态（accept 成功）才清除——中途失败/刷新仍可重试。路由只认
  *   hash，"返回待办"不会因 search 残留把邀请面板还原。
+ * - 预览走 POST /product/invites/:id + body token（与 accept/reject 同形态，
+ *   一次性令牌不落 URL query）。
  * - accept 走服务端契约：先完成 /store/auth 会话（personal_sign 证明钱包
  *   控制），再携带 x-uvp-store-session + query walletAddress + body token。
  * - 缺少 inviteToken 时如实阻断，不得发出注定失败的请求。
@@ -108,10 +110,12 @@ interface CapturedRequest {
       await fulfill({ participant: participantBody.participant, tasks: [] });
       return;
     }
-    if (request.method() === "GET" && url.pathname === `/product/invites/${INVITE_ID}`) {
-      // 契约对齐：预览与 accept/reject 同一凭据口径（token 哈希比对），
-      // 缺 token/错 token 一律 403，不再无条件 200 掩盖客户端断裂。
-      if (url.searchParams.get("token") !== INVITE_TOKEN) {
+    if (request.method() === "POST" && url.pathname === `/product/invites/${INVITE_ID}`) {
+      // 契约对齐：预览与 accept/reject 同一凭据口径与请求形态——token
+      // 哈希比对且走 body，缺 token/错 token 一律 403，不再无条件 200
+      // 掩盖客户端断裂。
+      const body = request.postDataJSON() as { readonly token?: string };
+      if (body.token !== INVITE_TOKEN) {
         await fulfill({ error: "invite_token_mismatch", message: "invite token required" }, 403);
         return;
       }
@@ -171,10 +175,18 @@ test("invite entry accepts through the server contract and returns to tasks", as
   const acceptUrl = new URL(accept.url);
   expect(acceptUrl.searchParams.get("walletAddress")).toBe(participantWallet);
   expect(JSON.parse(accept.body ?? "{}")).toMatchObject({ token: INVITE_TOKEN, walletAddress: participantWallet });
-  // 预览请求同样携带一次性令牌（服务端按 token 哈希比对，缺失 403）。
-  const preview = requests.find((request) => request.method === "GET" && request.url.includes(`/product/invites/${INVITE_ID}?`));
+  // 预览请求同样携带一次性令牌（服务端按 token 哈希比对，缺失 403）：
+  // POST body 形态，与 accept/reject 一致，令牌不落 URL query。
+  const preview = requests.find((request) => {
+    if (request.method !== "POST") {
+      return false;
+    }
+    const parsed = new URL(request.url);
+    return parsed.pathname === `/product/invites/${INVITE_ID}`;
+  });
   assert.ok(preview, "preview request captured");
-  expect(new URL(preview.url).searchParams.get("token")).toBe(INVITE_TOKEN);
+  assert.ok(!new URL(preview.url).searchParams.get("token"), "invite token must not appear in the preview URL query");
+  expect(JSON.parse(preview.body ?? "{}")).toMatchObject({ token: INVITE_TOKEN });
   // 会话证明链路确实发生过。
   expect(requests.some((request) => request.url.endsWith("/store/auth/challenge"))).toBe(true);
   expect(requests.some((request) => request.url.endsWith("/store/auth/verify"))).toBe(true);

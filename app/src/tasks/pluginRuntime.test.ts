@@ -13,12 +13,12 @@ import {
   selectableTargetsForTask,
   type ParticipantAddOnKind,
   type ProductTaskWithAddOns
-} from "./addOnTypes.js";
+} from "./model/addOnTypes.js";
 import {
   buildAddOnManifestPrepareInput,
   createInitialAddOnManifestState,
   validateAddOnManifestAction
-} from "./addOnManifestRuntime.js";
+} from "./plugins/addOnManifestRuntime.js";
 import {
   createInitialTaskPluginState,
   pluginPresentationForTask,
@@ -27,21 +27,21 @@ import {
   supportedTaskAddOnKinds,
   supportedTaskPluginKinds,
   type TaskPluginState
-} from "./pluginRuntime.js";
+} from "./plugins/pluginRuntime.js";
 import {
   taskAddOnKind,
   taskCapabilityPluginKind,
   taskExecutorDisplay,
   taskPrimaryActionLabel,
   taskSubmitIntent
-} from "./taskPresentation.js";
-import { signalContainerForTask } from "./signalContainer.js";
+} from "./model/taskPresentation.js";
+import { signalContainerForTask } from "./model/signalContainer.js";
 import {
   filterParticipantTasksForWallet,
   sortParticipantTasks,
   taskDisplay,
   taskWalletHint
-} from "./taskStatus.js";
+} from "./model/taskStatus.js";
 
 const wallet = "0x9d8A62f656a8d1615C1294FD71E9cfB3e4855A4F";
 
@@ -370,7 +370,7 @@ describe("task plugin runtime", () => {
     assert.equal(prepare.input.intent, "confirm_stage");
   });
 
-  it("derives the submit intent from the manifest declaration first, aligned with zhixu-store", () => {
+  it("derives the submit intent from the manifest declaration first (single-sourced from product-dto)", () => {
     const manifestIntent = (
       intent: NonNullable<ParticipantAddOnManifestDTO["actions"][number]["intent"]>,
       primary = true
@@ -396,7 +396,7 @@ describe("task plugin runtime", () => {
     assert.equal(taskSubmitIntent(taskFixture("delivery_update")), "confirm_stage");
   });
 
-  it("derives the manifest-driven prepare intent by plugin kind when the action declares none (aligned with zhixu-store)", () => {
+  it("derives the manifest-driven prepare intent by plugin kind when the action declares none (single-sourced from product-dto)", () => {
     // manifest 动作未声明 intent 时按能力插件类型推导，不再兜底
     // confirm_stage：dispute_material 动作必须以 raise_dispute 提交。
     const undeclaredManifest: ParticipantAddOnManifestDTO = {

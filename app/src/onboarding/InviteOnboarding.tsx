@@ -1,6 +1,6 @@
 import { AlertCircle, CheckCircle2, ShieldCheck, Wallet, XCircle } from "lucide-react";
 import { useEffect, useState } from "react";
-import { ProductApiError, type ProductInvitePreviewDTO } from "../api/productApi";
+import { isWalletIdentityRequired, ProductApiError, type ProductInvitePreviewDTO } from "../api/productApi";
 import type { OrderAppActions } from "../actions/orderAppActions";
 import type { ParticipantSession } from "../auth/participant";
 import { shortWallet } from "../auth/participant";
@@ -11,7 +11,15 @@ type InviteLoadState =
   | { readonly status: "ready"; readonly invite: ProductInvitePreviewDTO }
   | { readonly status: "accepted"; readonly invite: ProductInvitePreviewDTO }
   | { readonly status: "rejected" }
-  | { readonly status: "error"; readonly message: string; readonly retryable: boolean };
+  | {
+      readonly status: "error";
+      readonly message: string;
+      readonly retryable: boolean;
+      /** 非"邀请不可用"类终态（如钱包身份缺失）的定制标题。 */
+      readonly errorTitle?: string | undefined;
+      /** 服务端错误体原文（message 已提取时保留），供展开核对。 */
+      readonly bodyText?: string | undefined;
+    };
 
 interface InviteOnboardingProps {
   readonly inviteId: string;
@@ -38,6 +46,24 @@ function isEvmWalletAddress(value: string): boolean {
 function isTerminalInviteFailure(error: unknown): boolean {
   return error instanceof ProductApiError
     && (error.status === 403 || error.status === 404 || error.status === 410);
+}
+
+/**
+ * 401 wallet_identity_required：参与者面（含邀请预览/接受/拒绝）要求钱包
+ * 会话身份，非 local 部署不接受自报钱包——无钱包会话的受邀者重发同一
+ * 请求永远得到同一 401。按终态处理并引导安装/连接钱包，不给"可直接
+ * 重试"的假出口。
+ */
+function isWalletIdentityInviteFailure(error: unknown): boolean {
+  return isWalletIdentityRequired(error);
+}
+
+function walletIdentityInviteFailureCopy(error: unknown): string {
+  return `${inviteFailureMessage(error, "参与者服务要求钱包身份。")}请先安装并连接浏览器钱包、完成钱包登录后重新打开邀请链接；未建立钱包身份前重试同一请求不会成功。`;
+}
+
+function inviteErrorBodyText(error: unknown): string | undefined {
+  return error instanceof ProductApiError ? error.bodyText : undefined;
 }
 
 function inviteFailureMessage(error: unknown, fallback: string): string {
@@ -102,10 +128,15 @@ export function InviteOnboarding({ inviteId, inviteToken, actions, session, onAc
       })
       .catch((error) => {
         if (!cancelled) {
+          const walletIdentityFailure = isWalletIdentityInviteFailure(error);
           setLoadState({
             status: "error",
-            message: inviteFailureMessage(error, "邀请加载失败"),
-            retryable: !isTerminalInviteFailure(error)
+            message: walletIdentityFailure
+              ? walletIdentityInviteFailureCopy(error)
+              : inviteFailureMessage(error, "邀请加载失败"),
+            retryable: !isTerminalInviteFailure(error) && !walletIdentityFailure,
+            ...(walletIdentityFailure ? { errorTitle: "需要钱包身份" } : {}),
+            ...(inviteErrorBodyText(error) ? { bodyText: inviteErrorBodyText(error) } : {})
           });
         }
       });
@@ -159,6 +190,16 @@ export function InviteOnboarding({ inviteId, inviteToken, actions, session, onAc
         setLoadState({ status: "error", message: terminalInviteFailureCopy(error), retryable: false });
         return;
       }
+      if (isWalletIdentityInviteFailure(error)) {
+        setLoadState({
+          status: "error",
+          message: walletIdentityInviteFailureCopy(error),
+          retryable: false,
+          errorTitle: "需要钱包身份",
+          ...(inviteErrorBodyText(error) ? { bodyText: inviteErrorBodyText(error) } : {})
+        });
+        return;
+      }
       setActionError(retryableInviteFailureCopy(error, "接受邀请失败"));
     } finally {
       setBusy(false);
@@ -184,6 +225,16 @@ export function InviteOnboarding({ inviteId, inviteToken, actions, session, onAc
         setLoadState({ status: "error", message: terminalInviteFailureCopy(error), retryable: false });
         return;
       }
+      if (isWalletIdentityInviteFailure(error)) {
+        setLoadState({
+          status: "error",
+          message: walletIdentityInviteFailureCopy(error),
+          retryable: false,
+          errorTitle: "需要钱包身份",
+          ...(inviteErrorBodyText(error) ? { bodyText: inviteErrorBodyText(error) } : {})
+        });
+        return;
+      }
       setActionError(retryableInviteFailureCopy(error, "拒绝邀请失败"));
     } finally {
       setBusy(false);
@@ -203,8 +254,14 @@ export function InviteOnboarding({ inviteId, inviteToken, actions, session, onAc
     return (
       <section className="invite-panel invite-panel-error" role="alert">
         <AlertCircle aria-hidden="true" />
-        <h2>{loadState.retryable ? "邀请加载失败" : "邀请不可用"}</h2>
+        <h2>{loadState.errorTitle ?? (loadState.retryable ? "邀请加载失败" : "邀请不可用")}</h2>
         <p>{loadState.message}</p>
+        {loadState.bodyText ? (
+          <details className="invite-error-body">
+            <summary>服务端原始响应</summary>
+            <pre>{loadState.bodyText}</pre>
+          </details>
+        ) : null}
         {loadState.retryable ? (
           <button
             className="primary-button"

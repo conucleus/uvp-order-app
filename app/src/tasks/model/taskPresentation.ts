@@ -1,7 +1,6 @@
 import type {
   FulfillmentPluginKind,
   FulfillmentRequiredInputDTO,
-  ParticipantAddOnManifestActionDTO,
   ProductTaskDTO
 } from "@uvp-eth/product-dto";
 import {
@@ -69,44 +68,12 @@ export function taskPrimaryActionLabel(task: ProductTaskDTO, fallback?: string):
     taskAddOnLabel(taskAddOnKind(task));
 }
 
-export type TaskSubmitIntent = "confirm_stage" | "reject_stage" | "raise_dispute" | "resolve_dispute";
-
-/** 无 manifest 声明时的兜底映射：争议任务不得以 confirm_stage 提交。 */
-const submitIntentByPluginKind: Readonly<Record<FulfillmentPluginKind, TaskSubmitIntent>> = {
-  payment_placeholder: "confirm_stage",
-  evidence_submission: "confirm_stage",
-  delivery_update: "confirm_stage",
-  validation_confirm: "confirm_stage",
-  dispute_material: "raise_dispute"
-};
-
-/**
- * 提交意图与 zhixu-store 同源同序：manifest 显式声明的 submit_signal intent
- * 优先（发布者声明是权威），无 manifest 声明时按能力插件类型推导。
- * 两端各自单源推导会在 manifest 与插件类型不一致时得出不同 intent。
- */
-export function taskSubmitIntent(task: ProductTaskDTO): TaskSubmitIntent {
-  const submitActions = (addOnManifestForTask(task)?.actions ?? [])
-    .filter((action) => action.actionKind === "submit_signal");
-  const primary = submitActions.find((action) => action.primary) ?? submitActions[0];
-  return taskSubmitIntentForAction(primary, task);
-}
-
-/**
- * manifest 驱动路径的提交意图（与 zhixu-store taskSubmitIntent 同源同序）：
- * 动作显式声明优先；未声明时按能力插件类型推导——dispute_material 的
- * 未声明动作不得兜底成 confirm_stage，否则争议任务会以确认口径提交。
- */
-export function taskSubmitIntentForAction(
-  action: Pick<ParticipantAddOnManifestActionDTO, "intent"> | undefined,
-  task: Pick<ProductTaskDTO, "capabilityPlugin">
-): TaskSubmitIntent {
-  if (action?.intent) {
-    return action.intent;
-  }
-  const pluginKind = task.capabilityPlugin?.pluginKind;
-  return pluginKind ? submitIntentByPluginKind[pluginKind] ?? "confirm_stage" : "confirm_stage";
-}
+// 提交意图推导单源（治理审计 §1.1 P1-1）：TaskSubmitIntent 词表、
+// submitIntentByPluginKind 兜底映射与 manifest/插件类型推导以
+// @uvp-eth/product-dto 为唯一出处（此处与 zhixu-store workbenchSupport
+// 原先各持一份逐字镜像）。
+export { taskSubmitIntent, taskSubmitIntentForAction } from "@uvp-eth/product-dto";
+export type { TaskSubmitIntent } from "@uvp-eth/product-dto";
 
 export function taskRequiredInputsFromCapability(
   task: ProductTaskDTO

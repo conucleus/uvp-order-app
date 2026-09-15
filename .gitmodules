@@ -1,0 +1,4 @@
+[submodule "app/src/shared"]
+	path = app/src/shared
+	url = git@github.com:conucleus/frontend-shared.git
+	branch = dev

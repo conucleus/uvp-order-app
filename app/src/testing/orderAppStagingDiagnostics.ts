@@ -1,5 +1,5 @@
 import type { ProductTaskDTO } from "@uvp-eth/product-dto";
-import { filterParticipantTasksForWallet, taskWalletHint } from "../tasks/taskStatus";
+import { filterParticipantTasksForWallet, taskWalletHint } from "../tasks/model/taskStatus";
 import { orderAppFullModeRequiredEvents } from "./orderAppFullModeGate";
 
 export interface StagingTaskWalletDiagnostic {

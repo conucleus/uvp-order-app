@@ -19,5 +19,15 @@
     "jsx": "react-jsx",
     "types": ["vite/client", "node"]
   },
-  "include": ["src", "e2e"]
+  "include": ["src", "e2e"],
+  "exclude": [
+    // 嵌套子模块 frontend-shared（app/src/shared）的另两轨面不由本链端
+    // 宿主 typecheck：web/（Vue SFC + vue 依赖）与 miniprogram/（wx 类型）
+    // 属于 miniprogram 工作区的四个云宿主；tests/（vitest specs）同理。
+    // chain/ 与其消费的 contracts/domain 在本仓严格设置下检查。
+    "src/shared/web",
+    "src/shared/miniprogram",
+    "src/shared/tests",
+    "src/shared/vitest.config.ts"
+  ]
 }

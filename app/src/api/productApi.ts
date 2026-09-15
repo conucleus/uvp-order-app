@@ -1,11 +1,32 @@
 import {
   type ChainProofRowDTO,
+  type EvidenceProofDTO,
+  type PrepareProductTaskSubmitInput,
   type ProductExecutorPatchMode,
   type ProductOrderDTO,
   type ProductParticipantProfileDTO,
-  type ProductTaskDTO
+  type ProductSubmissionDTO,
+  type ProductSubmissionStatus,
+  type ProductSubmitIntent,
+  type ProductTaskDTO,
+  type SubmitProductTaskInput
 } from "@uvp-eth/product-dto";
 import type { ProductSubmitTypedData } from "@uvp-eth/executor-kit/participant";
+import { deadlineSortMs } from "../tasks/model/taskUtils";
+
+// 写侧契约单源（治理审计 §1.1 P1-1）：提交意图、prepare/submit 请求体、
+// 提交回执与证据证明以 @uvp-eth/product-dto 为唯一出处（形状按
+// uvp-chain-services 服务端真身裁定——statusLabel 与 EvidenceProofDTO 的
+// evidenceId/payloadRef/storageURI 服务端恒产出，为必填），本模块只做
+// transport，不再手写镜像。
+export type {
+  EvidenceProofDTO,
+  PrepareProductTaskSubmitInput,
+  ProductSubmissionDTO,
+  ProductSubmissionStatus,
+  ProductSubmitIntent,
+  SubmitProductTaskInput
+} from "@uvp-eth/product-dto";
 
 type Hex = `0x${string}`;
 type Fetcher = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
@@ -56,8 +77,8 @@ export interface ProductApiClient {
    * 判定会话失效时清除）。返回是否真的改变了客户端持有的 token。
    */
   restoreSessionToken(token: string | undefined): boolean;
-  prepareTaskSubmit(taskId: string, input: PrepareTaskSubmitInput): Promise<PreparedTaskSubmitDTO>;
-  submitTask(taskId: string, input: SubmitTaskInput): Promise<ProductSubmissionDTO>;
+  prepareTaskSubmit(taskId: string, input: PrepareProductTaskSubmitInput): Promise<PreparedTaskSubmitDTO>;
+  submitTask(taskId: string, input: SubmitProductTaskInput): Promise<ProductSubmissionDTO>;
   prepareStageExecutorPatch(taskId: string, input: PrepareStageExecutorPatchInput): Promise<PreparedStageExecutorPatchDTO>;
   submitStageExecutorPatch(taskId: string, input: SubmitStageExecutorPatchInput): Promise<StageExecutorPatchSubmissionDTO>;
   prepareStageResourcePatch(taskId: string, input: PrepareStageResourcePatchInput): Promise<PreparedStageResourcePatchDTO>;
@@ -68,7 +89,7 @@ export interface ProductApiClient {
 
 export interface ParticipantQueryInput {
   readonly walletAddress?: string | undefined;
-  /** 一次性邀请令牌：预览（GET /product/invites/:id）与 accept/reject 一样按 token 哈希比对，缺失 403。 */
+  /** 一次性邀请令牌：预览（POST /product/invites/:id body）与 accept/reject 一样按 token 哈希比对，缺失即拒。 */
   readonly token?: string | undefined;
 }
 
@@ -160,20 +181,6 @@ export interface ProductInvitePreviewDTO {
   };
 }
 
-export type ProductSubmitIntent = "confirm_stage" | "reject_stage" | "raise_dispute" | "resolve_dispute";
-
-export interface PrepareTaskSubmitInput {
-  readonly evidenceIds: readonly string[];
-  readonly walletAddress: string;
-  readonly intent: ProductSubmitIntent;
-}
-
-export interface SubmitTaskInput {
-  readonly prepareId: string;
-  readonly signature: string;
-  readonly walletAddress: string;
-}
-
 export interface PrepareStageExecutorPatchInput {
   readonly selectorWallet: string;
   readonly targetStageId: string;
@@ -231,30 +238,6 @@ export interface PreparedTaskSubmitDTO {
   };
   readonly typedData: ProductSubmitTypedData;
   readonly evidence: readonly unknown[];
-}
-
-export type ProductSubmissionStatus =
-  | "prepared"
-  | "signature_received"
-  | "broadcasting"
-  | "submitted"
-  | "indexing"
-  | "confirmed"
-  | "failed"
-  | "expired"
-  | "replaced";
-
-export interface ProductSubmissionDTO {
-  readonly submissionId: string;
-  readonly prepareId: string;
-  readonly taskId: string;
-  readonly orderId: string;
-  readonly status: ProductSubmissionStatus;
-  readonly txHash?: Hex;
-  readonly blockNumber?: string;
-  readonly errorCode?: string;
-  readonly retryable: boolean;
-  readonly proofRows: readonly ChainProofRowDTO[];
 }
 
 export interface PreparedStageExecutorPatchDTO {
@@ -384,32 +367,26 @@ export interface EvidenceUploadResponseDTO {
   readonly payloadRef?: string;
 }
 
-export interface EvidenceProofDTO {
-  readonly evidenceId?: string;
-  readonly payloadHash: Hex;
-  readonly contentHash: Hex;
-  readonly metadataHash: Hex;
-  readonly payloadRef?: string;
-  readonly boundSignalTxHash?: Hex;
-  readonly blockNumber?: string;
-  readonly submitter?: string;
-  readonly verificationStatus: "unbound" | "matched" | "mismatch" | "missing_file";
-}
-
 export class ProductApiError extends Error {
   override readonly name = "ProductApiError";
   /** 服务端错误体的 `error` 短码（如 wallet_identity_required）；非 JSON 体为空。 */
   readonly errorCode?: string;
+  /** 服务端错误体原文：message 已提取为人类可读文案时保留原始 JSON 供展开核对。 */
+  readonly bodyText?: string | undefined;
 
   constructor(
     readonly status: number,
     readonly endpoint: string,
     message: string,
-    errorCode?: string
+    errorCode?: string,
+    bodyText?: string
   ) {
     super(message);
     if (errorCode !== undefined) {
       this.errorCode = errorCode;
+    }
+    if (bodyText !== undefined) {
+      this.bodyText = bodyText;
     }
   }
 }
@@ -537,8 +514,14 @@ class BrowserProductApiClient implements ProductApiClient {
   }
 
   async previewInvite(inviteId: string, input: ParticipantQueryInput = {}): Promise<ProductInvitePreviewDTO> {
-    return await this.getJson<ProductInvitePreviewDTO>(
-      participantPath(`/product/invites/${encodeURIComponent(inviteId)}`, input)
+    // 与 accept/reject 同一请求形态：token 是与 accept 同权的一次性凭据，
+    // 走 body 而不是 URL query（query 会随 URL/Referer/代理日志留痕）；
+    // walletAddress 仍走 query 声明通道，由服务端与会话锚定地址核验。
+    return await this.requestJson<ProductInvitePreviewDTO>(
+      "POST",
+      participantPath(`/product/invites/${encodeURIComponent(inviteId)}`, { walletAddress: input.walletAddress }),
+      { token: input.token },
+      this.config.timeoutMs
     );
   }
 
@@ -595,14 +578,14 @@ class BrowserProductApiClient implements ProductApiClient {
     };
   }
 
-  async prepareTaskSubmit(taskId: string, input: PrepareTaskSubmitInput): Promise<PreparedTaskSubmitDTO> {
+  async prepareTaskSubmit(taskId: string, input: PrepareProductTaskSubmitInput): Promise<PreparedTaskSubmitDTO> {
     return await this.postJson<PreparedTaskSubmitDTO>(
       `/product/tasks/${encodeURIComponent(taskId)}/prepare-submit`,
       input
     );
   }
 
-  async submitTask(taskId: string, input: SubmitTaskInput): Promise<ProductSubmissionDTO> {
+  async submitTask(taskId: string, input: SubmitProductTaskInput): Promise<ProductSubmissionDTO> {
     return await this.postJson<ProductSubmissionDTO>(`/product/tasks/${encodeURIComponent(taskId)}/submit`, input);
   }
 
@@ -706,17 +689,29 @@ class BrowserProductApiClient implements ProductApiClient {
     if (!response.ok) {
       const text = await responseText(response);
       // 服务端错误体是 {error: 短码, message?}：短码进 errorCode 供界面
-      // 分支（如钱包会话缺失切换登录入口），文本整体留作展示。
+      // 分支（如钱包会话缺失切换登录入口）；message 提取为用户可读的
+      // 错误文案，原始体留 bodyText 供展开核对——原始 JSON 直出给用户
+      // 既不可读也不诚实。
       let errorCode: string | undefined;
+      let serverMessage: string | undefined;
       try {
-        const parsed = JSON.parse(text) as { readonly error?: unknown };
+        const parsed = JSON.parse(text) as { readonly error?: unknown; readonly message?: unknown };
         if (typeof parsed.error === "string") {
           errorCode = parsed.error;
+        }
+        if (typeof parsed.message === "string" && parsed.message.trim().length > 0) {
+          serverMessage = parsed.message;
         }
       } catch {
         // 非 JSON 错误体只有文本可用。
       }
-      throw new ProductApiError(response.status, pathname, text, errorCode);
+      throw new ProductApiError(
+        response.status,
+        pathname,
+        serverMessage ?? text,
+        errorCode,
+        serverMessage !== undefined ? text : undefined
+      );
     }
     try {
       return await response.json() as TResponse;
@@ -775,7 +770,9 @@ function sortTasks(tasks: readonly ProductTaskDTO[]): readonly ProductTaskDTO[] 
   };
   return [...tasks].sort((left, right) =>
     statusRank[left.status] - statusRank[right.status] ||
-    left.deadline.localeCompare(right.deadline) ||
+    // deadline 排序与收件箱/任务状态同一 UTC 解析口径（deadlineSortMs）：
+    // localeCompare 的字符串序在混合格式/时区符下与时间序漂移。
+    deadlineSortMs(left.deadline) - deadlineSortMs(right.deadline) ||
     left.taskId.localeCompare(right.taskId)
   );
 }

@@ -1,8 +1,4 @@
-export { TaskInbox } from "./TaskInbox";
-export {
-  TaskPluginHost,
-  type PreparedTaskSubmit,
-  type ProductSubmission,
-  type SubmitPreparedInput
-} from "./TaskPluginHost";
-export type { PrepareSubmitInput } from "./pluginRuntime";
+export { TaskInbox } from "./components/TaskInbox";
+export { TaskPluginHost } from "./TaskPluginHost";
+export type { PreparedTaskSubmit, ProductSubmission, SubmitPreparedInput } from "./submission/types";
+export type { PrepareSubmitInput } from "./plugins/pluginRuntime";

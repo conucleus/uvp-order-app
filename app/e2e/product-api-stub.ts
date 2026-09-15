@@ -12,7 +12,7 @@ import {
   STAGE_EXECUTOR_PATCH_DOMAIN_NAME,
   STAGE_EXECUTOR_PATCH_DOMAIN_VERSION
 } from "@uvp-eth/executor-kit/participant";
-import type { ProductTaskWithAddOns, SelectableTargetStageDTO } from "../src/tasks/addOnTypes";
+import type { ProductTaskWithAddOns, SelectableTargetStageDTO } from "../src/tasks/model/addOnTypes";
 
 export type { ProductTaskWithAddOns };
 
@@ -743,6 +743,9 @@ export async function installProductApiStub(page: Page, options: StubOptions = {
           payloadHash,
           contentHash: "0x1111111111111111111111111111111111111111111111111111111111111111",
           metadataHash: "0x3333333333333333333333333333333333333333333333333333333333333333",
+          // storageURI 与 evidenceId/payloadRef 同为服务端 getProof 恒产出
+          //（product-dto 写侧契约必填），桩按同一口径回显。
+          storageURI: `stub-offchain://${evidenceId}`,
           payloadRef: `stub-proof://${payloadHash.slice(2)}`,
           verificationStatus: "matched",
           blockNumber: "18,735,002",
@@ -1028,6 +1031,9 @@ export async function installProductApiStub(page: Page, options: StubOptions = {
         taskId: task.taskId,
         orderId: task.orderId,
         status,
+        // statusLabel 为服务端 withSubmissionReconcileDefaults 恒兜底产出
+        //（product-dto 写侧契约必填），桩按服务端词表回显。
+        statusLabel: status === "confirmed" ? "已确认" : "同步中",
         txHash: status === "confirmed" ? "0x4444444444444444444444444444444444444444444444444444444444444444" : undefined,
         blockNumber: status === "confirmed" ? "18,735,004" : undefined,
         retryable: status !== "confirmed",

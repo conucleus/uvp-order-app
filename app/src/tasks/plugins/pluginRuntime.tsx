@@ -14,7 +14,7 @@ import {
   selectableTargetsForTask,
   targetStageLabel,
   type ParticipantAddOnKind
-} from "./addOnTypes";
+} from "../model/addOnTypes";
 import {
   taskAddOnKind,
   taskAddOnLabel,
@@ -24,8 +24,8 @@ import {
   taskRequiredInputsFromCapability,
   taskSubmitIntent,
   type TaskSubmitIntent
-} from "./taskPresentation";
-import { parseEvidenceIds } from "./taskUtils";
+} from "../model/taskPresentation";
+import { parseEvidenceIds } from "../model/taskUtils";
 
 export type { TaskSubmitIntent };
 
@@ -53,6 +53,12 @@ export interface TaskPluginRenderInput {
   readonly state: TaskPluginState;
   readonly onValueChange: (inputId: string, value: string) => void;
   readonly onConfirmationChange: (inputId: string, checked: boolean) => void;
+  /**
+   * 凭证面板持有提交边界（任务有 evidenceSpec/资源槽位）时，插件表单的
+   * 值不再进入任何 prepare 载荷：继续渲染可编辑输入是假参与面，只保留
+   * 信息展示（要求/权限/履约者证明等）。
+   */
+  readonly submissionOwnedByEvidenceFlow?: boolean | undefined;
 }
 
 export interface TaskPlugin {
@@ -268,7 +274,8 @@ function PluginFields({
   task,
   state,
   onValueChange,
-  onConfirmationChange
+  onConfirmationChange,
+  submissionOwnedByEvidenceFlow
 }: TaskPluginRenderInput & { readonly spec: TaskPluginSpec }) {
   const plugin = pluginForKind(spec.kind);
   const presentation = pluginPresentationForTask(task, plugin);
@@ -363,18 +370,20 @@ function PluginFields({
         </div>
       ) : null}
 
-      <div className="plugin-inputs">
-        {requiredInputs.map((input) => (
-          <TaskPluginInput
-            input={input}
-            key={input.inputId}
-            value={state.values[input.inputId] ?? ""}
-            checked={Boolean(state.confirmations[input.inputId])}
-            onValueChange={onValueChange}
-            onConfirmationChange={onConfirmationChange}
-          />
-        ))}
-      </div>
+      {submissionOwnedByEvidenceFlow ? null : (
+        <div className="plugin-inputs">
+          {requiredInputs.map((input) => (
+            <TaskPluginInput
+              input={input}
+              key={input.inputId}
+              value={state.values[input.inputId] ?? ""}
+              checked={Boolean(state.confirmations[input.inputId])}
+              onValueChange={onValueChange}
+              onConfirmationChange={onConfirmationChange}
+            />
+          ))}
+        </div>
+      )}
 
       <p className="confirmation-copy">{presentation.confirmationCopy}</p>
     </section>

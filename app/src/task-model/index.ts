@@ -11,7 +11,7 @@ export {
   proofSummaryRowsForTask,
   signalContainerForTask,
   type TaskSignalContainerSummary
-} from "../tasks/signalContainer";
+} from "../tasks/model/signalContainer";
 export {
   taskAddOnKind,
   taskAddOnLabel,
@@ -23,11 +23,11 @@ export {
   taskSubmitIntent,
   type TaskExecutorDisplay,
   type TaskSubmitIntent
-} from "../tasks/taskPresentation";
+} from "../tasks/model/taskPresentation";
 export {
   resourceRequirementDisplays,
   type EffectiveFileResourceDisplay
-} from "../tasks/addOnTypes";
+} from "../tasks/model/addOnTypes";
 export {
   cleanString,
   parseEvidenceIds,
@@ -37,4 +37,4 @@ export {
   stagePatchSignExpectation,
   submitSignExpectation,
   type SignDomainEnv
-} from "../tasks/taskUtils";
+} from "../tasks/model/taskUtils";
