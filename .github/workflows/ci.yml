@@ -1,0 +1,94 @@
+name: ci
+
+on:
+  pull_request:
+    branches:
+      - dev
+      - main
+  push:
+    branches:
+      - dev
+      - main
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  web:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      # 嵌套 frontend-shared（app/src/shared）是跨仓私有库，默认
+      # GITHUB_TOKEN 无权限；checkout 模式照搬伞仓 ci.yml。
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          path: uvp-order-app
+          submodules: recursive
+          token: ${{ secrets.CI_SUBMODULE_TOKEN || github.token }}
+
+      # app 依赖 @uvp-eth/executor-kit / product-dto / protocol-bindings
+      # （均 workspace:*），本仓 workspace 不含它们——姊妹仓检出 + 合成
+      # 安装根。跨仓私有 checkout 用伞仓 CI_SUBMODULE_TOKEN 模式；ref 用
+      # 默认分支，同 uvp-core 仓既有 ci.yml 检出姊妹仓的形态。
+      - name: Checkout uvp-protocol (product-dto, protocol-bindings)
+        uses: actions/checkout@v4
+        with:
+          repository: conucleus/uvp-protocol
+          path: uvp-protocol
+          fetch-depth: 1
+          token: ${{ secrets.CI_SUBMODULE_TOKEN || github.token }}
+
+      - name: Checkout uvp-executor-kit (executor-kit)
+        uses: actions/checkout@v4
+        with:
+          repository: conucleus/uvp-executor-kit
+          path: uvp-executor-kit
+          fetch-depth: 1
+          token: ${{ secrets.CI_SUBMODULE_TOKEN || github.token }}
+
+      # 复现伞仓 workspace 形态：本 app + 跨仓 workspace 依赖包合成一个
+      # 安装根；命令仍照伞仓对该包的跑法（typecheck/test/build）。
+      - name: Compose workspace root
+        run: |
+          cat > pnpm-workspace.yaml <<'EOF'
+          packages:
+            - "uvp-order-app/app"
+            - "uvp-protocol/packages/product-dto"
+            - "uvp-protocol/packages/protocol-bindings"
+            - "uvp-executor-kit/package"
+          EOF
+          printf '{"name":"ci-workspace","private":true,"packageManager":"pnpm@9.15.0"}' > package.json
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9.15.0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          # 子仓无 pnpm-lock.yaml（锁定在伞仓根），不能开 pnpm 缓存。
+
+      - name: Install dependencies
+        # 伞仓用 --frozen-lockfile；子仓无 lockfile，显式 --no-frozen-lockfile。
+        run: pnpm install --no-frozen-lockfile
+        timeout-minutes: 5
+
+      - name: Typecheck
+        run: pnpm --filter @uvp-eth/order-app run typecheck
+        timeout-minutes: 8
+
+      # app 级 test（tsx 单测）＝伞仓 "pnpm -r run test" 对本仓跑的脚本。
+      - name: Test
+        run: pnpm --filter @uvp-eth/order-app run test
+        timeout-minutes: 10
+
+      - name: Build
+        run: pnpm --filter @uvp-eth/order-app run build
+        timeout-minutes: 12
