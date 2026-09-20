@@ -77,6 +77,25 @@ test.describe("UVP Order App production readiness negatives", () => {
     await expect(page.getByRole("button", { name: "使用钱包签名并提交" })).toBeEnabled();
   });
 
+  test("negative: mismatched evidence proof blocks the wallet signature before signing", async ({ page }) => {
+    // 凭证核验时机前移：坏凭证（proof mismatch）必须在触发钱包签名前拦下，
+    // 不是等签名提交上链后才在证明区暴露。
+    await installProductApiStub(page, { task: customsEvidenceTask(), evidenceProofStatus: "mismatch" });
+    await page.goto("/");
+
+    await page.getByLabel("签名钱包").fill(participantWallet);
+    await uploadCustomsPdf(page);
+    await expect(page.getByText("上传完成，可用于提交")).toBeVisible();
+    await page.getByRole("button", { name: "准备提交" }).click();
+    await expect(page.getByText("预检编号")).toBeVisible();
+    await page.getByRole("button", { name: "使用钱包签名并提交" }).click();
+
+    await expect(page.getByRole("alert").getByText("凭证核验异常（内容与指纹不符或文件缺失），请重新上传：报关单 PDF")).toBeVisible();
+    // 坏凭证被拦：没有签名、没有提交、没有链上确认
+    await expect(page.getByText("提交已确认")).toHaveCount(0);
+    await expect(page.getByText("提交已收到，等待索引确认")).toHaveCount(0);
+  });
+
   test("negative: missing injected wallet fails closed", async ({ page }) => {
     await installProductApiStub(page, { task: customsEvidenceTask(), walletMode: "missing" });
     await page.goto("/");

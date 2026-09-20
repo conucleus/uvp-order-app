@@ -10,7 +10,7 @@ import {
   WalletCards,
   XCircle
 } from "lucide-react";
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { ProductOrderDTO, ProductTaskDTO } from "@uvp-eth/product-dto";
 import type {
   EvidenceProofDTO,
@@ -41,7 +41,8 @@ import {
   signalContainerForTask,
   taskPrimaryActionLabel,
   taskSubmitIntent,
-  submitSignExpectation
+  submitSignExpectation,
+  useTaskScopeGuard
 } from "../task-model";
 import { shortWallet } from "../auth/participant";
 import "./evidence.css";
@@ -95,12 +96,11 @@ export function EvidencePanel({
   const [fieldSnapshots, setFieldSnapshots] = useState<Readonly<Record<string, string>>>({});
   const [signingWallet, setSigningWallet] = useState("");
   const [prepareState, setPrepareState] = useState<PrepareState>({ status: "idle" });
-  // 任务作用域守卫（zhixu-store 同款）：慢网切任务后，在途上传/提交不得写入新任务。
-  const taskScopeKey = task ? `${task.orderId}:${task.taskId}:${task.stageId}` : "none";
-  const taskScopeRef = useRef(taskScopeKey);
-  useLayoutEffect(() => {
-    taskScopeRef.current = taskScopeKey;
-  }, [taskScopeKey]);
+  // 任务作用域守卫（zhixu-store useTaskSubmissionFlow 同款原语）：语义键
+  // （orderId:taskId:stageId）在 A→B→A 回切时会复用，按裸键比较的在途
+  // 上传/提交续作会"键又对上了"并覆盖同槽位；代数随键变化单调推进，
+  // 慢网切任务后旧作用域的续作一律丢弃。
+  const { scopeKey: taskScopeKey, taskScopeRef } = useTaskScopeGuard(task);
   // 同步互斥（zhixu-store submitInflightRef 同款）：prepare→签名→提交是长
   // 链路，按钮的 pending 禁用要等状态落盘+重渲染才生效，同步 ref 挡住
   // 重渲染前的第二次点击；ref 在单次请求收尾即释放，防重复提交的终态
@@ -281,6 +281,35 @@ export function EvidencePanel({
     try {
       if (!prepared.raw) {
         throw new Error("参与者服务未返回可签名内容。");
+      }
+      // 凭证核验前移（zhixu-store 上传即核验同口径）：签名前先取回核验
+      // 记录，坏凭证（mismatch/missing_file）与核验状态未知（拉取失败）的
+      // 槽位在触发钱包签名前拦下——签名提交之后才发现只能事后补救。
+      const preSignVerification = await refreshEvidenceProofs(actions, uploadedEvidence);
+      if (taskScopeRef.current !== requestScopeKey) {
+        return;
+      }
+      setCaptures((current) => mergeProofCaptures(current, preSignVerification.evidence));
+      const quarantinedLabels = preSignVerification.evidence
+        .filter((item) => item.status === "quarantined")
+        .map((item) => item.businessLabel ?? item.requirement.label);
+      if (quarantinedLabels.length > 0) {
+        setPrepareState({
+          status: "failed",
+          message: `凭证核验异常（内容与指纹不符或文件缺失），请重新上传：${quarantinedLabels.join("、")}`,
+          prepared,
+          terminal: false
+        });
+        return;
+      }
+      if (preSignVerification.failedChecks > 0) {
+        setPrepareState({
+          status: "failed",
+          message: "凭证核验状态未知（未取到核验记录），请稍后重试或重新上传后再提交。",
+          prepared,
+          terminal: false
+        });
+        return;
       }
       const signature = await actions.signProductSubmit({
         typedData: prepared.raw.typedData,

@@ -46,7 +46,8 @@ export interface ProductApiSummaryDTO {
   readonly orderCount: number;
   readonly openTaskCount: number;
   readonly blockedTaskCount: number;
-  readonly completedTaskCount: number;
+  /** 已提交待索引的任务数：服务端任务词表没有完成态，这是可真实统计的终向指标。 */
+  readonly submittedTaskCount: number;
 }
 
 export interface ProductHomeData {
@@ -474,7 +475,11 @@ class BrowserProductApiClient implements ProductApiClient {
 
   async loadParticipantHome(input: ParticipantQueryInput = {}): Promise<ProductHomeData> {
     const [meResponse, ordersResponse, tasksResponse] = await Promise.all([
-      this.getJson<{ readonly participant: ProductParticipantProfileDTO; readonly summary?: ProductApiSummaryDTO }>(
+      // /product/me 的 summary.completedTaskCount 统计的是服务端任务词表
+      // 永不产出的完成态（恒 0），summary 不作为数据源，只取 participant；
+      // 摘要与待办列表同源（同一 /product/me/tasks 投影）本地计算，
+      // 避免两处口径漂移。
+      this.getJson<{ readonly participant: ProductParticipantProfileDTO }>(
         participantPath("/product/me", input)
       ),
       this.getJson<{ readonly participant?: ProductParticipantProfileDTO; readonly orders: readonly ProductOrderDTO[] }>(
@@ -489,7 +494,7 @@ class BrowserProductApiClient implements ProductApiClient {
     const tasks = sortTasks(tasksResponse.tasks);
     return {
       participant: meResponse.participant,
-      summary: meResponse.summary ?? summarizeParticipantHome(orders, tasks),
+      summary: summarizeParticipantHome(orders, tasks),
       orders,
       tasks,
       source: {
@@ -756,20 +761,29 @@ function summarizeParticipantHome(
     orderCount: orders.length,
     openTaskCount: tasks.filter((task) => task.status === "open").length,
     blockedTaskCount: tasks.filter((task) => task.status === "blocked").length,
-    // submitted 是等待索引的中间态，不计入已完成（与 taskStatus 口径一致）。
-    completedTaskCount: tasks.filter((task) => task.status === "done").length
+    // submitted 是等待索引的中间态，不是完成（与 taskStatus 口径一致）；
+    // 指标按"已提交"如实命名，不冒充已完成。
+    submittedTaskCount: tasks.filter((task) => task.status === "submitted").length
   };
 }
 
 function sortTasks(tasks: readonly ProductTaskDTO[]): readonly ProductTaskDTO[] {
-  const statusRank: Readonly<Record<ProductTaskDTO["status"], number>> = {
-    open: 0,
-    blocked: 1,
-    submitted: 2,
-    done: 3
+  // 服务端任务词表只有 open/blocked/submitted；排序口径与 taskStatus 的
+  // 展示序一致（可处理 → 受阻 → 等待索引）。
+  const statusRank = (status: ProductTaskDTO["status"]): number => {
+    switch (status) {
+      case "open":
+        return 0;
+      case "blocked":
+        return 1;
+      case "submitted":
+        return 2;
+      default:
+        return 3;
+    }
   };
   return [...tasks].sort((left, right) =>
-    statusRank[left.status] - statusRank[right.status] ||
+    statusRank(left.status) - statusRank(right.status) ||
     // deadline 排序与收件箱/任务状态同一 UTC 解析口径（deadlineSortMs）：
     // localeCompare 的字符串序在混合格式/时区符下与时间序漂移。
     deadlineSortMs(left.deadline) - deadlineSortMs(right.deadline) ||

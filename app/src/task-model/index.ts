@@ -38,3 +38,8 @@ export {
   submitSignExpectation,
   type SignDomainEnv
 } from "../tasks/model/taskUtils";
+export {
+  // 任务作用域守卫（在途上传/提交的跨任务续作丢弃）：evidence 面板经此
+  // 公共边界取用，不直接依赖 tasks 内部模块。
+  useTaskScopeGuard
+} from "../tasks/model/taskScope";

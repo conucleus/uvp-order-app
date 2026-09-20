@@ -59,9 +59,9 @@ interface OrderTimelineEvent {
 
 interface SlaRow {
   readonly task: ProductTaskDTO;
-  readonly status: "ready" | "near_deadline" | "overdue" | "blocked" | "indexing" | "confirmed";
+  readonly status: "ready" | "near_deadline" | "overdue" | "blocked" | "indexing";
   readonly label: string;
-  readonly tone: "info" | "warn" | "danger" | "ok";
+  readonly tone: "info" | "warn" | "danger";
   readonly blockedBy: string;
   readonly escalation: string;
 }
@@ -340,11 +340,8 @@ function buildSlaRows(tasks: readonly ProductTaskDTO[]): readonly SlaRow[] {
 }
 
 function slaStatus(task: ProductTaskDTO): SlaRow["status"] {
-  // submitted 只是等待索引的中间态，不再落入 confirmed 绿勾；
-  // 只有链上 done 才按已确认呈现（与 taskStatus/ProofPanel 口径一致）。
-  if (task.status === "done") {
-    return "confirmed";
-  }
+  // 服务端任务词表只有 open/submitted/blocked：submitted 只是等待索引的
+  // 中间态，不落入 confirmed 绿勾（与 taskStatus/ProofPanel 口径一致）。
   if (task.status === "submitted") {
     return "indexing";
   }
@@ -373,8 +370,6 @@ function slaLabel(status: SlaRow["status"]): string {
       return "Blocked";
     case "indexing":
       return "等待索引确认";
-    case "confirmed":
-      return "Confirmed";
   }
 }
 
@@ -386,8 +381,6 @@ function slaTone(status: SlaRow["status"]): SlaRow["tone"] {
     case "near_deadline":
     case "indexing":
       return "warn";
-    case "confirmed":
-      return "ok";
     case "ready":
       return "info";
   }
@@ -403,8 +396,6 @@ function escalationHint(status: SlaRow["status"]): string {
       return "优先完成当前责任，必要时联系订单运营";
     case "indexing":
       return "已提交，等待链上索引确认；确认前不会显示为完成";
-    case "confirmed":
-      return "等待后续阶段或链上索引更新";
     case "ready":
       return "由责任方使用授权钱包提交";
   }
@@ -412,8 +403,6 @@ function escalationHint(status: SlaRow["status"]): string {
 
 function slaIcon(status: SlaRow["status"]) {
   switch (status) {
-    case "confirmed":
-      return <CheckCircle2 aria-hidden="true" />;
     case "blocked":
     case "overdue":
       return <XCircle aria-hidden="true" />;

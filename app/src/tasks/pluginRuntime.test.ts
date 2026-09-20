@@ -752,10 +752,9 @@ describe("participant task inbox helpers", () => {
     assert.equal(filterResult.filteredOutCount, 1);
   });
 
-  it("sorts ready overdue, ready, blocked, submitted, failed, then confirmed tasks", () => {
+  it("sorts ready overdue, ready, blocked, submitted, then failed tasks", () => {
     const now = new Date("2026-04-29T12:00:00Z");
     const ordered = sortParticipantTasks([
-      taskFixture("delivery_update", { taskId: "done", status: "done", deadline: "2026-04-20 18:00" }),
       taskFixture("delivery_update", { taskId: "ready", status: "open", deadline: "2026-05-01 18:00" }),
       taskFixture("delivery_update", { taskId: "overdue", status: "open", deadline: "2026-04-20 18:00" }),
       taskFixture("delivery_update", { taskId: "submitted", status: "submitted", deadline: "2026-04-21 18:00" }),
@@ -768,23 +767,9 @@ describe("participant task inbox helpers", () => {
       "ready",
       "blocked",
       "submitted",
-      "failed",
-      "done"
+      "failed"
     ]);
     assert.equal(taskDisplay(ordered[0]!, now).label, "逾期待办");
-  });
-
-  it("keeps done tasks confirmed even when a stale errorCode lingers from an earlier failed attempt", () => {
-    const doneWithResidualError = taskFixture("delivery_update", {
-      taskId: "done-residual-error",
-      status: "done",
-      errorCode: "EARLIER_ATTEMPT_FAILED"
-    });
-
-    const display = taskDisplay(doneWithResidualError);
-
-    assert.equal(display.state, "confirmed");
-    assert.equal(display.label, "已确认");
   });
 
   it("renders submitted tasks as waiting-for-indexing, never as confirmed", () => {

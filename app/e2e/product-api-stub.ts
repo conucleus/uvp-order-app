@@ -28,6 +28,8 @@ interface StubOptions {
   readonly task?: ProductTaskDTO;
   readonly submitStatus?: "indexing" | "confirmed";
   readonly walletMode?: "available" | "missing" | "reject";
+  /** 凭证核验记录的核验态：mismatch/missing_file 驱动签名前的核验闸负向路径。 */
+  readonly evidenceProofStatus?: "matched" | "unbound" | "mismatch" | "missing_file";
 }
 
 const participant: ProductParticipantProfileDTO = {
@@ -697,8 +699,8 @@ export async function installProductApiStub(page: Page, options: StubOptions = {
           orderCount: orders.length,
           openTaskCount: tasks.filter((item) => item.status === "open").length,
           blockedTaskCount: tasks.filter((item) => item.status === "blocked").length,
-          // submitted 是等待索引的中间态，不计入已完成。
-          completedTaskCount: tasks.filter((item) => item.status === "done").length
+          // 服务端任务词表没有完成态；已提交（等待索引）是可真实统计的终向指标。
+          submittedTaskCount: tasks.filter((item) => item.status === "submitted").length
         }
       });
       return;
@@ -747,7 +749,7 @@ export async function installProductApiStub(page: Page, options: StubOptions = {
           //（product-dto 写侧契约必填），桩按同一口径回显。
           storageURI: `stub-offchain://${evidenceId}`,
           payloadRef: `stub-proof://${payloadHash.slice(2)}`,
-          verificationStatus: "matched",
+          verificationStatus: options.evidenceProofStatus ?? "matched",
           blockNumber: "18,735,002",
           submitter: participantWallet
         }

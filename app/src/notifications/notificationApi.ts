@@ -250,20 +250,9 @@ export function deriveOrderAppNotifications(input: {
     const sla = slaStateForTask(task, input.now);
     const base = baseNotification(task, order);
 
-    // done 才是链上确认的完成态；submitted 仍是等待索引的中间态，
-    // 通知口径与 taskStatus/ProofPanel 一致，不提前宣布"提交已确认"。
-    if (task.status === "done") {
-      notifications.push({
-        ...base,
-        notificationId: localNotificationId("submission_confirmed", task.taskId),
-        kind: "submission_confirmed",
-        severity: "success",
-        eventLabel: "提交已确认",
-        message: `${task.stageName} 已确认完成，继续关注后续订单状态。`
-      });
-      continue;
-    }
-
+    // 服务端任务词表没有完成态：submitted 仍是等待索引的中间态，本地
+    // 投影只产生"等待索引确认"通知，不提前宣布"提交已确认"（口径与
+    // taskStatus/ProofPanel 一致；submission_confirmed 只来自服务端通知面）。
     if (task.status === "submitted") {
       notifications.push({
         ...base,
@@ -525,8 +514,35 @@ function readNotificationIds(session: ParticipantSession): ReadonlyMap<string, s
   }
 }
 
+/** 匿名会话的已读桶 id：落 sessionStorage（每标签页独立、刷新保留）。 */
+const ANONYMOUS_READ_BUCKET_KEY = "uvp-order-app:anonymous-notification-bucket";
+let inMemoryAnonymousBucket: string | undefined;
+
+/**
+ * 无钱包会话没有稳定身份，但匿名已读不能共桶：同一浏览器上的不同匿名
+ * 访客会互相吃掉未读。桶 id 按标签页生成（sessionStorage），存储不可用
+ * 时退化为本次页面加载的内存 id——宁可桶多，不可共享。
+ */
+function anonymousReadBucket(): string {
+  if (typeof window === "undefined") {
+    return "anonymous-headless";
+  }
+  try {
+    const existing = window.sessionStorage.getItem(ANONYMOUS_READ_BUCKET_KEY);
+    if (existing) {
+      return existing;
+    }
+    const created = `anon-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+    window.sessionStorage.setItem(ANONYMOUS_READ_BUCKET_KEY, created);
+    return created;
+  } catch {
+    inMemoryAnonymousBucket ??= `anon-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+    return inMemoryAnonymousBucket;
+  }
+}
+
 function localReadStateKey(session: ParticipantSession): string {
-  return `uvp-order-app:notification-read:${session.walletAddress?.toLowerCase() ?? "anonymous"}`;
+  return `uvp-order-app:notification-read:${session.walletAddress?.toLowerCase() ?? anonymousReadBucket()}`;
 }
 
 function pendingReadEntries(session: ParticipantSession): readonly (readonly [string, string])[] {
@@ -579,7 +595,7 @@ function clearPendingRead(session: ParticipantSession, notificationId: string): 
 }
 
 function pendingReadStateKey(session: ParticipantSession): string {
-  return `uvp-order-app:notification-read-pending:${session.walletAddress?.toLowerCase() ?? "anonymous"}`;
+  return `uvp-order-app:notification-read-pending:${session.walletAddress?.toLowerCase() ?? anonymousReadBucket()}`;
 }
 
 function localNotificationId(kind: OrderAppNotificationKind, ...parts: readonly string[]): string {

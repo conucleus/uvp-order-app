@@ -60,7 +60,7 @@ const participantBody = {
     orderCount: 0,
     openTaskCount: 0,
     blockedTaskCount: 0,
-    completedTaskCount: 0
+    submittedTaskCount: 0
   }
 };
 
@@ -69,7 +69,12 @@ interface CapturedRequest {
   readonly method: string;
   readonly headers: Record<string, string>;
   readonly body: string | null;
-}async function installInviteRoutes(page: Page): Promise<{ requests: CapturedRequest[] }> {
+}
+
+/** accept 端点的桩行为：默认成功；conflict 模拟 409 终态；hang 模拟超时。 */
+type AcceptMode = "ok" | "conflict" | "hang";
+
+async function installInviteRoutes(page: Page, options: { readonly acceptMode?: AcceptMode } = {}): Promise<{ requests: CapturedRequest[] }> {
   const requests: CapturedRequest[] = [];
   await page.addInitScript((address) => {
     const provider = {
@@ -145,6 +150,17 @@ interface CapturedRequest {
         await fulfill({ error: "invite_token_mismatch" }, 403);
         return;
       }
+      if (options.acceptMode === "conflict") {
+        // 并发双 accept 的败者/重复接受：服务端 409 终态（英文 message 不直出）
+        await fulfill({ error: "invite_already_accepted", message: "invite has already been accepted" }, 409);
+        return;
+      }
+      if (options.acceptMode === "hang") {
+        // 超过客户端 fetch 超时窗口才回复：驱动"结果未知"路径
+        await new Promise((resolve) => setTimeout(resolve, 12_000));
+        await fulfill({ invite: { inviteId: INVITE_ID, status: "accepted" } });
+        return;
+      }
       await fulfill({ invite: { inviteId: INVITE_ID, status: "accepted" } });
       return;
     }
@@ -211,4 +227,33 @@ test("invite entry without a token is refused by the token-checked preview and n
   await expect(page.getByRole("button", { name: "拒绝", exact: true })).toHaveCount(0);
   expect(requests.some((request) => request.url.includes("/accept"))).toBe(false);
   expect(requests.some((request) => request.url.includes("/reject"))).toBe(false);
+});
+
+test("invite 409 terminal is localized and not retryable, without leaking the English server message", async ({ page }) => {
+  await installInviteRoutes(page, { acceptMode: "conflict" });
+  await page.goto(`/?invite=${INVITE_ID}&inviteToken=${INVITE_TOKEN}`);
+
+  await page.getByLabel("绑定钱包").fill(participantWallet);
+  await page.getByRole("button", { name: "接受角色" }).click();
+
+  // 409 是终态：本地化文案直出要点，英文 message 不再作为界面文案
+  await expect(page.getByText("该邀请已被接受，不能再重复操作；请使用已绑定的钱包进入待办查看角色。")).toBeVisible();
+  await expect(page.getByText("invite has already been accepted")).toHaveCount(0);
+  // 终态不提供"重试加载"出口（重试加载只属于可恢复的加载失败）
+  await expect(page.getByRole("button", { name: "重试加载" })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "接受角色" })).toHaveCount(0);
+});
+
+test("invite accept timeout is presented as result-unknown, never as not-submitted retryable", async ({ page }) => {
+  await installInviteRoutes(page, { acceptMode: "hang" });
+  await page.goto(`/?invite=${INVITE_ID}&inviteToken=${INVITE_TOKEN}`);
+
+  await page.getByLabel("绑定钱包").fill(participantWallet);
+  await page.getByRole("button", { name: "接受角色" }).click();
+
+  // 超时 ≠ 失败：服务端可能已处理，文案如实按"结果未知"呈现并引导查询，
+  // 不得宣称"本次操作未提交，可直接重试"诱导重复签名。
+  await expect(page.getByRole("alert").getByText(/本次操作结果未知：邀请可能已经生效/u)).toBeVisible({ timeout: 15_000 });
+  await expect(page.getByRole("alert").getByText(/请勿重复发起/u)).toBeVisible();
+  await expect(page.getByText("本次操作未提交，可直接重试")).toHaveCount(0);
 });

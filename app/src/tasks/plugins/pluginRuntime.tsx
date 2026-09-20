@@ -488,9 +488,6 @@ function validateTaskPluginInput(spec: TaskPluginSpec, state: TaskPluginState): 
   if (task.status === "submitted") {
     errors.push("已提交，正在等待链上确认。");
   }
-  if (task.status === "done") {
-    errors.push("该待办已确认完成。");
-  }
   if (task.canSubmit === false) {
     errors.push("当前钱包暂不能提交此待办。请确认你使用的钱包与订单登记的一致。");
   }

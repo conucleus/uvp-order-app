@@ -25,8 +25,9 @@ type ProofMatchStatus = "matched" | "unbound" | "missing" | "mismatched";
 export function ProofPanel({ order, task, submissionProof }: ProofPanelProps) {
   const [open, setOpen] = useState(false);
   const taskIsIndexing = task?.status === "submitted" && !task.proofSummary?.txHash;
-  // done 是链上最终态：早先失败尝试残留的 errorCode 不再显示为"提交失败"。
-  const taskFailed = task && task.status !== "done"
+  // 服务端任务词表没有完成态：残留 errorCode 一律如实展示，不存在
+  // "任务已完成、旧失败不再相关"的豁免分支。
+  const taskFailed = task
     ? (task as ProductTaskDTO & { readonly errorCode?: string }).errorCode
     : undefined;
   const signalContainer = useMemo(() => task ? signalContainerForTask(task) : undefined, [task]);

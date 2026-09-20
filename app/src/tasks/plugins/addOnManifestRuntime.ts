@@ -105,9 +105,6 @@ export function validateAddOnManifestAction(
   if (state.task.status === "submitted") {
     errors.push("已提交，正在等待链上确认。");
   }
-  if (state.task.status === "done") {
-    errors.push("该待办已确认完成。");
-  }
   if (state.task.canSubmit === false) {
     errors.push("当前钱包暂不能提交此待办。请确认你使用的钱包与订单登记的一致。");
   }

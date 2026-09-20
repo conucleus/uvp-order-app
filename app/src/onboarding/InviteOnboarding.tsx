@@ -39,13 +39,41 @@ function isEvmWalletAddress(value: string): boolean {
 }
 
 /**
- * 终态失败判定：令牌比对失败 / 邀请不存在或已过期（403/404/410）时同一
- * 链接重试不可能成功；其余失败（拒签、网络闪断、超时、会话未建立）都
- * 允许在当前步骤重试——一次性令牌只在服务端 accept/reject 成功时消费。
+ * 终态失败判定：令牌比对失败 / 邀请不存在、已过期或已被消费（403/404/
+ * 409/410）时同一链接重试不可能成功；其余失败（拒签、网络闪断、会话未
+ * 建立）都允许在当前步骤重试——一次性令牌只在服务端 accept/reject 成功
+ * 时消费。
  */
 function isTerminalInviteFailure(error: unknown): boolean {
   return error instanceof ProductApiError
-    && (error.status === 403 || error.status === 404 || error.status === 410);
+    && (error.status === 403 || error.status === 404 || error.status === 409 || error.status === 410);
+}
+
+/**
+ * 409 是邀请状态已迁移的终态（并发双 accept 的败者、已接受/已拒绝后的
+ * 重复操作）：按服务端错误码给本地化文案，英文 message 不直出。
+ */
+function conflictInviteFailureCopy(error: unknown): string {
+  const errorCode = error instanceof ProductApiError ? error.errorCode : undefined;
+  if (errorCode === "invite_already_accepted") {
+    return "该邀请已被接受，不能再重复操作；请使用已绑定的钱包进入待办查看角色。";
+  }
+  if (errorCode === "invite_rejected") {
+    return "该邀请已被拒绝，不能再接受；如需参与请联系邀请方重新发送邀请。";
+  }
+  return `${inviteFailureMessage(error, "邀请状态已变更。")}该邀请不可重试，请联系邀请方重新发送邀请链接。`;
+}
+
+/**
+ * 请求超时（status 0，客户端未收到服务端响应）：服务端可能已处理——
+ * 超时不等于未提交，不得引导重签；如实按"结果未知"呈现并引导查询。
+ */
+function isTimeoutInviteFailure(error: unknown): boolean {
+  return error instanceof ProductApiError && error.status === 0;
+}
+
+function timeoutInviteFailureCopy(error: unknown): string {
+  return `${inviteFailureMessage(error, "请求超时。")}本次操作结果未知：邀请可能已经生效，请刷新页面或重新打开邀请链接查看当前状态；确认结果前请勿重复发起。`;
 }
 
 /**
@@ -169,6 +197,42 @@ export function InviteOnboarding({ inviteId, inviteToken, actions, session, onAc
     return { sessionToken: proof.sessionToken };
   }
 
+  /**
+   * accept/reject 请求本身的失败分类（会话建立阶段除外——那里请求尚未
+   * 发出，失败恒为"未提交可重试"）：
+   * - 403/404/410/409 终态：409 用本地化冲突文案，英文 message 不直出；
+   * - 超时（status 0）：结果未知，引导查询而不是重签；
+   * - 钱包身份缺失：终态引导连接钱包；
+   * - 其余（拒签/网络闪断）：未提交，可重试。
+   */
+  function reportInviteActionFailure(error: unknown, fallback: string): void {
+    if (isTerminalInviteFailure(error)) {
+      setLoadState({
+        status: "error",
+        message: error instanceof ProductApiError && error.status === 409
+          ? conflictInviteFailureCopy(error)
+          : terminalInviteFailureCopy(error),
+        retryable: false
+      });
+      return;
+    }
+    if (isWalletIdentityInviteFailure(error)) {
+      setLoadState({
+        status: "error",
+        message: walletIdentityInviteFailureCopy(error),
+        retryable: false,
+        errorTitle: "需要钱包身份",
+        ...(inviteErrorBodyText(error) ? { bodyText: inviteErrorBodyText(error) } : {})
+      });
+      return;
+    }
+    if (isTimeoutInviteFailure(error)) {
+      setActionError(timeoutInviteFailureCopy(error));
+      return;
+    }
+    setActionError(retryableInviteFailureCopy(error, fallback));
+  }
+
   async function handleAccept() {
     if (!invite || !canAccept || busy) {
       return;
@@ -176,31 +240,27 @@ export function InviteOnboarding({ inviteId, inviteToken, actions, session, onAc
     setBusy(true);
     setActionError(undefined);
     try {
-      const options = await ensureWalletSessionProof(walletAddress.trim());
-      await actions.acceptInvite(inviteId, {
-        displayName: displayName.trim(),
-        walletAddress: walletAddress.trim(),
-        contact: contact.trim(),
-        token: inviteToken ?? ""
-      }, options);
+      let options: { readonly sessionToken?: string | undefined } = {};
+      try {
+        options = await ensureWalletSessionProof(walletAddress.trim());
+      } catch (error) {
+        // 会话链路失败时 accept 请求尚未发出：按未提交可重试如实呈现。
+        setActionError(retryableInviteFailureCopy(error, "建立钱包会话失败"));
+        return;
+      }
+      try {
+        await actions.acceptInvite(inviteId, {
+          displayName: displayName.trim(),
+          walletAddress: walletAddress.trim(),
+          contact: contact.trim(),
+          token: inviteToken ?? ""
+        }, options);
+      } catch (error) {
+        reportInviteActionFailure(error, "接受邀请失败");
+        return;
+      }
       setLoadState({ status: "accepted", invite });
       onAccepted();
-    } catch (error) {
-      if (isTerminalInviteFailure(error)) {
-        setLoadState({ status: "error", message: terminalInviteFailureCopy(error), retryable: false });
-        return;
-      }
-      if (isWalletIdentityInviteFailure(error)) {
-        setLoadState({
-          status: "error",
-          message: walletIdentityInviteFailureCopy(error),
-          retryable: false,
-          errorTitle: "需要钱包身份",
-          ...(inviteErrorBodyText(error) ? { bodyText: inviteErrorBodyText(error) } : {})
-        });
-        return;
-      }
-      setActionError(retryableInviteFailureCopy(error, "接受邀请失败"));
     } finally {
       setBusy(false);
     }
@@ -213,29 +273,18 @@ export function InviteOnboarding({ inviteId, inviteToken, actions, session, onAc
     setBusy(true);
     setActionError(undefined);
     try {
-      await actions.rejectInvite(inviteId, {
-        token: inviteToken ?? "",
-        displayName: displayName.trim() || undefined,
-        contact: contact.trim() || undefined
-      });
+      try {
+        await actions.rejectInvite(inviteId, {
+          token: inviteToken ?? "",
+          displayName: displayName.trim() || undefined,
+          contact: contact.trim() || undefined
+        });
+      } catch (error) {
+        reportInviteActionFailure(error, "拒绝邀请失败");
+        return;
+      }
       setLoadState({ status: "rejected" });
       onRejected?.();
-    } catch (error) {
-      if (isTerminalInviteFailure(error)) {
-        setLoadState({ status: "error", message: terminalInviteFailureCopy(error), retryable: false });
-        return;
-      }
-      if (isWalletIdentityInviteFailure(error)) {
-        setLoadState({
-          status: "error",
-          message: walletIdentityInviteFailureCopy(error),
-          retryable: false,
-          errorTitle: "需要钱包身份",
-          ...(inviteErrorBodyText(error) ? { bodyText: inviteErrorBodyText(error) } : {})
-        });
-        return;
-      }
-      setActionError(retryableInviteFailureCopy(error, "拒绝邀请失败"));
     } finally {
       setBusy(false);
     }

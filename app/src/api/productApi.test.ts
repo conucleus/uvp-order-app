@@ -109,6 +109,8 @@ describe("order app Product API boundary", () => {
             roleLabels: ["报关行"],
             source: "wallet"
           },
+          // 服务端 summary（completedTaskCount 统计永不产出的完成态）不再
+          // 被消费：桩即便携带也不影响客户端摘要。
           summary: {
             orderCount: 1,
             openTaskCount: 1,
@@ -129,7 +131,13 @@ describe("order app Product API boundary", () => {
     });
 
     assert.equal(home.source.kind, "real");
-    assert.equal(home.summary.openTaskCount, 1);
+    // 摘要与待办列表同源本地计算：open 任务计开放、无 submitted 不虚报。
+    assert.deepEqual(home.summary, {
+      orderCount: 1,
+      openTaskCount: 1,
+      blockedTaskCount: 0,
+      submittedTaskCount: 0
+    });
     assert.ok(requested.some((url) => url.includes("/product/me?walletAddress=")));
     assert.ok(requested.some((url) => url.includes("/product/me/orders?walletAddress=")));
     assert.ok(requested.some((url) => url.includes("/product/me/tasks?walletAddress=")));

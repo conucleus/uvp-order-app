@@ -14,11 +14,13 @@ import type { ScopeGeneration } from "../../shared/chain/submission/scope-guard"
  * 在途请求通过检查，把旧结果写回当前界面。代数只在键变化时推进，同键
  * 重渲染（投影刷新）保持不变，不会误伤正常刷新。
  */
-export function useTaskScopeGuard(task: ProductTaskDTO): {
+export function useTaskScopeGuard(task: ProductTaskDTO | undefined): {
   readonly scopeKey: string;
   readonly taskScopeRef: Readonly<{ readonly current: string }>;
 } {
-  const semanticKey = `${task.orderId}:${task.taskId}:${task.stageId}`;
+  // 无任务时用固定 "none" 键：面板保持挂载但处于空作用域，在途请求续作
+  // 一律按跨作用域丢弃。
+  const semanticKey = task ? `${task.orderId}:${task.taskId}:${task.stageId}` : "none";
   const generationRef = useRef<ScopeGeneration<string | undefined>>({ key: semanticKey, generation: 1 });
   generationRef.current = advanceScopeGeneration(generationRef.current, semanticKey);
   const scopeKey = scopeGenerationValue(generationRef.current);

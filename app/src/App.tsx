@@ -1,8 +1,8 @@
 import {
   AlertCircle,
   Bell,
-  CheckCircle2,
   ClipboardList,
+  Clock3,
   FileCheck2,
   FolderKanban,
   RefreshCw,
@@ -291,7 +291,7 @@ function AppShell({ api }: { readonly api: ProductApiClient }) {
             <Metric label="待处理" value={data?.summary.openTaskCount ?? 0} icon={<FileCheck2 />} />
             <Metric label="运行订单" value={data?.summary.orderCount ?? 0} icon={<FolderKanban />} />
             <Metric label="受阻" value={data?.summary.blockedTaskCount ?? 0} icon={<AlertCircle />} />
-            <Metric label="已完成" value={data?.summary.completedTaskCount ?? 0} icon={<CheckCircle2 />} />
+            <Metric label="已提交待确认" value={data?.summary.submittedTaskCount ?? 0} icon={<Clock3 />} />
           </section>
 
           <nav className="section-tabs" aria-label="参与者视图">
