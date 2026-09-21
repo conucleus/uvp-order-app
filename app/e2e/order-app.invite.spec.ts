@@ -60,7 +60,8 @@ const participantBody = {
     orderCount: 0,
     openTaskCount: 0,
     blockedTaskCount: 0,
-    submittedTaskCount: 0
+    // 与服务端 /product/me 真身同形：completedTaskCount 按 submitted 计入。
+    completedTaskCount: 0
   }
 };
 

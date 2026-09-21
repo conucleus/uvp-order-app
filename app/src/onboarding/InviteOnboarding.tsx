@@ -1,5 +1,5 @@
 import { AlertCircle, CheckCircle2, ShieldCheck, Wallet, XCircle } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { isWalletIdentityRequired, ProductApiError, type ProductInvitePreviewDTO } from "../api/productApi";
 import type { OrderAppActions } from "../actions/orderAppActions";
 import type { ParticipantSession } from "../auth/participant";
@@ -42,7 +42,8 @@ function isEvmWalletAddress(value: string): boolean {
  * 终态失败判定：令牌比对失败 / 邀请不存在、已过期或已被消费（403/404/
  * 409/410）时同一链接重试不可能成功；其余失败（拒签、网络闪断、会话未
  * 建立）都允许在当前步骤重试——一次性令牌只在服务端 accept/reject 成功
- * 时消费。
+ * 时消费。409 中的 wallet_already_bound 是例外（占用的是钱包不是邀请），
+ * 由 reportInviteActionFailure 先行分流为可重试。
  */
 function isTerminalInviteFailure(error: unknown): boolean {
   return error instanceof ProductApiError
@@ -50,8 +51,10 @@ function isTerminalInviteFailure(error: unknown): boolean {
 }
 
 /**
- * 409 是邀请状态已迁移的终态（并发双 accept 的败者、已接受/已拒绝后的
- * 重复操作）：按服务端错误码给本地化文案，英文 message 不直出。
+ * 409 终态冲突（并发双 accept 的败者、已接受/已拒绝后的重复操作、角色
+ * 已被占用）：按服务端错误码给本地化文案，英文 message 不直出。
+ * wallet_already_bound 不在此列——该 409 下邀请仍 active，按可换钱包
+ * 重试的表单内提示处理（见 isWalletAlreadyBoundConflict）。
  */
 function conflictInviteFailureCopy(error: unknown): string {
   const errorCode = error instanceof ProductApiError ? error.errorCode : undefined;
@@ -61,7 +64,25 @@ function conflictInviteFailureCopy(error: unknown): string {
   if (errorCode === "invite_rejected") {
     return "该邀请已被拒绝，不能再接受；如需参与请联系邀请方重新发送邀请。";
   }
+  if (errorCode === "role_already_filled") {
+    return "该邀请对应的角色已被其他参与者绑定，换钱包也不能接受；如需参与请联系邀请方。";
+  }
   return `${inviteFailureMessage(error, "邀请状态已变更。")}该邀请不可重试，请联系邀请方重新发送邀请链接。`;
+}
+
+/**
+ * 409 wallet_already_bound：占用的是钱包不是邀请——服务端校验失败不消费
+ * 一次性令牌，邀请仍 active，换一个未绑定本订单的钱包重试同一链接即可
+ * 完成接受。按可重试处理（表单保持挂载），不按终态卸载。
+ */
+function isWalletAlreadyBoundConflict(error: unknown): boolean {
+  return error instanceof ProductApiError
+    && error.status === 409
+    && error.errorCode === "wallet_already_bound";
+}
+
+function walletAlreadyBoundFailureCopy(): string {
+  return "该钱包已绑定本订单的另一角色，不能同时担任两个角色；邀请仍然有效，请更换绑定钱包后重试。";
 }
 
 /**
@@ -128,7 +149,23 @@ export function InviteOnboarding({ inviteId, inviteToken, actions, session, onAc
     return initial && isEvmWalletAddress(initial) ? initial : "";
   });
 
+  // 终态闩（accepted/rejected/不可重试 error，单向置位）：置位后钱包输入
+  // 防抖与预览刷新都不再重跑——迟到的 400ms 探测会把刚落档的终态出口
+  // 无差别冲回 loading→ready 表单，accept/reject 的失败结论闪现即被替换。
+  // 用 ref 而不是把 loadState 加进预览 effect 依赖：ready 本身也会触发
+  // 预览重发，形成循环。声明在防抖/预览 effect 之前，同一提交内先置闩。
+  const inviteSettledRef = useRef(false);
   useEffect(() => {
+    if (loadState.status === "accepted" || loadState.status === "rejected"
+      || (loadState.status === "error" && !loadState.retryable)) {
+      inviteSettledRef.current = true;
+    }
+  }, [loadState]);
+
+  useEffect(() => {
+    if (inviteSettledRef.current) {
+      return undefined;
+    }
     const trimmed = walletAddress.trim();
     if (trimmed && !isEvmWalletAddress(trimmed)) {
       return undefined;
@@ -138,6 +175,10 @@ export function InviteOnboarding({ inviteId, inviteToken, actions, session, onAc
   }, [walletAddress]);
 
   useEffect(() => {
+    // 终态后失效：不闪 loading、不发预览 POST（见 inviteSettledRef 注释）。
+    if (inviteSettledRef.current) {
+      return undefined;
+    }
     let cancelled = false;
     setLoadState({ status: "loading" });
     // 预览与 accept/reject 同一凭据口径：服务端按 token 哈希比对（缺失 403），
@@ -147,7 +188,7 @@ export function InviteOnboarding({ inviteId, inviteToken, actions, session, onAc
       ...(inviteToken ? { token: inviteToken } : {})
     })
       .then((invite) => {
-        if (cancelled) {
+        if (cancelled || inviteSettledRef.current) {
           return;
         }
         setDisplayName((current) => current || invite.participant.displayName);
@@ -155,7 +196,8 @@ export function InviteOnboarding({ inviteId, inviteToken, actions, session, onAc
         setLoadState({ status: "ready", invite });
       })
       .catch((error) => {
-        if (!cancelled) {
+        // 在途预览不得覆盖终态：请求发出后 accept/reject 可能已落档结论。
+        if (!cancelled && !inviteSettledRef.current) {
           const walletIdentityFailure = isWalletIdentityInviteFailure(error);
           setLoadState({
             status: "error",
@@ -200,12 +242,17 @@ export function InviteOnboarding({ inviteId, inviteToken, actions, session, onAc
   /**
    * accept/reject 请求本身的失败分类（会话建立阶段除外——那里请求尚未
    * 发出，失败恒为"未提交可重试"）：
-   * - 403/404/410/409 终态：409 用本地化冲突文案，英文 message 不直出；
+   * - 409 wallet_already_bound：邀请仍 active，表单保持挂载，引导换钱包；
+   * - 403/404/410/409 其余终态：409 用本地化冲突文案，英文 message 不直出；
    * - 超时（status 0）：结果未知，引导查询而不是重签；
    * - 钱包身份缺失：终态引导连接钱包；
    * - 其余（拒签/网络闪断）：未提交，可重试。
    */
   function reportInviteActionFailure(error: unknown, fallback: string): void {
+    if (isWalletAlreadyBoundConflict(error)) {
+      setActionError(walletAlreadyBoundFailureCopy());
+      return;
+    }
     if (isTerminalInviteFailure(error)) {
       setLoadState({
         status: "error",

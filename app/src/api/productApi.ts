@@ -475,10 +475,11 @@ class BrowserProductApiClient implements ProductApiClient {
 
   async loadParticipantHome(input: ParticipantQueryInput = {}): Promise<ProductHomeData> {
     const [meResponse, ordersResponse, tasksResponse] = await Promise.all([
-      // /product/me 的 summary.completedTaskCount 统计的是服务端任务词表
-      // 永不产出的完成态（恒 0），summary 不作为数据源，只取 participant；
-      // 摘要与待办列表同源（同一 /product/me/tasks 投影）本地计算，
-      // 避免两处口径漂移。
+      // /product/me 的 summary.completedTaskCount 是服务端把 submitted（已
+      // 提交、等待链上索引）按已完成口径计入的计数，与客户端"按已提交
+      // 如实命名、不冒充完成"的口径不同；summary 因此不作为数据源，只取
+      // participant——摘要在本地与待办列表同源（同一 /product/me/tasks
+      // 投影）计算，避免两处口径漂移。
       this.getJson<{ readonly participant: ProductParticipantProfileDTO }>(
         participantPath("/product/me", input)
       ),
@@ -682,7 +683,9 @@ class BrowserProductApiClient implements ProductApiClient {
       }), signal);
     } catch (error) {
       if (signal.aborted || (error instanceof DOMException && error.name === "TimeoutError")) {
-        throw new ProductApiError(0, pathname, `请求超时（${timeoutMs} 毫秒），请稍后重试。`);
+        // 超时=结果未知：服务端可能已处理（对 accept/reject、任务提交这类
+        // 一次性动作，盲目重发正是要防的方向），文案不得诱导立即重试。
+        throw new ProductApiError(0, pathname, `请求超时（${timeoutMs} 毫秒），服务端可能已处理本次请求。`);
       }
       throw error;
     }

@@ -699,8 +699,10 @@ export async function installProductApiStub(page: Page, options: StubOptions = {
           orderCount: orders.length,
           openTaskCount: tasks.filter((item) => item.status === "open").length,
           blockedTaskCount: tasks.filter((item) => item.status === "blocked").length,
-          // 服务端任务词表没有完成态；已提交（等待索引）是可真实统计的终向指标。
-          submittedTaskCount: tasks.filter((item) => item.status === "submitted").length
+          // 与服务端 /product/me 真身同形：completedTaskCount 按 submitted
+          // 计入（"已提交等待索引"按已完成口径），没有 submittedTaskCount
+          // 这样的客户端侧字段。
+          completedTaskCount: tasks.filter((item) => item.status === "submitted").length
         }
       });
       return;

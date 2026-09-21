@@ -470,11 +470,11 @@ function shortHash(value: string): string {
 }
 
 function compareTasks(left: ProductTaskDTO, right: ProductTaskDTO): number {
+  // 排序口径与服务端任务词表一致（open/blocked/submitted，无完成态）。
   const rank: Readonly<Record<ProductTaskDTO["status"], number>> = {
     open: 0,
     blocked: 1,
-    submitted: 2,
-    done: 3
+    submitted: 2
   };
   return rank[left.status] - rank[right.status] ||
     // deadline 排序统一 UTC 解析口径（deadlineSortMs），不随字符串序漂移。

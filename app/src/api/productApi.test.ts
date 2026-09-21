@@ -109,8 +109,9 @@ describe("order app Product API boundary", () => {
             roleLabels: ["报关行"],
             source: "wallet"
           },
-          // 服务端 summary（completedTaskCount 统计永不产出的完成态）不再
-          // 被消费：桩即便携带也不影响客户端摘要。
+          // 服务端 summary（completedTaskCount 按 submitted 计入的"已完成"
+          // 口径）不被消费：桩即便携带也不影响客户端按 submitted 如实
+          // 命名的本地摘要。
           summary: {
             orderCount: 1,
             openTaskCount: 1,
