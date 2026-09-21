@@ -18,9 +18,11 @@ const inviteSearchKeys = ["invite", "inviteToken"] as const;
 
 /**
  * 路由只认 hash：?invite= 搜索参数属于"进入应用的邀请入口"，由
- * readInviteEntryFromSearch 在挂载时消费一次并从地址栏清除。
- * 若路由持续回读 search，hash 导航（只改 hash 不清 search）会让
- * 邀请面板永远还原，"返回待办"全部失效。
+ * readInviteEntryFromSearch 在进入时读取进应用状态；地址栏上的一次性
+ * 令牌保留到流程终态（accept/reject 成功或明确离开）才由
+ * clearInviteSearchParams 清除，中途失败/刷新后仍可凭 URL 重试。
+ * 路由不回读 search：hash 导航（只改 hash 不清 search）留下的 search
+ * 残留不会在导航后还原邀请面板，"返回待办"保持可达。
  */
 export function readOrderAppRoute(hash = window.location.hash): OrderAppRoute {
   const raw = hash.replace(/^#/u, "");
