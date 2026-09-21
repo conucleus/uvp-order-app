@@ -481,13 +481,13 @@ class BrowserProductApiClient implements ProductApiClient {
       // participant——摘要在本地与待办列表同源（同一 /product/me/tasks
       // 投影）计算，避免两处口径漂移。
       this.getJson<{ readonly participant: ProductParticipantProfileDTO }>(
-        participantPath("/product/me", input)
+        participantPath("/product/me", input.walletAddress)
       ),
       this.getJson<{ readonly participant?: ProductParticipantProfileDTO; readonly orders: readonly ProductOrderDTO[] }>(
-        participantPath("/product/me/orders", input)
+        participantPath("/product/me/orders", input.walletAddress)
       ),
       this.getJson<{ readonly participant?: ProductParticipantProfileDTO; readonly tasks: readonly ProductTaskDTO[] }>(
-        participantPath("/product/me/tasks", input)
+        participantPath("/product/me/tasks", input.walletAddress)
       )
     ]);
 
@@ -514,7 +514,7 @@ class BrowserProductApiClient implements ProductApiClient {
 
   async getTask(taskId: string, input: ParticipantQueryInput = {}): Promise<ProductTaskDTO> {
     const response = await this.getJson<{ readonly task: ProductTaskDTO }>(
-      participantPath(`/product/me/tasks/${encodeURIComponent(taskId)}`, input)
+      participantPath(`/product/me/tasks/${encodeURIComponent(taskId)}`, input.walletAddress)
     );
     return response.task;
   }
@@ -525,7 +525,7 @@ class BrowserProductApiClient implements ProductApiClient {
     // walletAddress 仍走 query 声明通道，由服务端与会话锚定地址核验。
     return await this.requestJson<ProductInvitePreviewDTO>(
       "POST",
-      participantPath(`/product/invites/${encodeURIComponent(inviteId)}`, { walletAddress: input.walletAddress }),
+      participantPath(`/product/invites/${encodeURIComponent(inviteId)}`, input.walletAddress),
       { token: input.token },
       this.config.timeoutMs
     );
@@ -541,7 +541,7 @@ class BrowserProductApiClient implements ProductApiClient {
     // local 运行时才允许作为自报身份兜底。
     return await this.requestJson<ProductInviteAcceptanceDTO>(
       "POST",
-      participantPath(`/product/invites/${encodeURIComponent(inviteId)}/accept`, { walletAddress: input.walletAddress }),
+      participantPath(`/product/invites/${encodeURIComponent(inviteId)}/accept`, input.walletAddress),
       input,
       this.config.timeoutMs,
       options.sessionToken ? { "x-uvp-store-session": options.sessionToken } : {}
@@ -804,16 +804,17 @@ function sortOrders(orders: readonly ProductOrderDTO[]): readonly ProductOrderDT
   );
 }
 
-function participantPath(pathname: string, input: ParticipantQueryInput): string {
-  const query = new URLSearchParams();
-  if (input.walletAddress) {
-    query.set("walletAddress", input.walletAddress);
+/**
+ * 参与者路由的 query 拼装只收钱包声明值：一次性邀请令牌与 accept/reject
+ * 同形态走请求 body（query 会随 URL/Referer/代理日志留痕），按参数形态
+ * 杜绝 token 进入路径。
+ */
+function participantPath(pathname: string, walletAddress?: string | undefined): string {
+  if (!walletAddress) {
+    return pathname;
   }
-  if (input.token) {
-    query.set("token", input.token);
-  }
-  const serialized = query.toString();
-  return serialized.length > 0 ? `${pathname}?${serialized}` : pathname;
+  const query = new URLSearchParams({ walletAddress });
+  return `${pathname}?${query.toString()}`;
 }
 
 function joinUrl(baseUrl: string, pathname: string): string {

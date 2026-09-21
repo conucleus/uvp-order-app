@@ -1,3 +1,5 @@
+import type { ProductSubmitTypedData } from "@uvp-eth/executor-kit/participant";
+
 export function cleanString(value: unknown): string | undefined {
   const trimmed = typeof value === "string" ? value.trim() : "";
   return trimmed.length > 0 ? trimmed : undefined;
@@ -103,6 +105,33 @@ export function submitSignExpectation(env: SignDomainEnv = buildTimeSignDomainEn
     expected: {
       verifyingContract: requiredEnvAddress(env, "VITE_UVP_STATE_MACHINE_ADDRESS", "状态机部署地址")
     }
+  };
+}
+
+/**
+ * 任务提交边界共用的签名输入组装（TaskPluginHost/EvidencePanel/
+ * ManifestAddOnPanel 同一闸门口径）：prepare 记录声明的提交方与部署配置
+ * 注入的域预期一并进入签名——被攻陷 BFF 换其他 principal 的 prepared
+ * 信封时，钱包闸门在调钱包前拒绝。
+ */
+export function taskSubmitSignInput(
+  prepared: {
+    readonly typedData: ProductSubmitTypedData;
+    readonly submitter?: string | undefined;
+  },
+  walletAddress: string,
+  env: SignDomainEnv = buildTimeSignDomainEnv()
+): {
+  readonly typedData: ProductSubmitTypedData;
+  readonly walletAddress: string;
+  readonly preparedSubmitters: readonly (string | undefined)[];
+  readonly expected: { readonly verifyingContract: string };
+} {
+  return {
+    typedData: prepared.typedData,
+    walletAddress,
+    preparedSubmitters: [prepared.submitter],
+    ...submitSignExpectation(env)
   };
 }
 

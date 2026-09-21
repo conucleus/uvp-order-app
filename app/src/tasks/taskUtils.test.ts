@@ -1,5 +1,11 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
+import { buildProductSubmitTypedData } from "@uvp-eth/executor-kit/participant";
+import {
+  InjectedWalletError,
+  signProductSubmitWithInjectedWallet,
+  type Eip1193Provider
+} from "../wallet/injectedWallet.js";
 import {
   cleanString,
   isContentAddressedReference,
@@ -8,6 +14,7 @@ import {
   sameAddress,
   stagePatchSignExpectation,
   submitSignExpectation,
+  taskSubmitSignInput,
   type SignDomainEnv
 } from "./model/taskUtils.js";
 
@@ -55,6 +62,65 @@ describe("task submit signing domain expectation", () => {
   it("refuses to sign when the deployment config does not declare the state machine address", () => {
     assert.throws(() => submitSignExpectation({}), /VITE_UVP_STATE_MACHINE_ADDRESS/u);
     assert.throws(() => submitSignExpectation({ VITE_UVP_STATE_MACHINE_ADDRESS: "0x1234" }), /VITE_UVP_STATE_MACHINE_ADDRESS/u);
+  });
+});
+
+describe("task submit boundary sign input assembly", () => {
+  const stateMachineAddress = "0x7777777777777777777777777777777777777777";
+  const env: SignDomainEnv = { VITE_UVP_STATE_MACHINE_ADDRESS: stateMachineAddress };
+  const walletAddress = "0x9d8a62f656a8d1615c1294fd71e9cfb3e4855a4f";
+  const typedData = buildProductSubmitTypedData({
+    chainId: 31337,
+    verifyingContract: stateMachineAddress,
+    planId: "0x1111111111111111111111111111111111111111111111111111111111111111",
+    orderId: "0x0101010101010101010101010101010101010101010101010101010101010101",
+    sourceId: "0x0202020202020202020202020202020202020202020202020202020202020202",
+    signalId: "0x0303030303030303030303030303030303030303030303030303030303030303",
+    payloadHash: "0x0404040404040404040404040404040404040404040404040404040404040404",
+    idempotencyKey: "0x0505050505050505050505050505050505050505050505050505050505050505",
+    submitter: walletAddress,
+    deadline: "1777777777"
+  });
+
+  function acceptAllProvider(): Eip1193Provider {
+    return {
+      request: async ({ method }) =>
+        method === "eth_chainId" ? "0x7a69" : `0x${"aa".repeat(65)}`
+    };
+  }
+
+  it("carries the prepared record's submitter and the deployment expectation in one gate input", () => {
+    assert.deepEqual(
+      taskSubmitSignInput({ typedData, submitter: walletAddress.toUpperCase() }, walletAddress, env),
+      {
+        typedData,
+        walletAddress,
+        preparedSubmitters: [walletAddress.toUpperCase()],
+        expected: { verifyingContract: stateMachineAddress }
+      }
+    );
+    // 投影类型允许 prepare 记录未声明提交方：undefined 条目由闸门跳过。
+    assert.deepEqual(taskSubmitSignInput({ typedData }, walletAddress, env).preparedSubmitters, [undefined]);
+  });
+
+  it("refuses to sign when the prepared record names a different submitter (built-in plugin submit boundary)", async () => {
+    // 组装结果直接进真实钱包闸门（桩 provider）：被攻陷 BFF 把别的
+    // principal 的 prepared 信封换给本钱包时，在调钱包前拒绝。
+    const forged = taskSubmitSignInput(
+      { typedData, submitter: "0x000000000000000000000000000000000000dead" },
+      walletAddress,
+      env
+    );
+    await assert.rejects(
+      signProductSubmitWithInjectedWallet({ ...forged, provider: acceptAllProvider() }),
+      (error) => error instanceof InjectedWalletError &&
+        error.code === "typed_data_mismatch" &&
+        /prepare 记录声明的提交方/.test(error.message)
+    );
+    // prepared 声明一致（大小写不敏感）时放行。
+    const consistent = taskSubmitSignInput({ typedData, submitter: walletAddress.toUpperCase() }, walletAddress, env);
+    const signature = await signProductSubmitWithInjectedWallet({ ...consistent, provider: acceptAllProvider() });
+    assert.equal(signature, `0x${"aa".repeat(65)}`);
   });
 });
 

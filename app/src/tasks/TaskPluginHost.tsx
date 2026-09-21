@@ -21,7 +21,7 @@ import {
 } from "./plugins/pluginRuntime";
 import { useTaskScopeGuard } from "./model/taskScope";
 import { signalContainerForTask } from "./model/signalContainer";
-import { formatDeadlineUtc, submitSignExpectation } from "./model/taskUtils";
+import { formatDeadlineUtc, taskSubmitSignInput } from "./model/taskUtils";
 import { taskExecutorDisplay } from "./model/taskPresentation";
 import { taskDisplay } from "./model/taskStatus";
 import {
@@ -179,13 +179,12 @@ export function TaskPluginHost({
     setPhase("submitting");
     setError(undefined);
     try {
-      const signature = await actions.signProductSubmit({
-        typedData: prepared.typedData,
-        walletAddress: participantWallet ?? "",
-        // 域校验预期来自部署配置注入（独立来源），缺配置即拒签，不读同一
-        // BFF 响应里的地址，防被攻陷 BFF 换域让钱包照签。
-        ...submitSignExpectation()
-      });
+      const signature = await actions.signProductSubmit(
+        // prepare 记录声明的提交方与部署配置注入的域预期一并进入签名闸门
+        // （与 EvidencePanel/ManifestAddOnPanel 同口径），缺配置或 prepared
+        // 声明他人提交方即在调钱包前拒签。
+        taskSubmitSignInput(prepared, participantWallet ?? "")
+      );
       if (taskScopeRef.current !== requestScopeKey) {
         return;
       }

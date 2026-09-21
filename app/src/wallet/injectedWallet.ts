@@ -313,6 +313,12 @@ export async function signTypedDataWithInjectedWallet(input: {
   }
   assertTypedDataEnvelopeMatchesProtocol(input.typedData, signer, input.expected, input.preparedSubmitters);
   try {
+    // 与 signProductSubmit 同一签名边界：信封校验后先核对钱包当前链与
+    // domain.chainId 一致（错链上的补丁签名对验签模块无效），再请求签名。
+    await ensureCurrentChainMatchesDomain(provider, input.typedData, {
+      ports: walletPorts,
+      chainIdReadErrorMode: { kind: "wrap", readFailureFallback: "读取钱包当前链失败。" }
+    });
     return await requestTypedDataSignature(provider, signer, input.typedData, {
       ports: walletPorts,
       texts: orderAppMismatchTexts,

@@ -33,7 +33,7 @@ import {
 } from "../plugins/addOnManifestRuntime";
 import { pluginPresentationForTask, type PrepareSubmitInput } from "../plugins/pluginRuntime";
 import { useTaskScopeGuard } from "../model/taskScope";
-import { stagePatchSignExpectation, submitSignExpectation } from "../model/taskUtils";
+import { stagePatchSignExpectation, taskSubmitSignInput } from "../model/taskUtils";
 import { isTerminalSubmissionEnvelope, submissionFailureText, submissionPendingText } from "../submission/submissionEnvelope";
 import type { PreparedTaskSubmit, ProductSubmission, RuntimePhase, SubmitPreparedInput } from "../submission/types";
 import { ProofRow } from "./ProofRow";
@@ -210,15 +210,12 @@ export function ManifestAddOnPanel({
     try {
       let result: ProductSubmission | StageExecutorPatchSubmissionDTO | StageResourcePatchSubmissionDTO;
       if (prepared.actionKind === "submit_signal") {
-        const signature = await actions.signProductSubmit({
-          typedData: prepared.prepared.typedData,
-          walletAddress: prepared.input.walletAddress,
-          // prepared 记录声明的提交方参与签名前交叉核对（同 EvidencePanel
-          // submit 边界）：换签名对象在调钱包前拒绝。
-          preparedSubmitters: [prepared.prepared.submitter],
-          // 预期值来自部署配置注入（独立来源），缺配置即拒签（同 submit 边界）。
-          ...submitSignExpectation()
-        });
+        const signature = await actions.signProductSubmit(
+          // prepare 记录声明的提交方与部署配置注入的域预期一并进入签名
+          // 闸门（taskSubmitSignInput 单源组装）：换签名对象或换域在调
+          // 钱包前拒绝。
+          taskSubmitSignInput(prepared.prepared, prepared.input.walletAddress)
+        );
         if (taskScopeRef.current !== requestScopeKey) {
           return;
         }

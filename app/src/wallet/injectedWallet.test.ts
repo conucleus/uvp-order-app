@@ -163,6 +163,45 @@ describe("typed-data envelope gate before signing", () => {
     assert.equal(signature, `0x${"aa".repeat(65)}`);
   });
 
+  it("checks the wallet's current chain before requesting a stage patch signature", async () => {
+    const signature = `0x${"bb".repeat(65)}` as const;
+    const requests: unknown[] = [];
+    const provider: Eip1193Provider = {
+      request: async (input) => {
+        requests.push(input);
+        if (input.method === "eth_chainId") {
+          return "0x7a69";
+        }
+        return signature;
+      }
+    };
+
+    const result = await signTypedDataWithInjectedWallet({
+      typedData: stagePatchTypedData,
+      walletAddress,
+      provider
+    });
+
+    assert.equal(result, signature);
+    // 补丁签名与任务提交同序：先 eth_chainId 核对当前链，再发起签名。
+    assert.deepEqual(requests, [
+      { method: "eth_chainId" },
+      {
+        method: "eth_signTypedData_v4",
+        params: [walletAddress, JSON.stringify(stagePatchTypedData)]
+      }
+    ]);
+  });
+
+  it("refuses to sign stage patch typed data when the wallet is on a different chain", async () => {
+    await assert.rejects(
+      signTypedDataWithInjectedWallet({ typedData: stagePatchTypedData, walletAddress, provider: wrongChainProvider() }),
+      (error) => error instanceof InjectedWalletError &&
+        error.code === "typed_data_mismatch" &&
+        /与签名域 chainId 31337 不一致/.test(error.message)
+    );
+  });
+
   it("refuses to sign a foreign domain name", async () => {
     const forged: GenericTypedData = {
       ...stagePatchTypedData,
