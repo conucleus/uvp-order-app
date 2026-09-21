@@ -127,8 +127,8 @@ export interface TypedDataDomainExpectation {
 }
 
 /**
- * 本端钱包内核 = chain 轨共享面 + protocol-bindings 端口注入（治理审计
- * §1.1 P1-1 的共享仓形态）：判定单源于 protocol-bindings（原函数注入），
+ * 本端钱包内核 = chain 轨共享面 + protocol-bindings 端口注入：判定
+ * 单源于 protocol-bindings（原函数注入），
  * 连接/链核对/签名请求的机械段与错误分类学（code 四类）在
  * shared/chain/wallet 单源；本端保留 InjectedWalletError 公开类与各调用
  * 点的面向参与者文案。
@@ -248,7 +248,7 @@ export async function signProductSubmitWithInjectedWallet(input: {
   /**
    * prepare 记录声明的提交方（prepared.submitter）：参与签名前交叉核对，
    * 防被攻陷 BFF 用别的 principal 的 prepared 信封换签名对象（三端
-   * 签名闸门最强集的一员，此前 order-app 缺失）。undefined 条目跳过。
+   * 签名闸门最强集的一员）。undefined 条目跳过。
    */
   readonly preparedSubmitters?: readonly (string | undefined)[] | undefined;
 }): Promise<`0x${string}`> {
@@ -337,7 +337,7 @@ export async function signTypedDataWithInjectedWallet(input: {
  * chainId/verifyingContract 提供预期时严格比对）、types 字段表非空、
  * message 签名者（submitter/selector）与本次签名钱包及 prepared 记录
  * 声明的提交方一致——单源消费 protocol-bindings validateTypedDataForSigning
- * （三端签名闸门的最强集，治理审计 §1.1 P1-1 安全面）。任何不一致都在
+ * （三端签名闸门的最强集）。任何不一致都在
  * 调钱包前拒绝；判定只返回 reason，面向参与者的文案由本宿主映射。
  */
 export function assertTypedDataEnvelopeMatchesProtocol(

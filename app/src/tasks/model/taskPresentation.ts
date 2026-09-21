@@ -68,10 +68,10 @@ export function taskPrimaryActionLabel(task: ProductTaskDTO, fallback?: string):
     taskAddOnLabel(taskAddOnKind(task));
 }
 
-// 提交意图推导单源（治理审计 §1.1 P1-1）：TaskSubmitIntent 词表、
+// 提交意图推导单源：TaskSubmitIntent 词表、
 // submitIntentByPluginKind 兜底映射与 manifest/插件类型推导以
-// @uvp-eth/product-dto 为唯一出处（此处与 zhixu-store workbenchSupport
-// 原先各持一份逐字镜像）。
+// @uvp-eth/product-dto 为唯一出处（本端与 zhixu-store workbenchSupport
+// 不各自持镜像副本）。
 export { taskSubmitIntent, taskSubmitIntentForAction } from "@uvp-eth/product-dto";
 export type { TaskSubmitIntent } from "@uvp-eth/product-dto";
 

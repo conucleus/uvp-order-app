@@ -14,11 +14,11 @@ import {
 import type { ProductSubmitTypedData } from "@uvp-eth/executor-kit/participant";
 import { deadlineSortMs } from "../tasks/model/taskUtils";
 
-// 写侧契约单源（治理审计 §1.1 P1-1）：提交意图、prepare/submit 请求体、
+// 写侧契约单源：提交意图、prepare/submit 请求体、
 // 提交回执与证据证明以 @uvp-eth/product-dto 为唯一出处（形状按
 // uvp-chain-services 服务端真身裁定——statusLabel 与 EvidenceProofDTO 的
 // evidenceId/payloadRef/storageURI 服务端恒产出，为必填），本模块只做
-// transport，不再手写镜像。
+// transport，不手写镜像。
 export type {
   EvidenceProofDTO,
   PrepareProductTaskSubmitInput,

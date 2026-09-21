@@ -220,7 +220,7 @@ describe("typed-data envelope gate before signing", () => {
   it("refuses to sign when the prepared record names a different submitter (cross-check from the strongest gate set)", async () => {
     // 被攻陷 BFF 把别的 principal 的 prepared 信封换给本钱包：message.submitter
     // 虽与签名钱包一致，但与 prepare 记录声明的 submitter 不一致，必须在调
-    // 钱包前拒绝（此前 order-app 缺失该校验，zhixu-store 已有）。
+    // 钱包前拒绝（三端签名闸门同口径）。
     await assert.rejects(
       signProductSubmitWithInjectedWallet({
         typedData,
