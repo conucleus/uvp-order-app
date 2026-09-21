@@ -146,7 +146,7 @@ export function EvidencePanel({
     prepareState.status !== "preparing" &&
     prepareState.status !== "submitting" &&
     // 终态闸：本次会话已成功提交后不再开放重投，重复提交只能经由刷新后的
-    // 任务投影状态改判（submitted/done 时 preflightBlockers 会关闭入口）。
+    // 任务投影状态改判（任务状态不是 open 时 preflightBlockers 会关闭入口）。
     prepareState.status !== "confirmed";
   const canSubmitSignature =
     // failed 里的服务端终态（expired/replaced）不可再签；可重试失败
@@ -817,7 +817,7 @@ function evidenceFromProof(item: CapturedEvidence, proof: EvidenceProofDTO): Cap
     metadataHash: proof.metadataHash,
     payloadHash: proof.payloadHash,
     // payloadRef/storageURI 为服务端恒产出（product-dto 写侧契约必填），
-    // 刷新证明时采用服务端当前值，不再回退上传时的本地快照。
+    // 刷新证明时采用服务端当前值。
     payloadRef: proof.payloadRef,
     storageURI: proof.storageURI,
     verificationStatus: proof.verificationStatus,

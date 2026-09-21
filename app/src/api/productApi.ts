@@ -12,6 +12,7 @@ import {
   type SubmitProductTaskInput
 } from "@uvp-eth/product-dto";
 import type { ProductSubmitTypedData } from "@uvp-eth/executor-kit/participant";
+import { participantPath } from "./participantPath";
 import { deadlineSortMs } from "../tasks/model/taskUtils";
 
 // 写侧契约单源：提交意图、prepare/submit 请求体、
@@ -573,9 +574,9 @@ class BrowserProductApiClient implements ProductApiClient {
       readonly token: string;
       readonly session: { readonly anchoredAddress?: string | undefined };
     }>("/store/auth/verify", { nonce: challenge.challenge.nonce, signature });
-    // 会话留存：后续 me/tasks/orders/prepare-submit/evidence 请求统一携带，
-    // 不再退化为只有 accept 邀请才有会话锚定身份；会话级持久化让刷新后
-    // 无需重新签名（服务端 TTL 是会话真实有效期，过期即重新登录）。
+    // 会话留存：后续 me/tasks/orders/prepare-submit/evidence 请求统一携带；
+    // 会话级持久化让刷新后无需重新签名（服务端 TTL 是会话真实有效期，
+    // 过期即重新登录）。
     this.walletSessionToken = verified.token;
     persistWalletSessionToken(verified.token);
     return {
@@ -802,19 +803,6 @@ function sortOrders(orders: readonly ProductOrderDTO[]): readonly ProductOrderDT
     statusRank[left.status] - statusRank[right.status] ||
     left.orderId.localeCompare(right.orderId)
   );
-}
-
-/**
- * 参与者路由的 query 拼装只收钱包声明值：一次性邀请令牌与 accept/reject
- * 同形态走请求 body（query 会随 URL/Referer/代理日志留痕），按参数形态
- * 杜绝 token 进入路径。
- */
-function participantPath(pathname: string, walletAddress?: string | undefined): string {
-  if (!walletAddress) {
-    return pathname;
-  }
-  const query = new URLSearchParams({ walletAddress });
-  return `${pathname}?${query.toString()}`;
 }
 
 function joinUrl(baseUrl: string, pathname: string): string {

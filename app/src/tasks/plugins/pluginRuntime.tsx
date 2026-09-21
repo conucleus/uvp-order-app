@@ -55,8 +55,8 @@ export interface TaskPluginRenderInput {
   readonly onConfirmationChange: (inputId: string, checked: boolean) => void;
   /**
    * 凭证面板持有提交边界（任务有 evidenceSpec/资源槽位）时，插件表单的
-   * 值不再进入任何 prepare 载荷：继续渲染可编辑输入是假参与面，只保留
-   * 信息展示（要求/权限/履约者证明等）。
+   * 值不进入任何 prepare 载荷：渲染可编辑输入是假参与面，只保留信息展示
+   * （要求/权限/履约者证明等）。
    */
   readonly submissionOwnedByEvidenceFlow?: boolean | undefined;
 }

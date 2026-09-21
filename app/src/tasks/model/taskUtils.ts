@@ -77,11 +77,14 @@ export function formatDeadlineUtc(deadline: string): string {
  * 签名域交叉核对的预期值独立来源：构建期部署配置注入（Vite 内联的静态
  * import.meta.env 成员），不来自被核对的同一 BFF 响应——被攻陷的 BFF 可以
  * 让 typedData.domain 与 prepare 信封/humanSummary 自洽，但改不了部署配置。
- * 缺预期值即拒绝签名（fail-closed），不再条件性跳过比对。
+ * verifyingContract 缺配置即拒绝签名（fail-closed）；chainId 是同一独立
+ * 来源的加强锚——部署配置声明了就严格比对，未声明的部署只保留信封校验
+ * 里的链 ID 形状判定，不挡签名。
  */
 export interface SignDomainEnv {
   readonly VITE_UVP_STATE_MACHINE_ADDRESS?: string | undefined;
   readonly VITE_UVP_STAGE_PATCH_MODULE_ADDRESS?: string | undefined;
+  readonly VITE_UVP_CHAIN_ID?: string | undefined;
 }
 
 function requiredEnvAddress(env: SignDomainEnv, key: keyof SignDomainEnv, label: string): string {
@@ -92,18 +95,44 @@ function requiredEnvAddress(env: SignDomainEnv, key: keyof SignDomainEnv, label:
   return address;
 }
 
+/**
+ * 可选部署链 ID（十进制正整数字符串）：声明了才锚定 domain.chainId。
+ * 显式限定十进制——Number 会把 "0x7a69" 这类十六进制串静默解析成功，
+ * 部署配置写错格式时按 fail-closed 拒签而不是宽松放行。
+ */
+function optionalEnvChainId(env: SignDomainEnv): number | undefined {
+  const raw = cleanString(env.VITE_UVP_CHAIN_ID);
+  if (!raw) {
+    return undefined;
+  }
+  if (!/^\d+$/u.test(raw)) {
+    throw new Error(`部署链 ID 不是十进制正整数（构建期环境变量 VITE_UVP_CHAIN_ID="${raw}"），已拒绝签名`);
+  }
+  const parsed = Number(raw);
+  if (!Number.isSafeInteger(parsed) || parsed <= 0) {
+    throw new Error(`部署链 ID 不是有效的十进制正整数（构建期环境变量 VITE_UVP_CHAIN_ID="${raw}"），已拒绝签名`);
+  }
+  return parsed;
+}
+
 function buildTimeSignDomainEnv(): SignDomainEnv {
   return {
     VITE_UVP_STATE_MACHINE_ADDRESS: import.meta.env?.VITE_UVP_STATE_MACHINE_ADDRESS,
-    VITE_UVP_STAGE_PATCH_MODULE_ADDRESS: import.meta.env?.VITE_UVP_STAGE_PATCH_MODULE_ADDRESS
+    VITE_UVP_STAGE_PATCH_MODULE_ADDRESS: import.meta.env?.VITE_UVP_STAGE_PATCH_MODULE_ADDRESS,
+    VITE_UVP_CHAIN_ID: import.meta.env?.VITE_UVP_CHAIN_ID
   };
 }
 
+/** 域预期里可随配置出现的那部分（verifyingContract 恒有、chainId 可选）。 */
+type SignDomainExpected = { readonly verifyingContract: string; readonly chainId?: number | undefined };
+
 /** 任务提交信号（UVPStateMachineSignal）的验签合约预期：状态机部署地址。 */
-export function submitSignExpectation(env: SignDomainEnv = buildTimeSignDomainEnv()): { readonly expected: { readonly verifyingContract: string } } {
+export function submitSignExpectation(env: SignDomainEnv = buildTimeSignDomainEnv()): { readonly expected: SignDomainExpected } {
+  const chainId = optionalEnvChainId(env);
   return {
     expected: {
-      verifyingContract: requiredEnvAddress(env, "VITE_UVP_STATE_MACHINE_ADDRESS", "状态机部署地址")
+      verifyingContract: requiredEnvAddress(env, "VITE_UVP_STATE_MACHINE_ADDRESS", "状态机部署地址"),
+      ...(chainId !== undefined ? { chainId } : {})
     }
   };
 }
@@ -125,7 +154,7 @@ export function taskSubmitSignInput(
   readonly typedData: ProductSubmitTypedData;
   readonly walletAddress: string;
   readonly preparedSubmitters: readonly (string | undefined)[];
-  readonly expected: { readonly verifyingContract: string };
+  readonly expected: SignDomainExpected;
 } {
   return {
     typedData: prepared.typedData,
@@ -139,11 +168,14 @@ export function taskSubmitSignInput(
  * 阶段补丁（executor/resource patch）的 EIP-712 域由 UVPStagePatchModule 验签，
  * 不是任务投影里的状态机地址；预期值同样来自部署配置注入，不读 prepare
  * 响应里的 humanSummary.verifyingContract（与被核对对象同源会被攻陷 BFF 操纵）。
+ * 部署链 ID 与提交信号同一部署（同一 VITE_UVP_CHAIN_ID）。
  */
-export function stagePatchSignExpectation(env: SignDomainEnv = buildTimeSignDomainEnv()): { readonly expected: { readonly verifyingContract: string } } {
+export function stagePatchSignExpectation(env: SignDomainEnv = buildTimeSignDomainEnv()): { readonly expected: SignDomainExpected } {
+  const chainId = optionalEnvChainId(env);
   return {
     expected: {
-      verifyingContract: requiredEnvAddress(env, "VITE_UVP_STAGE_PATCH_MODULE_ADDRESS", "阶段补丁模块地址")
+      verifyingContract: requiredEnvAddress(env, "VITE_UVP_STAGE_PATCH_MODULE_ADDRESS", "阶段补丁模块地址"),
+      ...(chainId !== undefined ? { chainId } : {})
     }
   };
 }

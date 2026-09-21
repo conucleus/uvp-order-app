@@ -1,6 +1,7 @@
 import type { ProductOrderDTO, ProductTaskDTO } from "@uvp-eth/product-dto";
 import type { ParticipantSession } from "../auth/participant";
 import type { ProductApiSource, ProductHomeData } from "../api/productApi";
+import { participantPath } from "../api/participantPath";
 import { parseDeadlineUtcMs } from "../tasks/model/taskUtils";
 import type {
   OrderAppNotificationDTO,
@@ -42,7 +43,7 @@ export async function loadOrderAppNotifications(
 
   try {
     await syncPendingNotificationReads(data, session, fetcher, options);
-    const response = await fetcher(joinUrl(data.source.baseUrl, participantPath("/product/me/activity-feed", session)), {
+    const response = await fetcher(joinUrl(data.source.baseUrl, participantPath("/product/me/activity-feed", session.walletAddress)), {
       method: "GET",
       headers: {
         "content-type": "application/json",
@@ -713,14 +714,6 @@ function routeHash(section: "tasks" | "orders" | "proof", orderId: string, taskI
     params.set("task", taskId);
   }
   return `#${params.toString()}`;
-}
-
-function participantPath(pathname: string, session: ParticipantSession): string {
-  if (!session.walletAddress) {
-    return pathname;
-  }
-  const query = new URLSearchParams({ walletAddress: session.walletAddress });
-  return `${pathname}?${query.toString()}`;
 }
 
 function joinUrl(baseUrl: string, pathname: string): string {

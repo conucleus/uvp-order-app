@@ -256,10 +256,14 @@ export async function signProductSubmitWithInjectedWallet(input: {
   if (!provider) {
     throw new InjectedWalletError("missing_wallet", "未检测到浏览器钱包，不能创建业务签名。");
   }
+  const signer = input.walletAddress.trim();
+  if (!signer) {
+    throw new InjectedWalletError("wallet_signature_failed", "缺少签名钱包。");
+  }
   // executor-kit 只核对 submitter 一致性；域与结构在这里补齐同一签名边界。
   assertTypedDataEnvelopeMatchesProtocol(
     input.typedData,
-    input.walletAddress,
+    signer,
     input.expected,
     input.preparedSubmitters
   );
@@ -280,7 +284,7 @@ export async function signProductSubmitWithInjectedWallet(input: {
   }
 
   try {
-    return await requestProductSubmitSignature(provider, input.typedData, input.walletAddress);
+    return await requestProductSubmitSignature(provider, input.typedData, signer);
   } catch (error) {
     if (error instanceof InjectedWalletError) {
       throw error;

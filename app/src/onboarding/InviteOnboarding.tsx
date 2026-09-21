@@ -153,7 +153,9 @@ export function InviteOnboarding({ inviteId, inviteToken, actions, session, onAc
   // 防抖与预览刷新都不再重跑——迟到的 400ms 探测会把刚落档的终态出口
   // 无差别冲回 loading→ready 表单，accept/reject 的失败结论闪现即被替换。
   // 用 ref 而不是把 loadState 加进预览 effect 依赖：ready 本身也会触发
-  // 预览重发，形成循环。声明在防抖/预览 effect 之前，同一提交内先置闩。
+  // 预览重发，形成循环。action 调用点在 setLoadState 的同一提交内同步置
+  // 位（effect 要等提交后才跑，期间在途预览的 .then 仍会读到 false）；
+  // 本 effect 兜底预览链路自己落的不可重试终态。
   const inviteSettledRef = useRef(false);
   useEffect(() => {
     if (loadState.status === "accepted" || loadState.status === "rejected"
@@ -254,6 +256,9 @@ export function InviteOnboarding({ inviteId, inviteToken, actions, session, onAc
       return;
     }
     if (isTerminalInviteFailure(error)) {
+      // 终态同步置闩：不等 effect——同一事件循环内在途预览的 .then 仍可能
+      // 把 error 出口覆盖回 ready 表单。
+      inviteSettledRef.current = true;
       setLoadState({
         status: "error",
         message: error instanceof ProductApiError && error.status === 409
@@ -264,6 +269,7 @@ export function InviteOnboarding({ inviteId, inviteToken, actions, session, onAc
       return;
     }
     if (isWalletIdentityInviteFailure(error)) {
+      inviteSettledRef.current = true;
       setLoadState({
         status: "error",
         message: walletIdentityInviteFailureCopy(error),
@@ -306,6 +312,7 @@ export function InviteOnboarding({ inviteId, inviteToken, actions, session, onAc
         reportInviteActionFailure(error, "接受邀请失败");
         return;
       }
+      inviteSettledRef.current = true;
       setLoadState({ status: "accepted", invite });
       onAccepted();
     } finally {
@@ -330,6 +337,7 @@ export function InviteOnboarding({ inviteId, inviteToken, actions, session, onAc
         reportInviteActionFailure(error, "拒绝邀请失败");
         return;
       }
+      inviteSettledRef.current = true;
       setLoadState({ status: "rejected" });
       onRejected?.();
     } finally {

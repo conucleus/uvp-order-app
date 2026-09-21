@@ -554,7 +554,7 @@ function ManifestComponent({
         aria-label={component.label}
         onChange={(event) => onValueChange(component.inputId!, event.currentTarget.value)}
         placeholder={component.placeholder ?? manifestInputPlaceholder(component.componentKind)}
-        type={component.componentKind === "uri" || component.componentKind === "hash" || component.componentKind === "wallet" ? "text" : "text"}
+        type="text"
         value={value}
       />
     </label>

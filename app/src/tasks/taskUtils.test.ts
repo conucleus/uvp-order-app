@@ -43,7 +43,7 @@ describe("stage patch signing domain expectation", () => {
   });
 
   it("refuses to sign when the deployment config does not declare the patch module address", () => {
-    // 缺预期值即拒绝签名（fail-closed），不再条件性跳过比对。
+    // 缺预期值即拒绝签名（fail-closed）。
     assert.throws(() => stagePatchSignExpectation({}), /VITE_UVP_STAGE_PATCH_MODULE_ADDRESS/u);
     assert.throws(() => stagePatchSignExpectation({ VITE_UVP_STAGE_PATCH_MODULE_ADDRESS: "not-an-address" }), /VITE_UVP_STAGE_PATCH_MODULE_ADDRESS/u);
   });
@@ -62,6 +62,32 @@ describe("task submit signing domain expectation", () => {
   it("refuses to sign when the deployment config does not declare the state machine address", () => {
     assert.throws(() => submitSignExpectation({}), /VITE_UVP_STATE_MACHINE_ADDRESS/u);
     assert.throws(() => submitSignExpectation({ VITE_UVP_STATE_MACHINE_ADDRESS: "0x1234" }), /VITE_UVP_STATE_MACHINE_ADDRESS/u);
+  });
+
+  it("anchors domain.chainId from the same deployment config as the contract address", () => {
+    assert.deepEqual(
+      submitSignExpectation({ VITE_UVP_STATE_MACHINE_ADDRESS: stateMachineAddress, VITE_UVP_CHAIN_ID: " 31337 " }),
+      { expected: { verifyingContract: stateMachineAddress, chainId: 31337 } }
+    );
+    assert.deepEqual(
+      stagePatchSignExpectation({ VITE_UVP_STAGE_PATCH_MODULE_ADDRESS: "0x8888888888888888888888888888888888888888", VITE_UVP_CHAIN_ID: "31337" }),
+      { expected: { verifyingContract: "0x8888888888888888888888888888888888888888", chainId: 31337 } }
+    );
+  });
+
+  it("keeps chainId unanchored when the config omits it, but refuses malformed values", () => {
+    assert.deepEqual(
+      submitSignExpectation({ VITE_UVP_STATE_MACHINE_ADDRESS: stateMachineAddress }),
+      { expected: { verifyingContract: stateMachineAddress } }
+    );
+    assert.throws(
+      () => submitSignExpectation({ VITE_UVP_STATE_MACHINE_ADDRESS: stateMachineAddress, VITE_UVP_CHAIN_ID: "0x7a69" }),
+      /VITE_UVP_CHAIN_ID/u
+    );
+    assert.throws(
+      () => submitSignExpectation({ VITE_UVP_STATE_MACHINE_ADDRESS: stateMachineAddress, VITE_UVP_CHAIN_ID: "-1" }),
+      /VITE_UVP_CHAIN_ID/u
+    );
   });
 });
 
@@ -101,6 +127,21 @@ describe("task submit boundary sign input assembly", () => {
     );
     // 投影类型允许 prepare 记录未声明提交方：undefined 条目由闸门跳过。
     assert.deepEqual(taskSubmitSignInput({ typedData }, walletAddress, env).preparedSubmitters, [undefined]);
+  });
+
+  it("refuses to sign when the deployment chain differs from the prepared envelope domain", async () => {
+    // 部署配置锚定的 chainId 与被核对的 typedData.domain 不一致：钱包闸门
+    // 在调钱包前拒绝（换链攻击与换合约地址同罪）。
+    const wrongChain = taskSubmitSignInput({ typedData }, walletAddress, {
+      VITE_UVP_STATE_MACHINE_ADDRESS: stateMachineAddress,
+      VITE_UVP_CHAIN_ID: "31338"
+    });
+    await assert.rejects(
+      signProductSubmitWithInjectedWallet({ ...wrongChain, provider: acceptAllProvider() }),
+      (error) => error instanceof InjectedWalletError &&
+        error.code === "typed_data_mismatch" &&
+        /domain\.chainId 31337 与预期 31338 不一致/.test(error.message)
+    );
   });
 
   it("refuses to sign when the prepared record names a different submitter (built-in plugin submit boundary)", async () => {
