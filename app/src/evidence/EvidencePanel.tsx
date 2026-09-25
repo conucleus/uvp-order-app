@@ -246,6 +246,9 @@ export function EvidencePanel({
       return;
     }
     const requestScopeKey = taskScopeRef.current;
+    // prepare 与签名提交共用同一同步互斥：preparing 状态落盘前的第二次
+    // 点击由 ref 挡下，不是只读探测。
+    submitInflightRef.current.tryAcquire();
     setPrepareState({ status: "preparing" });
     try {
       const prepared = await prepareApiSubmit({
@@ -268,6 +271,8 @@ export function EvidencePanel({
         message: error instanceof Error ? error.message : "提交预检失败",
         terminal: false
       });
+    } finally {
+      submitInflightRef.current.release();
     }
   }
 
