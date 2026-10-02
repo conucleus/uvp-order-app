@@ -279,15 +279,6 @@ export function ExecutorPatchPanel({
         </div>
       ) : null}
 
-      {executorPatchWorkStarted(selectedTarget) ? (
-        // replacement 入口退役后的承接位：非协作换人（原履约者失联/作恶）
-        // 今后走治理分叉车道，该通道尚未开放——只提示，不造假按钮。
-        <div className="executor-authority-note governance-fork-note" aria-label="治理分叉提示">
-          <strong>原履约者不配合交接？</strong>
-          <span>治理分叉承接即将上线：当前版本不能在原履约者未签名的情况下更换履约者。</span>
-        </div>
-      ) : null}
-
       <div className="patch-grid">
         <label className="plugin-field">
           <span>
@@ -511,8 +502,7 @@ function executorPatchModeIntro(mode: ProductExecutorPatchMode): string {
     case "handoff":
       return "已开始阶段需原履约者签名；已完成部分不变。";
     default:
-      // replacement 已退役：历史投影不应再走到这里，保守给只读描述。
-      return "该处理方式已退役；原履约者不配合时请等待治理分叉承接。";
+      return "处理方式无效";
   }
 }
 

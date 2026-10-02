@@ -536,6 +536,16 @@ export function handoffSelectorTask(overrides: Partial<ProductTaskWithAddOns> = 
             priorAuthorityLabel: "已完成部分不变",
             futureAuthorityLabel: "交接确认后，新履约者只接续后续工作",
             guidanceLabel: "需要原履约者签名"
+          },
+          {
+            mode: "assign",
+            modeLabel: "选择履约者",
+            allowed: false,
+            workStarted: true,
+            requiresSelectorSignature: true,
+            requiresPreviousExecutorSignature: false,
+            requiresApprovalSignal: false,
+            disabledReason: "阶段已开始，不能直接选择履约者。"
           }
         ],
         priorAuthorityLabel: "已完成部分不变",
@@ -548,19 +558,6 @@ export function handoffSelectorTask(overrides: Partial<ProductTaskWithAddOns> = 
         desc: "交接只影响后续履约权限，不改写已提交的阶段事实。"
       }
     ],
-    ...overrides
-  });
-}
-
-/**
- * 开工后仅有交接通道的投影（replacement 退役后的新面）：用于钉住
- * 「治理分叉承接即将上线」提示与已退役入口不出现的前端行为。
- */
-export function governanceForkPendingSelectorTask(overrides: Partial<ProductTaskWithAddOns> = {}): ProductTaskDTO {
-  return handoffSelectorTask({
-    taskId: "task-selector-fork-pending-001",
-    title: "交接检验履约者",
-    subtitle: "已开始阶段由原履约者签名交接剩余工作；原履约者不配合时等待治理分叉承接。",
     ...overrides
   });
 }
@@ -818,8 +815,7 @@ export async function installProductApiStub(page: Page, options: StubOptions = {
             mode,
             selector: participantWallet,
             previousExecutor: previousExecutor ?? "0x0000000000000000000000000000000000000000",
-            // 桩载荷：新 digest 面以 authorizationsHash 承诺生效时写入的
-            // 显式订单级授权集（approval 双字段已随 replacement 退役）。
+            // 桩载荷：digest 面以 authorizationsHash 承诺生效时写入的显式订单级授权集。
             authorizationsHash: "0xcccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
           }
         },
@@ -1009,7 +1005,7 @@ function executorPatchModeLabel(mode: ProductExecutorPatchMode): string {
     case "handoff":
       return "交接履约者";
     default:
-      return "履约者调整（通道已退役）";
+      return "处理方式无效";
   }
 }
 

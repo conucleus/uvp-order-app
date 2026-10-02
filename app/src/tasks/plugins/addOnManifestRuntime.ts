@@ -229,12 +229,11 @@ function semanticErrorsForAction(
     if (executorMetadataHash && !looksLikeHash(executorMetadataHash)) {
       errors.push("executorMetadataHash 必须是 0x 开头的 32 字节指纹。");
     }
-    // 与应用层 ExecutorPatchPanel 同一双模式门槛：manifest 驱动路径不得
-    // 绕过（replacement 已退役，非协作换人等待治理分叉车道）。
+    // 与应用层 ExecutorPatchPanel 同一双模式门槛：manifest 驱动路径不得绕过。
     const modeInput = boundValue(action, state, "mode");
     const mode = normalizeExecutorPatchMode(modeInput);
     if (modeInput && !mode) {
-      errors.push("处理方式必须是 assign/handoff 之一（协议拼写；replacement 已退役）。");
+      errors.push("处理方式必须是 assign/handoff 之一。");
     }
     const target = selectableTargetsForTask(state.task)
       .find((candidate) => targetStageId(candidate) === boundValue(action, state, "targetStageId"));
@@ -311,9 +310,8 @@ function valueForInput(state: AddOnManifestRuntimeState, inputId: string): strin
 }
 
 function normalizeExecutorPatchMode(value: string): ProductExecutorPatchMode | undefined {
-  // 只认协议冻结的双模式拼写（assign/handoff）：replacement 已随合约批
-  // 退役（非协作换人走治理分叉车道），自造拼写（含退役词与 "replace"
-  // 别名）一律拒绝，客户端不提供绕过应用层按 mode 建立门槛的路径。
+  // 只认协议冻结的双模式拼写（assign/handoff）：自造拼写一律拒绝，客户端
+  // 不提供绕过应用层按 mode 建立门槛的路径。
   if (value === "assign" || value === "handoff") {
     return value;
   }

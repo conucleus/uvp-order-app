@@ -68,8 +68,6 @@ export interface ExecutorPatchModeOptionDTO extends Omit<
   | "targetStageId"
   | "previousExecutor"
   | "previousExecutorLabel"
-  | "approvalSourceId"
-  | "approvalSignalId"
   | "approvalSignalLabel"
   | "approvalSignal"
   | "priorAuthorityLabel"
@@ -174,11 +172,8 @@ export function executorPatchModeOptionsForTarget(target: SelectableTargetStageD
   if (!target) {
     return [];
   }
-  // replacement 已随合约批退役（原履约者不配合的换人走治理分叉车道，尚未
-  // 开放）：服务端投影若仍携带 replacement 选项，一律过滤，不向前端暴露
-  // 已退役入口；assign=开工前选择履约者，handoff=开工后原履约者会签交接。
-  const projected = (target.executorPatchModes ?? [])
-    .filter((mode) => mode.mode === "assign" || mode.mode === "handoff");
+  // 协议词表为双模式闭集：assign=开工前选择履约者，handoff=开工后原履约者会签交接。
+  const projected = target.executorPatchModes ?? [];
   if (projected.length > 0) {
     return projected.map((mode) => normalizeExecutorPatchModeOption(target, mode));
   }
@@ -202,8 +197,7 @@ export function executorPatchModeLabel(mode: ProductExecutorPatchMode): string {
     case "handoff":
       return "交接履约者";
     default:
-      // replacement 已退役：仅为历史投影/提交记录提供只读展示，不构成入口。
-      return "履约者调整（通道已退役）";
+      return "处理方式无效";
   }
 }
 
@@ -214,7 +208,7 @@ export function executorPatchModeGuidance(mode: ProductExecutorPatchMode): strin
     case "handoff":
       return "已开始阶段需原履约者签名，同意交接剩余工作。";
     default:
-      return "该处理方式已退役；原履约者不配合时请等待治理分叉承接。";
+      return "处理方式无效。";
   }
 }
 

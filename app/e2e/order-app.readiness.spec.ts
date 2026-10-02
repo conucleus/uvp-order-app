@@ -4,7 +4,6 @@ import {
   bareNoteResourceRequirement,
   customsEvidenceTask,
   executorMetadataHash,
-  governanceForkPendingSelectorTask,
   handoffSelectorTask,
   manifestTask,
   packingListResourceRequirement,
@@ -288,17 +287,17 @@ test.describe("UVP Order App production readiness negatives", () => {
     await expect(page.getByRole("heading", { name: "交接履约者" })).toBeVisible();
     await expect(page.getByLabel("履约权限说明").getByText("已完成部分不变")).toBeVisible();
     await expect(page.getByLabel("原履约者钱包")).toHaveValue(previousExecutorWallet);
-    await expect(page.getByLabel("替换证明来源")).toHaveCount(0);
 
     await page.getByRole("textbox", { name: "履约者钱包", exact: true }).fill("0x0000000000000000000000000000000000000002");
     await page.getByLabel("履约者指纹").fill(executorMetadataHash);
     await page.getByLabel("补充说明 URI").fill("ipfs://executor-patch/handoff");
     await page.getByRole("button", { name: "准备提交" }).click();
     await expect(page.getByText("准备编号 prep-executor-patch-001")).toBeVisible();
-    await expect(page.getByLabel("原履约者签名")).toBeVisible();
+    // exact：模式单选的可见文案含「需要原履约者签名」，避免子串误命中。
+    await expect(page.getByLabel("原履约者签名", { exact: true })).toBeVisible();
     await expect(page.getByRole("button", { name: "使用钱包签名并提交" })).toBeDisabled();
 
-    await page.getByLabel("原履约者签名").fill(`0x${"cc".repeat(65)}`);
+    await page.getByLabel("原履约者签名", { exact: true }).fill(`0x${"cc".repeat(65)}`);
     await page.getByRole("button", { name: "使用钱包签名并提交" }).click();
 
     await page.getByRole("button", { name: "查看证明" }).last().click();
@@ -307,27 +306,26 @@ test.describe("UVP Order App production readiness negatives", () => {
     await expect(page.getByText(previousExecutorWallet).first()).toBeVisible();
   });
 
-  test("post-start patch shows the governance fork notice and no retired replacement entry", async ({ page }) => {
-    await installProductApiStub(page, { task: governanceForkPendingSelectorTask() });
+  test("post-start patch offers exactly the assign/handoff mode set", async ({ page }) => {
+    await installProductApiStub(page, { task: handoffSelectorTask() });
     await page.goto("/");
 
     await expect(page.getByRole("heading", { name: "交接履约者" })).toBeVisible();
-    // 非协作换人的承接位：静态治理分叉提示（不可点击），不造假按钮。
-    await expect(page.getByLabel("治理分叉提示")).toContainText("治理分叉承接即将上线");
-    await expect(page.getByLabel("治理分叉提示")).toContainText("原履约者不配合");
-    // 已退役入口与替换证明材料一律不出现。
-    await expect(page.getByText("申请替换履约者")).toHaveCount(0);
-    await expect(page.getByText("需要替换证明")).toHaveCount(0);
-    await expect(page.getByLabel("替换证明来源")).toHaveCount(0);
-    await expect(page.getByLabel("替换证明编号")).toHaveCount(0);
+    // 模式词表为闭集：处理方式选项恰好为「交接履约者/选择履约者」两种，
+    // 页面上不存在第三种模式入口。
+    const modeOptions = page.locator("fieldset.patch-mode-options");
+    await expect(modeOptions).toBeVisible();
+    await expect(modeOptions.getByRole("radio")).toHaveCount(2);
+    await expect(modeOptions.getByRole("radio", { name: "交接履约者" })).toBeChecked();
+    await expect(modeOptions.getByRole("radio", { name: "选择履约者" })).toBeDisabled();
 
-    // 交接通道本身仍可用：原履约者签名缺省时提交按钮保持禁用。
+    // 交接通道本身可用：原履约者签名缺省时提交按钮保持禁用。
     await page.getByRole("textbox", { name: "履约者钱包", exact: true }).fill("0x0000000000000000000000000000000000000002");
     await page.getByLabel("履约者指纹").fill(executorMetadataHash);
     await page.getByLabel("补充说明 URI").fill("ipfs://executor-patch/handoff");
     await page.getByRole("button", { name: "准备提交" }).click();
     await expect(page.getByText("准备编号 prep-executor-patch-001")).toBeVisible();
-    await expect(page.getByLabel("原履约者签名")).toBeVisible();
+    await expect(page.getByLabel("原履约者签名", { exact: true })).toBeVisible();
     await expect(page.getByRole("button", { name: "使用钱包签名并提交" })).toBeDisabled();
   });
 

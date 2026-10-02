@@ -26,8 +26,8 @@ const typedData = buildProductSubmitTypedData({
 });
 
 const stagePatchTypedData: GenericTypedData = {
-  // 域版本随合约批 0.1→0.2（digest 面换血：authorizationsHash 进信封，
-  // approval 双字段退役）；字段表为最小桩，闸门只锚定域与签名者。
+  // 域版本随合约批 0.1→0.2（digest 面换血：authorizationsHash 进信封）；
+  // 字段表为最小桩，闸门只锚定域与签名者。
   domain: { name: "UVPStagePatchModule", version: "0.2", chainId: 31337, verifyingContract: "0x8888888888888888888888888888888888888888" },
   types: {
     UVPStagePatchModuleStageExecutorPatch: [

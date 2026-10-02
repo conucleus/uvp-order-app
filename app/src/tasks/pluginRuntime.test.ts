@@ -207,7 +207,7 @@ describe("task plugin runtime", () => {
     assert.equal(executorPatchModeLabel("assign"), "选择履约者");
   });
 
-  it("keeps handoff only after start and filters the retired replacement option", () => {
+  it("keeps handoff only after start", () => {
     const previousExecutor = "0x2222222222222222222222222222222222222222";
     const task = taskFixture("evidence_submission", {
       addOnKind: "stage_executor_patch",
@@ -230,20 +230,6 @@ describe("task plugin runtime", () => {
               requiresApprovalSignal: false,
               previousExecutor,
               priorAuthorityLabel: "已完成部分不变"
-            },
-            {
-              // 退役词表投影：服务端旧投影仍可能携带 replacement 选项，
-              // 前端必须过滤，不暴露已退役入口。
-              mode: "replacement",
-              modeLabel: "申请替换履约者",
-              allowed: true,
-              workStarted: true,
-              requiresSelectorSignature: true,
-              requiresPreviousExecutorSignature: false,
-              requiresApprovalSignal: true,
-              previousExecutor,
-              guidanceLabel: "需要替换证明",
-              priorAuthorityLabel: "已完成部分不变"
             }
           ]
         }
@@ -254,7 +240,6 @@ describe("task plugin runtime", () => {
 
     assert.deepEqual(modes.map((mode) => mode.mode), ["handoff"]);
     assert.equal(modes.some((mode) => mode.mode === "assign"), false);
-    assert.equal(modes.some((mode) => mode.mode === "replacement"), false);
     assert.equal(modes[0]?.requiresPreviousExecutorSignature, true);
     assert.equal(modes[0]?.previousExecutor, previousExecutor);
     assert.equal(modes[0]?.priorAuthorityLabel, "已完成部分不变");
@@ -569,7 +554,7 @@ describe("task plugin runtime", () => {
     assert.match(resourcePatchValidation.errors.join("\n"), /资源可见性/);
   });
 
-  it("drops a retired approval binding instead of forwarding replacement material", () => {
+  it("omits the manifest approval binding from the prepare request", () => {
     const manifest = addOnManifestFixture("stage_executor_patch", "stage_executor_patch", { withApprovalBinding: true });
     const action = manifest.actions[0]!;
     const task = taskFixture("evidence_submission", {
@@ -586,8 +571,8 @@ describe("task plugin runtime", () => {
       mode: "assign"
     };
 
-    // approval 随 replacement 退役：即使旧 manifest 仍绑定该输入，prepare
-    // 请求也不再携带（不转发退役授权材料，也不因旧输入阻断正常提交）。
+    // prepare 请求不包含审批字段：manifest 绑定的 approval 输入不进入请求，
+    // 也不因该输入阻断正常提交。
     const validation = validateAddOnManifestAction(manifest, action, {
       ...createInitialAddOnManifestState(task, wallet),
       values: { ...baseValues, approval: "source-id signal-id" },
@@ -965,7 +950,7 @@ function addOnManifestFixture(
       componentId: "approval",
       componentKind: "text",
       inputId: "approval",
-      label: "替换证明"
+      label: "审批输入"
     };
     return {
       schemaVersion: "participant-addon-manifest.v1",
@@ -1129,15 +1114,15 @@ describe("manifest-driven executor patch keeps the dual-mode gate", () => {
   it("rejects the self-invented replace spelling instead of letting it slip through as assign", () => {
     const validation = validateWith({ mode: "replace" });
     assert.equal(validation.ok, false);
-    assert.ok(validation.errors.includes("处理方式必须是 assign/handoff 之一（协议拼写；replacement 已退役）。"));
+    assert.ok(validation.errors.includes("处理方式必须是 assign/handoff 之一。"));
   });
 
-  it("rejects the retired replacement spelling instead of reviving the retired lane", () => {
-    const validation = validateWith({ mode: "replacement" });
+  it("rejects mode values outside the assign/handoff closed set", () => {
+    const validation = validateWith({ mode: "reassign" });
     assert.equal(validation.ok, false);
-    assert.ok(validation.errors.includes("处理方式必须是 assign/handoff 之一（协议拼写；replacement 已退役）。"));
-    // 退役通道不再要求替换证明：唯一拒绝理由是词表退役本身。
-    assert.equal(validation.errors.includes("需要替换证明。"), false);
+    assert.ok(validation.errors.includes("处理方式必须是 assign/handoff 之一。"));
+    // 闭集外取值只有这一条拒绝理由，不产生其他语义错误。
+    assert.equal(validation.errors.length, 1);
   });
 
   it("requires the previous executor wallet for handoff only", () => {

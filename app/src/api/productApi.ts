@@ -191,7 +191,6 @@ export interface PrepareStageExecutorPatchInput {
   readonly metadataURI: string;
   readonly mode?: ProductExecutorPatchMode | undefined;
   readonly previousExecutorWallet?: string | undefined;
-  readonly approval?: unknown | undefined;
   readonly executorReference?: string | undefined;
 }
 
@@ -250,8 +249,6 @@ export interface PreparedStageExecutorPatchDTO {
   readonly targetStageId: string;
   readonly mode?: ProductExecutorPatchMode;
   readonly previousExecutor?: string;
-  readonly approvalSourceId?: string;
-  readonly approvalSignalId?: string;
   readonly patchHash: Hex;
   readonly expiresAt?: string;
   readonly typedData: Eip712TypedDataDTO;
@@ -275,8 +272,6 @@ export interface StageExecutorPatchSubmissionDTO {
   readonly targetStageId: string;
   readonly mode?: ProductExecutorPatchMode;
   readonly previousExecutor?: string;
-  readonly approvalSourceId?: string;
-  readonly approvalSignalId?: string;
   readonly status: ProductSubmissionStatus;
   readonly txHash?: Hex;
   readonly blockNumber?: string;
