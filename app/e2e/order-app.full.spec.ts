@@ -13,7 +13,8 @@ import {
   filterProductTasksForOrder,
   findProductTaskForOrderByAction,
   productTaskActionKinds,
-  selectParticipantWalletsFromFullSummary
+  selectParticipantWalletsFromFullSummary,
+  summaryContentAddressedUri
 } from "../src/testing/orderAppFullSummary";
 
 type Hex = `0x${string}`;
@@ -159,9 +160,9 @@ test.describe.serial("full staging participant full Order App staging participan
     await fillByLabel(detail, /选择方钱包|买家钱包|selector wallet/u, summary.nonSelectedExecutorWallet);
     await fillByLabel(detail, /履约者钱包|报关履约者钱包/u, summary.activeExecutorWallet);
     await fillByLabel(detail, /履约者元数据指纹|履约者指纹|executorMetadataHash/u, summary.executorMetadataHash);
-    await fillOptionalByLabel(detail, /履约者元数据 URI|补充说明 URI|metadata URI/u, contentAddressedUriForForm(
-      summary.executorMetadataURI,
-      summary.executorMetadataHash
+    await fillOptionalByLabel(detail, /履约者元数据 URI|补充说明 URI|metadata URI/u, summaryContentAddressedUri(
+      "executorMetadataURI",
+      summary.executorMetadataURI
     ));
 
     await expect(detail.getByText(/钱包与授权参与方不匹配/u).first()).toBeVisible();
@@ -297,6 +298,18 @@ function assertSummaryGate(input: SummaryExpectations): void {
     expect(input.eventTxHashes[eventName], `${eventName} tx hash must not be zero`).not.toBe(
       "0x0000000000000000000000000000000000000000000000000000000000000000"
     );
+  }
+  // URI 字段先按生产口径整体校验：summary 若带 urn:/https: 等非内容寻址
+  // 引用，生产表单必然阻断提交——在门前置断言里点名数据形态分叉，而不是
+  // 让用例在中途以「准备提交按钮不可点」的形态误报成产品故障。
+  for (const [label, uri] of [
+    ["executorMetadataURI", input.executorMetadataURI],
+    ["resourceManifestURI", input.resourceManifestURI]
+  ] as const) {
+    expect(
+      () => summaryContentAddressedUri(label, uri),
+      `summary ${label} 必须满足生产内容寻址预检（拒绝 urn:/https:）`
+    ).not.toThrow();
   }
 }
 
@@ -525,9 +538,9 @@ async function submitSelectorPatchIfOpen(page: Page, task: ProductTaskDTO): Prom
   await fillByLabel(detail, /选择方钱包|买家钱包|selector wallet/u, summary.selectorWallet);
   await fillByLabel(detail, /履约者钱包|报关履约者钱包/u, summary.activeExecutorWallet);
   await fillByLabel(detail, /履约者元数据指纹|履约者指纹|executorMetadataHash/u, summary.executorMetadataHash);
-  await fillOptionalByLabel(detail, /履约者元数据 URI|补充说明 URI|metadata URI/u, contentAddressedUriForForm(
-    summary.executorMetadataURI,
-    summary.executorMetadataHash
+  await fillOptionalByLabel(detail, /履约者元数据 URI|补充说明 URI|metadata URI/u, summaryContentAddressedUri(
+    "executorMetadataURI",
+    summary.executorMetadataURI
   ));
   await clickFirstEnabled(detail, /选择报关履约者|选择履约者|准备提交/u);
   await expect(detail.getByText(/浏览器钱包只签署|准备编号/u).first()).toBeVisible();
@@ -544,7 +557,7 @@ async function submitResourcePatchIfOpen(page: Page, task: ProductTaskDTO): Prom
   const detail = taskDetailPanel(page);
   await fillOptionalByLabel(detail, /请求方钱包|买家钱包/u, summary.resourcePatchWallet);
   await fillByLabel(detail, /资源键/u, summary.resourceKey);
-  await fillByLabel(detail, /资源清单 URI/u, contentAddressedUriForForm(summary.resourceManifestURI, summary.resourceManifestHash));
+  await fillByLabel(detail, /资源清单 URI/u, summaryContentAddressedUri("resourceManifestURI", summary.resourceManifestURI));
   await fillByLabel(detail, /资源清单指纹|清单指纹/u, summary.resourceManifestHash);
   await fillByLabel(detail, /访问策略指纹|权限指纹/u, summary.resourcePolicyHash);
   await clickFirstEnabled(detail, /补充凭证要求|准备提交/u);
@@ -711,23 +724,6 @@ function userVisibleTaskProofValues(task: ProductTaskDTO): readonly string[] {
 function cleanProofValue(value: string | undefined): readonly string[] {
   const trimmed = value?.trim();
   return trimmed ? [trimmed] : [];
-}
-
-function contentAddressedUriForForm(value: string, fallbackHash: string): string {
-  const trimmed = value.trim();
-  if (isContentAddressedReference(trimmed)) {
-    return trimmed;
-  }
-  return `urn:sha256:${fallbackHash.replace(/^0x/u, "")}`;
-}
-
-function isContentAddressedReference(value: string): boolean {
-  const trimmed = value.trim().toLowerCase();
-  return trimmed.startsWith("ipfs://") ||
-    trimmed.startsWith("ar://") ||
-    trimmed.startsWith("cid:") ||
-    trimmed.startsWith("bafy") ||
-    trimmed.startsWith("urn:");
 }
 
 function eventBooleanPaths(eventName: EventName): readonly string[] {
