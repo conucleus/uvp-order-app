@@ -26,15 +26,22 @@ const typedData = buildProductSubmitTypedData({
 });
 
 const stagePatchTypedData: GenericTypedData = {
-  domain: { name: "UVPStagePatchModule", version: "0.1", chainId: 31337, verifyingContract: "0x8888888888888888888888888888888888888888" },
+  // 域版本随合约批 0.1→0.2（digest 面换血：authorizationsHash 进信封，
+  // approval 双字段退役）；字段表为最小桩，闸门只锚定域与签名者。
+  domain: { name: "UVPStagePatchModule", version: "0.2", chainId: 31337, verifyingContract: "0x8888888888888888888888888888888888888888" },
   types: {
     UVPStagePatchModuleStageExecutorPatch: [
       { name: "orderId", type: "bytes32" },
-      { name: "selector", type: "address" }
+      { name: "selector", type: "address" },
+      { name: "authorizationsHash", type: "bytes32" }
     ]
   },
   primaryType: "UVPStagePatchModuleStageExecutorPatch",
-  message: { orderId: "0x0101", selector: walletAddress }
+  message: {
+    orderId: "0x0101",
+    selector: walletAddress,
+    authorizationsHash: "0xcccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+  }
 };
 
 function acceptAllProvider(): Eip1193Provider {

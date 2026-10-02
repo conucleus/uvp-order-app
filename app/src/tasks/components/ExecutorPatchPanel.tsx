@@ -38,8 +38,6 @@ interface ExecutorPatchDraftState {
   readonly executorWallet: string;
   readonly executorMetadataHash: string;
   readonly executorReference: string;
-  readonly approvalSourceId: string;
-  readonly approvalSignalId: string;
   readonly metadataURI: string;
   readonly previousExecutorSignature: string;
 }
@@ -126,8 +124,6 @@ export function ExecutorPatchPanel({
       targetStageId: nextTargetStageId,
       mode: nextMode?.mode ?? "assign",
       previousExecutor: executorPatchPreviousExecutor(nextMode, nextTarget),
-      approvalSourceId: nextMode?.approvalSourceId ?? "",
-      approvalSignalId: nextMode?.approvalSignalId ?? "",
       previousExecutorSignature: ""
     });
   }
@@ -137,8 +133,6 @@ export function ExecutorPatchPanel({
     updateDraft({
       mode: nextModeValue,
       previousExecutor: executorPatchPreviousExecutor(nextMode, selectedTarget),
-      approvalSourceId: nextMode?.approvalSourceId ?? "",
-      approvalSignalId: nextMode?.approvalSignalId ?? "",
       previousExecutorSignature: ""
     });
   }
@@ -156,9 +150,6 @@ export function ExecutorPatchPanel({
         targetStageId: draft.targetStageId,
         mode: draft.mode,
         ...(draft.previousExecutor.trim() ? { previousExecutorWallet: draft.previousExecutor.trim() } : {}),
-        ...(draft.approvalSourceId.trim() && draft.approvalSignalId.trim()
-          ? { approval: { sourceId: draft.approvalSourceId.trim(), signalId: draft.approvalSignalId.trim() } }
-          : {}),
         executorWallet: draft.executorWallet.trim(),
         executorMetadataHash: draft.executorMetadataHash.trim(),
         ...(draft.executorReference.trim() ? { executorReference: draft.executorReference.trim() } : {}),
@@ -285,7 +276,15 @@ export function ExecutorPatchPanel({
         <div className="executor-authority-note" aria-label="履约权限说明">
           <strong>{selectedMode.priorAuthorityLabel ?? (executorPatchWorkStarted(selectedTarget) ? "已完成部分不变" : "阶段尚未开始")}</strong>
           <span>{selectedMode.futureAuthorityLabel ?? "确认后只变更后续履约权限"}</span>
-          {selectedMode.requiresApprovalSignal ? <em>需要替换证明</em> : null}
+        </div>
+      ) : null}
+
+      {executorPatchWorkStarted(selectedTarget) ? (
+        // replacement 入口退役后的承接位：非协作换人（原履约者失联/作恶）
+        // 今后走治理分叉车道，该通道尚未开放——只提示，不造假按钮。
+        <div className="executor-authority-note governance-fork-note" aria-label="治理分叉提示">
+          <strong>原履约者不配合交接？</strong>
+          <span>治理分叉承接即将上线：当前版本不能在原履约者未签名的情况下更换履约者。</span>
         </div>
       ) : null}
 
@@ -341,7 +340,7 @@ export function ExecutorPatchPanel({
           <label className="plugin-field">
             <span>
               原履约者钱包
-              <small>{draft.mode === "handoff" ? "需签名" : "已完成部分不变"}</small>
+              <small>需签名</small>
             </span>
             <input
               aria-label="原履约者钱包"
@@ -378,35 +377,6 @@ export function ExecutorPatchPanel({
           />
         </label>
       </div>
-
-      {draft.mode === "replacement" ? (
-        <div className="patch-grid">
-          <label className="plugin-field">
-            <span>
-              替换证明来源
-              <small>需要替换证明</small>
-            </span>
-            <input
-              aria-label="替换证明来源"
-              onChange={(event) => updateDraft({ approvalSourceId: event.currentTarget.value })}
-              placeholder="0x..."
-              value={draft.approvalSourceId}
-            />
-          </label>
-          <label className="plugin-field">
-            <span>
-              替换证明编号
-              <small>链上可核对</small>
-            </span>
-            <input
-              aria-label="替换证明编号"
-              onChange={(event) => updateDraft({ approvalSignalId: event.currentTarget.value })}
-              placeholder="0x..."
-              value={draft.approvalSignalId}
-            />
-          </label>
-        </div>
-      ) : null}
 
       <label className="plugin-field">
         <span>
@@ -465,9 +435,6 @@ export function ExecutorPatchPanel({
             <ProofRow label="处理方式" value={modeLabel} />
             <ProofRow label="目标阶段" value={prepared.humanSummary?.targetStage ?? targetStageLabel(selectedTarget ?? targets[0]!)} />
             {draft.previousExecutor.trim() ? <ProofRow label="原履约者" value={draft.previousExecutor.trim()} /> : null}
-            {draft.approvalSourceId.trim() && draft.approvalSignalId.trim() ? (
-              <ProofRow label="替换证明" value={`${draft.approvalSourceId.trim()} / ${draft.approvalSignalId.trim()}`} />
-            ) : null}
             <ProofRow label="有效期" value={prepared.humanSummary?.validUntil ?? prepared.expiresAt ?? "等待 API 返回"} />
           </dl>
           {selectedMode?.requiresPreviousExecutorSignature ? (
@@ -523,8 +490,6 @@ function initialExecutorPatchDraft(
     executorWallet: "",
     executorMetadataHash: "",
     executorReference: "",
-    approvalSourceId: firstMode?.approvalSourceId ?? "",
-    approvalSignalId: firstMode?.approvalSignalId ?? "",
     metadataURI: "",
     previousExecutorSignature: ""
   };
@@ -545,8 +510,9 @@ function executorPatchModeIntro(mode: ProductExecutorPatchMode): string {
       return "阶段开始前选择履约者；提交后等待链上确认。";
     case "handoff":
       return "已开始阶段需原履约者签名；已完成部分不变。";
-    case "replacement":
-      return "申请替换履约者需要替换证明；已完成部分不变。";
+    default:
+      // replacement 已退役：历史投影不应再走到这里，保守给只读描述。
+      return "该处理方式已退役；原履约者不配合时请等待治理分叉承接。";
   }
 }
 
@@ -556,8 +522,8 @@ function executorPatchReadyCopy(mode: ProductExecutorPatchMode): string {
       return "可准备签名：将提交履约者引用和指纹，不提交文件原文。";
     case "handoff":
       return "可准备签名：交接履约者需要原履约者签名，已完成部分不变。";
-    case "replacement":
-      return "可准备签名：需要替换证明，确认后只变更后续履约权限。";
+    default:
+      return "可准备签名：确认后只变更后续履约权限。";
   }
 }
 
@@ -602,13 +568,8 @@ function executorPatchBlockers(input: {
   if (!looksLikeHash(input.draft.executorMetadataHash)) {
     blockers.push("请填写 0x 开头的履约者指纹。");
   }
-  if ((input.draft.mode === "handoff" || input.draft.mode === "replacement") && !input.draft.previousExecutor.trim()) {
+  if (input.draft.mode === "handoff" && !input.draft.previousExecutor.trim()) {
     blockers.push("请填写原履约者钱包。");
-  }
-  if (input.draft.mode === "replacement") {
-    if (!input.draft.approvalSourceId.trim() || !input.draft.approvalSignalId.trim()) {
-      blockers.push("需要替换证明。");
-    }
   }
   if (!input.draft.metadataURI.trim()) {
     blockers.push("请填写补充说明 URI。");

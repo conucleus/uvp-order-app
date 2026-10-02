@@ -4,13 +4,13 @@ import {
   bareNoteResourceRequirement,
   customsEvidenceTask,
   executorMetadataHash,
+  governanceForkPendingSelectorTask,
   handoffSelectorTask,
   manifestTask,
   packingListResourceRequirement,
   participantWallet,
   previousExecutorWallet,
   readinessTask,
-  replacementSelectorTask,
   resourcePatchTask,
   selectorTask,
   unauthorizedWallet,
@@ -167,7 +167,7 @@ test.describe("UVP Order App production readiness negatives", () => {
     await page.goto("/");
 
     await expect(page.getByRole("heading", { name: "选择履约者" })).toBeVisible();
-    await expect(page.getByText("为目标阶段选择、交接或替换后续履约者。")).toBeVisible();
+    await expect(page.getByText("为目标阶段选择或交接后续履约者。")).toBeVisible();
     await expect(page.getByLabel("目标阶段")).toBeVisible();
 
     await page.getByRole("textbox", { name: "履约者钱包", exact: true }).fill("0x0000000000000000000000000000000000000002");
@@ -307,27 +307,28 @@ test.describe("UVP Order App production readiness negatives", () => {
     await expect(page.getByText(previousExecutorWallet).first()).toBeVisible();
   });
 
-  test("executor patch action requires approval proof for post-start replacement", async ({ page }) => {
-    await installProductApiStub(page, { task: replacementSelectorTask() });
+  test("post-start patch shows the governance fork notice and no retired replacement entry", async ({ page }) => {
+    await installProductApiStub(page, { task: governanceForkPendingSelectorTask() });
     await page.goto("/");
 
-    await expect(page.getByRole("heading", { name: "申请替换履约者" })).toBeVisible();
-    await expect(page.getByLabel("履约权限说明").getByText("已完成部分不变")).toBeVisible();
-    await expect(page.getByLabel("履约权限说明").getByText("需要替换证明")).toBeVisible();
-    await expect(page.getByLabel("替换证明来源")).toBeVisible();
-    await expect(page.getByLabel("原履约者签名")).toHaveCount(0);
+    await expect(page.getByRole("heading", { name: "交接履约者" })).toBeVisible();
+    // 非协作换人的承接位：静态治理分叉提示（不可点击），不造假按钮。
+    await expect(page.getByLabel("治理分叉提示")).toContainText("治理分叉承接即将上线");
+    await expect(page.getByLabel("治理分叉提示")).toContainText("原履约者不配合");
+    // 已退役入口与替换证明材料一律不出现。
+    await expect(page.getByText("申请替换履约者")).toHaveCount(0);
+    await expect(page.getByText("需要替换证明")).toHaveCount(0);
+    await expect(page.getByLabel("替换证明来源")).toHaveCount(0);
+    await expect(page.getByLabel("替换证明编号")).toHaveCount(0);
 
+    // 交接通道本身仍可用：原履约者签名缺省时提交按钮保持禁用。
     await page.getByRole("textbox", { name: "履约者钱包", exact: true }).fill("0x0000000000000000000000000000000000000002");
     await page.getByLabel("履约者指纹").fill(executorMetadataHash);
-    await page.getByLabel("补充说明 URI").fill("ipfs://executor-patch/replacement");
+    await page.getByLabel("补充说明 URI").fill("ipfs://executor-patch/handoff");
     await page.getByRole("button", { name: "准备提交" }).click();
     await expect(page.getByText("准备编号 prep-executor-patch-001")).toBeVisible();
-    await expect(page.getByText("替换证明", { exact: true }).first()).toBeVisible();
-    await page.getByRole("button", { name: "使用钱包签名并提交" }).click();
-
-    await page.getByRole("button", { name: "查看证明" }).last().click();
-    await expect(page.getByText("StageExecutorPatchApplied")).toBeVisible();
-    await expect(page.getByText("替换证明").first()).toBeVisible();
+    await expect(page.getByLabel("原履约者签名")).toBeVisible();
+    await expect(page.getByRole("button", { name: "使用钱包签名并提交" })).toBeDisabled();
   });
 
   test("resource patch add-on prepares, signs, and submits a resource patch", async ({ page }) => {

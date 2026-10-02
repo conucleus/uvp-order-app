@@ -12,7 +12,7 @@ import {
   STAGE_EXECUTOR_PATCH_DOMAIN_NAME,
   STAGE_EXECUTOR_PATCH_DOMAIN_VERSION
 } from "@uvp-eth/executor-kit/participant";
-import type { ProductTaskWithAddOns, SelectableTargetStageDTO } from "../src/tasks/model/addOnTypes";
+import type { ProductTaskWithAddOns } from "../src/tasks/model/addOnTypes";
 
 export type { ProductTaskWithAddOns };
 
@@ -20,8 +20,6 @@ export const productApiBaseUrl = "http://product-api.test";
 export const participantWallet = "0x9d8A62f656a8d1615C1294FD71E9cfB3e4855A4F";
 export const unauthorizedWallet = "0x000000000000000000000000000000000000dEaD";
 export const previousExecutorWallet = "0x2222222222222222222222222222222222222222";
-export const approvalSourceId = "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
-export const approvalSignalId = "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
 export const executorMetadataHash = "0x6666666666666666666666666666666666666666666666666666666666666666";
 
 interface StubOptions {
@@ -158,7 +156,7 @@ const selectorAddOnManifest: ParticipantAddOnManifestDTO = {
   roleSlotId: "buyer-selector",
   addOnKind: "stage_executor_patch",
   title: "选择履约者",
-  summary: "为目标阶段选择、交接或替换后续履约者。",
+  summary: "为目标阶段选择或交接后续履约者。",
   stageBindings: ["customs-complete"],
   pages: [
     {
@@ -172,8 +170,7 @@ const selectorAddOnManifest: ParticipantAddOnManifestDTO = {
             { componentId: "target-stage", componentKind: "stage_select", inputId: "selector.targetStageId", label: "目标阶段", required: true },
             { componentId: "mode", componentKind: "select", inputId: "selector.mode", label: "处理方式", required: true, defaultValue: "assign", options: [
               { value: "assign", label: "选择履约者" },
-              { value: "handoff", label: "交接履约者" },
-              { value: "replacement", label: "申请替换履约者" }
+              { value: "handoff", label: "交接履约者" }
             ] },
             { componentId: "selector-wallet", componentKind: "wallet", inputId: "selector.selectorWallet", label: "选择方钱包", required: true },
             { componentId: "executor-wallet", componentKind: "wallet", inputId: "selector.executorWallet", label: "履约者钱包", required: true },
@@ -397,7 +394,7 @@ const manifestTasks: Readonly<Record<string, ProductTaskDTO>> = {
   "task-selector-customs-001": readinessTask({
     taskId: "task-selector-customs-001",
     title: "选择或交接履约者",
-    subtitle: "未开始阶段可选择履约者；已开始阶段需走交接或替换证明。",
+    subtitle: "未开始阶段可选择履约者；已开始阶段需原履约者签名交接。",
     stageId: "order-confirmed",
     stageName: "订单确认",
     addOnKind: "stage_executor_patch",
@@ -555,63 +552,15 @@ export function handoffSelectorTask(overrides: Partial<ProductTaskWithAddOns> = 
   });
 }
 
-export function replacementSelectorTask(overrides: Partial<ProductTaskWithAddOns> = {}): ProductTaskDTO {
-  const replacementTarget: SelectableTargetStageDTO = {
-    targetStageId: "inspection",
-    targetStageName: "检验阶段",
-    allowed: true,
-    workStarted: true,
-    stageSignalCount: 2,
-    currentExecutorWallet: previousExecutorWallet,
-    previousExecutor: previousExecutorWallet,
-    previousExecutorLabel: "原检验履约者",
-    executorPatchMode: "replacement",
-    approvalSourceId,
-    approvalSignalId,
-    approvalSignalLabel: "裁定方替换证明",
-    executorPatchModes: [
-      {
-        mode: "replacement",
-        modeLabel: "申请替换履约者",
-        allowed: true,
-        workStarted: true,
-        requiresSelectorSignature: true,
-        requiresPreviousExecutorSignature: false,
-        requiresApprovalSignal: true,
-        previousExecutor: previousExecutorWallet,
-        previousExecutorLabel: "原检验履约者",
-        approvalSourceId,
-        approvalSignalId,
-        approvalSignalLabel: "裁定方替换证明",
-        approvalSignal: {
-          approvalSourceId,
-          approvalSignalId,
-          label: "裁定方替换证明"
-        },
-        priorAuthorityLabel: "已完成部分不变",
-        futureAuthorityLabel: "替换确认后，新履约者只接续后续工作",
-        guidanceLabel: "需要替换证明"
-      }
-    ],
-    priorAuthorityLabel: "已完成部分不变",
-    futureAuthorityLabel: "替换确认后，新履约者只接续后续工作"
-  };
-  return selectorTask({
-    taskId: "task-selector-replacement-001",
-    title: "申请替换检验履约者",
-    subtitle: "已开始阶段缺少原履约者同意时，需要替换证明。",
-    primaryActionLabel: "申请替换履约者",
-    selectableTargets: [replacementTarget],
-    responsibilityStatements: [
-      {
-        title: "已完成部分不变",
-        desc: "替换只影响后续履约权限，不改写已提交的阶段事实。"
-      },
-      {
-        title: "需要替换证明",
-        desc: "提交前需确认已有链上可核对的裁定或审批证明。"
-      }
-    ],
+/**
+ * 开工后仅有交接通道的投影（replacement 退役后的新面）：用于钉住
+ * 「治理分叉承接即将上线」提示与已退役入口不出现的前端行为。
+ */
+export function governanceForkPendingSelectorTask(overrides: Partial<ProductTaskWithAddOns> = {}): ProductTaskDTO {
+  return handoffSelectorTask({
+    taskId: "task-selector-fork-pending-001",
+    title: "交接检验履约者",
+    subtitle: "已开始阶段由原履约者签名交接剩余工作；原履约者不配合时等待治理分叉承接。",
     ...overrides
   });
 }
@@ -800,10 +749,6 @@ export async function installProductApiStub(page: Page, options: StubOptions = {
         readonly targetStageId?: string;
         readonly mode?: unknown;
         readonly previousExecutorWallet?: string;
-        readonly approval?: {
-          readonly sourceId?: string;
-          readonly signalId?: string;
-        };
         readonly executorWallet?: string;
         readonly executorReference?: string;
         readonly executorMetadataHash?: string;
@@ -811,8 +756,6 @@ export async function installProductApiStub(page: Page, options: StubOptions = {
       };
       const mode = isExecutorPatchMode(body.mode) ? body.mode : "assign";
       const previousExecutor = body.previousExecutorWallet;
-      const approvalSource = body.approval?.sourceId;
-      const approvalSignal = body.approval?.signalId;
       if (body.selectorWallet?.toLowerCase() !== participantWallet.toLowerCase()) {
         await fulfillJson(route, { message: "unauthorized wallet" }, 403);
         return;
@@ -825,12 +768,8 @@ export async function installProductApiStub(page: Page, options: StubOptions = {
         await fulfillJson(route, { message: "missing target stage" }, 400);
         return;
       }
-      if ((mode === "handoff" || mode === "replacement") && !previousExecutor) {
+      if (mode === "handoff" && !previousExecutor) {
         await fulfillJson(route, { message: "missing previous executor" }, 400);
-        return;
-      }
-      if (mode === "replacement" && (!approvalSource || !approvalSignal)) {
-        await fulfillJson(route, { message: "missing approval proof" }, 400);
         return;
       }
       if (!body.executorWallet) {
@@ -869,8 +808,7 @@ export async function installProductApiStub(page: Page, options: StubOptions = {
               { name: "mode", type: "string" },
               { name: "selector", type: "address" },
               { name: "previousExecutor", type: "address" },
-              { name: "approvalSourceId", type: "bytes32" },
-              { name: "approvalSignalId", type: "bytes32" }
+              { name: "authorizationsHash", type: "bytes32" }
             ]
           },
           primaryType: "UVPStagePatchModuleStageExecutorPatch",
@@ -880,8 +818,9 @@ export async function installProductApiStub(page: Page, options: StubOptions = {
             mode,
             selector: participantWallet,
             previousExecutor: previousExecutor ?? "0x0000000000000000000000000000000000000000",
-            approvalSourceId: approvalSource ?? "0x0000000000000000000000000000000000000000000000000000000000000000",
-            approvalSignalId: approvalSignal ?? "0x0000000000000000000000000000000000000000000000000000000000000000"
+            // 桩载荷：新 digest 面以 authorizationsHash 承诺生效时写入的
+            // 显式订单级授权集（approval 双字段已随 replacement 退役）。
+            authorizationsHash: "0xcccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
           }
         },
         humanSummary: {
@@ -918,8 +857,6 @@ export async function installProductApiStub(page: Page, options: StubOptions = {
         targetStageId: "inspection",
         mode,
         previousExecutor,
-        approvalSourceId: mode === "replacement" ? approvalSourceId : undefined,
-        approvalSignalId: mode === "replacement" ? approvalSignalId : undefined,
         status,
         txHash: status === "confirmed" ? "0x7777777777777777777777777777777777777777777777777777777777777777" : undefined,
         blockNumber: status === "confirmed" ? "18,735,010" : undefined,
@@ -928,7 +865,6 @@ export async function installProductApiStub(page: Page, options: StubOptions = {
           { label: "StageExecutorPatchApplied", value: status },
           { label: "处理方式", value: executorPatchModeLabel(mode) },
           ...(previousExecutor ? [{ label: "原履约者", value: previousExecutor }] : []),
-          ...(mode === "replacement" ? [{ label: "替换证明", value: `${approvalSourceId} / ${approvalSignalId}` }] : []),
           { label: "凭证指纹", value: "0x6666666666666666666666666666666666666666666666666666666666666666" }
         ]
       });
@@ -1063,7 +999,7 @@ export async function uploadCustomsPdf(page: Page): Promise<void> {
 }
 
 function isExecutorPatchMode(value: unknown): value is ProductExecutorPatchMode {
-  return value === "assign" || value === "handoff" || value === "replacement";
+  return value === "assign" || value === "handoff";
 }
 
 function executorPatchModeLabel(mode: ProductExecutorPatchMode): string {
@@ -1072,8 +1008,8 @@ function executorPatchModeLabel(mode: ProductExecutorPatchMode): string {
       return "选择履约者";
     case "handoff":
       return "交接履约者";
-    case "replacement":
-      return "申请替换履约者";
+    default:
+      return "履约者调整（通道已退役）";
   }
 }
 

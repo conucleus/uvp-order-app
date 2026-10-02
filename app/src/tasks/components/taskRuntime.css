@@ -402,6 +402,13 @@
   font-weight: 800;
 }
 
+/* 治理分叉承接提示（replacement 退役后的非协作换人承接位）：静态提示，
+   无交互态；琥珀警示底与常规权限说明区分。 */
+.governance-fork-note {
+  border-color: var(--app-amber);
+  background: var(--app-amber-soft);
+}
+
 .patch-mode-options {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));

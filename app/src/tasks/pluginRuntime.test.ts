@@ -207,7 +207,7 @@ describe("task plugin runtime", () => {
     assert.equal(executorPatchModeLabel("assign"), "选择履约者");
   });
 
-  it("separates post-start handoff and replacement executor patch modes", () => {
+  it("keeps handoff only after start and filters the retired replacement option", () => {
     const previousExecutor = "0x2222222222222222222222222222222222222222";
     const task = taskFixture("evidence_submission", {
       addOnKind: "stage_executor_patch",
@@ -232,6 +232,8 @@ describe("task plugin runtime", () => {
               priorAuthorityLabel: "已完成部分不变"
             },
             {
+              // 退役词表投影：服务端旧投影仍可能携带 replacement 选项，
+              // 前端必须过滤，不暴露已退役入口。
               mode: "replacement",
               modeLabel: "申请替换履约者",
               allowed: true,
@@ -240,8 +242,6 @@ describe("task plugin runtime", () => {
               requiresPreviousExecutorSignature: false,
               requiresApprovalSignal: true,
               previousExecutor,
-              approvalSourceId: "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-              approvalSignalId: "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
               guidanceLabel: "需要替换证明",
               priorAuthorityLabel: "已完成部分不变"
             }
@@ -252,13 +252,12 @@ describe("task plugin runtime", () => {
     const target = selectableTargetsForTask(task)[0];
     const modes = executorPatchModeOptionsForTarget(target);
 
-    assert.deepEqual(modes.map((mode) => mode.mode), ["handoff", "replacement"]);
+    assert.deepEqual(modes.map((mode) => mode.mode), ["handoff"]);
     assert.equal(modes.some((mode) => mode.mode === "assign"), false);
+    assert.equal(modes.some((mode) => mode.mode === "replacement"), false);
     assert.equal(modes[0]?.requiresPreviousExecutorSignature, true);
     assert.equal(modes[0]?.previousExecutor, previousExecutor);
-    assert.equal(modes[1]?.requiresApprovalSignal, true);
-    assert.equal(modes[1]?.guidanceLabel, "需要替换证明");
-    assert.equal(modes.every((mode) => mode.priorAuthorityLabel === "已完成部分不变"), true);
+    assert.equal(modes[0]?.priorAuthorityLabel, "已完成部分不变");
   });
 
   it("renders executor requirements and access status before evidence", () => {
@@ -570,7 +569,7 @@ describe("task plugin runtime", () => {
     assert.match(resourcePatchValidation.errors.join("\n"), /资源可见性/);
   });
 
-  it("blocks approval input that is not valid JSON instead of sending the raw string", () => {
+  it("drops a retired approval binding instead of forwarding replacement material", () => {
     const manifest = addOnManifestFixture("stage_executor_patch", "stage_executor_patch", { withApprovalBinding: true });
     const action = manifest.actions[0]!;
     const task = taskFixture("evidence_submission", {
@@ -587,31 +586,23 @@ describe("task plugin runtime", () => {
       mode: "assign"
     };
 
-    const invalidValidation = validateAddOnManifestAction(manifest, action, {
+    // approval 随 replacement 退役：即使旧 manifest 仍绑定该输入，prepare
+    // 请求也不再携带（不转发退役授权材料，也不因旧输入阻断正常提交）。
+    const validation = validateAddOnManifestAction(manifest, action, {
       ...createInitialAddOnManifestState(task, wallet),
       values: { ...baseValues, approval: "source-id signal-id" },
       confirmations: {}
     });
-    assert.equal(invalidValidation.ok, false);
-    assert.match(invalidValidation.errors.join("\n"), /approval.*JSON/u);
+    assert.equal(validation.ok, true);
 
-    assert.throws(
-      () => buildAddOnManifestPrepareInput(action, {
-        ...createInitialAddOnManifestState(task, wallet),
-        values: { ...baseValues, approval: "source-id signal-id" },
-        confirmations: {}
-      }),
-      /approval.*JSON/u
-    );
-
-    const validPrepare = buildAddOnManifestPrepareInput(action, {
+    const prepare = buildAddOnManifestPrepareInput(action, {
       ...createInitialAddOnManifestState(task, wallet),
       values: { ...baseValues, approval: JSON.stringify({ sourceId: "0xaaaa", signalId: "0xbbbb" }) },
       confirmations: {}
     });
-    assert.equal(validPrepare.actionKind, "stage_executor_patch");
-    if (validPrepare.actionKind === "stage_executor_patch") {
-      assert.deepEqual(validPrepare.input.approval, { sourceId: "0xaaaa", signalId: "0xbbbb" });
+    assert.equal(prepare.actionKind, "stage_executor_patch");
+    if (prepare.actionKind === "stage_executor_patch") {
+      assert.equal("approval" in prepare.input, false);
     }
   });
 
@@ -1110,7 +1101,7 @@ function addOnManifestFixture(
   };
 }
 
-describe("manifest-driven executor patch honors the replacement gate", () => {
+describe("manifest-driven executor patch keeps the dual-mode gate", () => {
   const manifest = addOnManifestFixture("stage_executor_patch", "stage_executor_patch", { withApprovalBinding: true });
   const task = taskFixture("evidence_submission", {
     addOnManifest: manifest,
@@ -1138,29 +1129,26 @@ describe("manifest-driven executor patch honors the replacement gate", () => {
   it("rejects the self-invented replace spelling instead of letting it slip through as assign", () => {
     const validation = validateWith({ mode: "replace" });
     assert.equal(validation.ok, false);
-    assert.ok(validation.errors.includes("处理方式必须是 assign/handoff/replacement 之一（协议拼写）。"));
+    assert.ok(validation.errors.includes("处理方式必须是 assign/handoff 之一（协议拼写；replacement 已退役）。"));
   });
 
-  it("requires a replacement proof for replacement mode, aligned with the application-level panel", () => {
-    const missing = validateWith({ mode: "replacement" });
-    assert.equal(missing.ok, false);
-    assert.ok(missing.errors.includes("需要替换证明。"));
-
-    const present = validateWith({
-      mode: "replacement",
-      approval: JSON.stringify({ sourceId: "0x11", signalId: "0x22" }),
-      previousExecutorWallet: "0x0000000000000000000000000000000000000003"
-    });
-    assert.equal(present.ok, true);
+  it("rejects the retired replacement spelling instead of reviving the retired lane", () => {
+    const validation = validateWith({ mode: "replacement" });
+    assert.equal(validation.ok, false);
+    assert.ok(validation.errors.includes("处理方式必须是 assign/handoff 之一（协议拼写；replacement 已退役）。"));
+    // 退役通道不再要求替换证明：唯一拒绝理由是词表退役本身。
+    assert.equal(validation.errors.includes("需要替换证明。"), false);
   });
 
-  it("requires the previous executor wallet for handoff and replacement modes", () => {
+  it("requires the previous executor wallet for handoff only", () => {
     const handoff = validateWith({ mode: "handoff" });
     assert.equal(handoff.ok, false);
     assert.ok(handoff.errors.includes("请填写原履约者钱包。"));
 
-    const replacement = validateWith({ mode: "replacement", approval: JSON.stringify({ sourceId: "0x11", signalId: "0x22" }) });
-    assert.equal(replacement.ok, false);
-    assert.ok(replacement.errors.includes("请填写原履约者钱包。"));
+    const present = validateWith({
+      mode: "handoff",
+      previousExecutorWallet: "0x0000000000000000000000000000000000000003"
+    });
+    assert.equal(present.ok, true);
   });
 });

@@ -161,7 +161,6 @@ export function buildAddOnManifestPrepareInput(
       const executorReference = boundValue(action, state, "executorReference");
       const previousExecutorWallet = boundValue(action, state, "previousExecutorWallet") ||
         boundValue(action, state, "previousExecutor");
-      const approval = parseOptionalJson(boundValue(action, state, "approval"));
       return {
         actionKind: "stage_executor_patch",
         input: {
@@ -172,7 +171,6 @@ export function buildAddOnManifestPrepareInput(
           metadataURI: boundValue(action, state, "metadataURI"),
           mode: normalizeExecutorPatchMode(boundValue(action, state, "mode")),
           ...(previousExecutorWallet ? { previousExecutorWallet } : {}),
-          ...(approval !== undefined ? { approval } : {}),
           ...(executorReference ? { executorReference } : {}),
         }
       };
@@ -231,28 +229,22 @@ function semanticErrorsForAction(
     if (executorMetadataHash && !looksLikeHash(executorMetadataHash)) {
       errors.push("executorMetadataHash 必须是 0x 开头的 32 字节指纹。");
     }
-    const approval = boundValue(action, state, "approval");
-    if (approval && !isValidJsonText(approval)) {
-      errors.push("替换证明（approval）必须是合法的 JSON 文本，不能按原始字符串发送。");
-    }
-    // 与应用层 ExecutorPatchPanel 同一替换门槛：manifest 驱动路径不得绕过。
+    // 与应用层 ExecutorPatchPanel 同一双模式门槛：manifest 驱动路径不得
+    // 绕过（replacement 已退役，非协作换人等待治理分叉车道）。
     const modeInput = boundValue(action, state, "mode");
     const mode = normalizeExecutorPatchMode(modeInput);
     if (modeInput && !mode) {
-      errors.push("处理方式必须是 assign/handoff/replacement 之一（协议拼写）。");
+      errors.push("处理方式必须是 assign/handoff 之一（协议拼写；replacement 已退役）。");
     }
     const target = selectableTargetsForTask(state.task)
       .find((candidate) => targetStageId(candidate) === boundValue(action, state, "targetStageId"));
     if (mode === "assign" && executorPatchWorkStarted(target)) {
       errors.push("阶段已开始，不能直接选择履约者。");
     }
-    if (mode === "handoff" || mode === "replacement") {
+    if (mode === "handoff") {
       if (!boundValue(action, state, "previousExecutorWallet") && !boundValue(action, state, "previousExecutor")) {
         errors.push("请填写原履约者钱包。");
       }
-    }
-    if (mode === "replacement" && !approval) {
-      errors.push("需要替换证明。");
     }
   }
   if (action.actionKind === "stage_resource_patch") {
@@ -319,10 +311,10 @@ function valueForInput(state: AddOnManifestRuntimeState, inputId: string): strin
 }
 
 function normalizeExecutorPatchMode(value: string): ProductExecutorPatchMode | undefined {
-  // 只认协议冻结的拼写（assign/handoff/replacement）：服务端虽把 "replace"
-  // 别名归一为 replacement，但那是服务端宽限；客户端自造拼写会让 manifest
-  // 驱动路径绕开应用层按 mode 建立的替换门槛（见 semanticErrorsForAction）。
-  if (value === "assign" || value === "handoff" || value === "replacement") {
+  // 只认协议冻结的双模式拼写（assign/handoff）：replacement 已随合约批
+  // 退役（非协作换人走治理分叉车道），自造拼写（含退役词与 "replace"
+  // 别名）一律拒绝，客户端不提供绕过应用层按 mode 建立门槛的路径。
+  if (value === "assign" || value === "handoff") {
     return value;
   }
   return undefined;
@@ -330,27 +322,6 @@ function normalizeExecutorPatchMode(value: string): ProductExecutorPatchMode | u
 
 function looksLikeHash(value: string): boolean {
   return /^0x[0-9a-fA-F]{64}$/u.test(value.trim());
-}
-
-function parseOptionalJson(value: string): unknown {
-  const trimmed = value.trim();
-  if (!trimmed) {
-    return undefined;
-  }
-  try {
-    return JSON.parse(trimmed) as unknown;
-  } catch {
-    throw new Error("替换证明（approval）不是合法的 JSON 文本，已停止准备提交。");
-  }
-}
-
-function isValidJsonText(value: string): boolean {
-  try {
-    JSON.parse(value.trim());
-    return true;
-  } catch {
-    return false;
-  }
 }
 
 export function manifestIntentLabel(intent: ParticipantAddOnManifestSignalIntent | undefined): string {

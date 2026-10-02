@@ -1,7 +1,6 @@
 import type {
   ChainProofRowDTO,
   FulfillmentRequiredInputDTO,
-  ProductExecutorPatchApprovalSignalDTO,
   ProductExecutorPatchMode,
   ProductExecutorPatchRequirementDTO,
   ProductResourceAccessState,
@@ -28,10 +27,6 @@ export interface SelectableTargetStageDTO {
   readonly previousExecutorLabel?: string;
   readonly executorPatchMode?: ProductExecutorPatchMode;
   readonly executorPatchModes?: readonly ExecutorPatchModeOptionDTO[];
-  readonly approvalSourceId?: string;
-  readonly approvalSignalId?: string;
-  readonly approvalSignalLabel?: string;
-  readonly approvalSignal?: ProductExecutorPatchApprovalSignalDTO;
   readonly priorAuthorityLabel?: string;
   readonly futureAuthorityLabel?: string;
   readonly selected?: boolean;
@@ -57,10 +52,6 @@ export interface ExecutorOverlayProjectionDTO {
   readonly newExecutorLabel?: string;
   readonly roleHash?: string;
   readonly executorMetadataHash?: string;
-  readonly approvalSourceId?: string;
-  readonly approvalSignalId?: string;
-  readonly approvalSignalLabel?: string;
-  readonly approvalSignal?: ProductExecutorPatchApprovalSignalDTO;
   readonly priorAuthorityLabel?: string;
   readonly futureAuthorityLabel?: string;
   readonly authorityNotice?: string;
@@ -91,10 +82,6 @@ export interface ExecutorPatchModeOptionDTO extends Omit<
   readonly targetStageId?: string | undefined;
   readonly previousExecutor?: string | undefined;
   readonly previousExecutorLabel?: string | undefined;
-  readonly approvalSourceId?: string | undefined;
-  readonly approvalSignalId?: string | undefined;
-  readonly approvalSignalLabel?: string | undefined;
-  readonly approvalSignal?: ProductExecutorPatchApprovalSignalDTO | undefined;
   readonly priorAuthorityLabel?: string | undefined;
   readonly futureAuthorityLabel?: string | undefined;
   readonly guidanceLabel?: string | undefined;
@@ -187,41 +174,25 @@ export function executorPatchModeOptionsForTarget(target: SelectableTargetStageD
   if (!target) {
     return [];
   }
-  if (target.executorPatchModes && target.executorPatchModes.length > 0) {
-    return target.executorPatchModes.map((mode) => normalizeExecutorPatchModeOption(target, mode));
+  // replacement 已随合约批退役（原履约者不配合的换人走治理分叉车道，尚未
+  // 开放）：服务端投影若仍携带 replacement 选项，一律过滤，不向前端暴露
+  // 已退役入口；assign=开工前选择履约者，handoff=开工后原履约者会签交接。
+  const projected = (target.executorPatchModes ?? [])
+    .filter((mode) => mode.mode === "assign" || mode.mode === "handoff");
+  if (projected.length > 0) {
+    return projected.map((mode) => normalizeExecutorPatchModeOption(target, mode));
   }
   const started = executorPatchWorkStarted(target);
-  if (!started) {
-    return [normalizeExecutorPatchModeOption(target, {
-      mode: target.executorPatchMode ?? "assign",
-      modeLabel: executorPatchModeLabel(target.executorPatchMode ?? "assign"),
-      allowed: target.allowed !== false,
-      workStarted: false,
-      requiresSelectorSignature: true,
-      requiresPreviousExecutorSignature: false,
-      requiresApprovalSignal: false
-    })];
-  }
-  return [
-    normalizeExecutorPatchModeOption(target, {
-      mode: "handoff",
-      modeLabel: executorPatchModeLabel("handoff"),
-      allowed: target.allowed !== false,
-      workStarted: true,
-      requiresSelectorSignature: true,
-      requiresPreviousExecutorSignature: true,
-      requiresApprovalSignal: false
-    }),
-    normalizeExecutorPatchModeOption(target, {
-      mode: "replacement",
-      modeLabel: executorPatchModeLabel("replacement"),
-      allowed: target.allowed !== false,
-      workStarted: true,
-      requiresSelectorSignature: true,
-      requiresPreviousExecutorSignature: false,
-      requiresApprovalSignal: true
-    })
-  ];
+  const fallbackMode: ProductExecutorPatchMode = started ? "handoff" : "assign";
+  return [normalizeExecutorPatchModeOption(target, {
+    mode: fallbackMode,
+    modeLabel: executorPatchModeLabel(fallbackMode),
+    allowed: target.allowed !== false,
+    workStarted: started,
+    requiresSelectorSignature: true,
+    requiresPreviousExecutorSignature: started,
+    requiresApprovalSignal: false
+  })];
 }
 
 export function executorPatchModeLabel(mode: ProductExecutorPatchMode): string {
@@ -230,8 +201,9 @@ export function executorPatchModeLabel(mode: ProductExecutorPatchMode): string {
       return "选择履约者";
     case "handoff":
       return "交接履约者";
-    case "replacement":
-      return "申请替换履约者";
+    default:
+      // replacement 已退役：仅为历史投影/提交记录提供只读展示，不构成入口。
+      return "履约者调整（通道已退役）";
   }
 }
 
@@ -241,8 +213,8 @@ export function executorPatchModeGuidance(mode: ProductExecutorPatchMode): strin
       return "阶段开始前选择后续履约者。";
     case "handoff":
       return "已开始阶段需原履约者签名，同意交接剩余工作。";
-    case "replacement":
-      return "需要替换证明，确认后只接续后续工作。";
+    default:
+      return "该处理方式已退役；原履约者不配合时请等待治理分叉承接。";
   }
 }
 
@@ -262,8 +234,6 @@ function normalizeExecutorPatchModeOption(
 ): ExecutorPatchModeOptionDTO {
   const previousExecutor = cleanString(mode.previousExecutor) ??
     cleanString(target.previousExecutor);
-  const approvalSourceId = cleanString(mode.approvalSourceId) ?? cleanString(target.approvalSourceId);
-  const approvalSignalId = cleanString(mode.approvalSignalId) ?? cleanString(target.approvalSignalId);
   return {
     ...mode,
     modeLabel: cleanString(mode.modeLabel) ?? executorPatchModeLabel(mode.mode),
@@ -271,10 +241,6 @@ function normalizeExecutorPatchModeOption(
     allowed: mode.allowed && target.allowed !== false,
     ...(previousExecutor ? { previousExecutor } : {}),
     previousExecutorLabel: cleanString(mode.previousExecutorLabel) ?? cleanString(target.previousExecutorLabel),
-    ...(approvalSourceId ? { approvalSourceId } : {}),
-    ...(approvalSignalId ? { approvalSignalId } : {}),
-    approvalSignalLabel: cleanString(mode.approvalSignalLabel) ?? cleanString(target.approvalSignalLabel),
-    approvalSignal: mode.approvalSignal ?? target.approvalSignal,
     priorAuthorityLabel: cleanString(mode.priorAuthorityLabel) ??
       cleanString(target.priorAuthorityLabel) ??
       (mode.workStarted || executorPatchWorkStarted(target) ? "已完成部分不变" : "阶段尚未开始"),
