@@ -71,6 +71,7 @@ export function ManifestAddOnPanel({
   task,
   onPrepareSubmit,
   onProofReady,
+  onSessionExpired,
   onSubmitted,
   onSubmitPrepared
 }: {
@@ -82,6 +83,8 @@ export function ManifestAddOnPanel({
   readonly task: ProductTaskDTO;
   readonly onPrepareSubmit: (taskId: string, input: PrepareSubmitInput) => Promise<PreparedTaskSubmit>;
   readonly onProofReady: (proof: TaskSubmissionProof) => void;
+  /** 写路径 401（钱包会话失效）时清会话切登录面；返回是否已接管。 */
+  readonly onSessionExpired?: ((error: unknown) => boolean) | undefined;
   readonly onSubmitted?: (() => void) | undefined;
   readonly onSubmitPrepared: (taskId: string, input: SubmitPreparedInput) => Promise<ProductSubmission>;
 }) {
@@ -192,6 +195,9 @@ export function ManifestAddOnPanel({
       setPhase("prepared");
     } catch (caught) {
       if (taskScopeRef.current !== requestScopeKey) {
+        return;
+      }
+      if (onSessionExpired?.(caught)) {
         return;
       }
       setError(caught instanceof Error ? caught.message : "附加能力准备失败");
@@ -315,6 +321,9 @@ export function ManifestAddOnPanel({
       onSubmitted?.();
     } catch (caught) {
       if (taskScopeRef.current !== requestScopeKey) {
+        return;
+      }
+      if (onSessionExpired?.(caught)) {
         return;
       }
       setError(caught instanceof Error ? caught.message : "签名提交失败");

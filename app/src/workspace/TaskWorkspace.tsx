@@ -24,6 +24,8 @@ interface TaskWorkspaceProps {
   readonly onPrepareTaskSubmit: (taskId: string, input: PrepareSubmitInput) => Promise<PreparedTaskSubmit>;
   readonly onSubmitTask: (taskId: string, input: SubmitPreparedInput) => Promise<ProductSubmission>;
   readonly onProofReady: (proof: TaskSubmissionProof) => void;
+  /** 写路径 401（钱包会话失效）时由 App 清会话切登录面；返回是否已接管。 */
+  readonly onSessionExpired?: ((error: unknown) => boolean) | undefined;
   readonly onSubmitted?: () => void;
 }
 
@@ -40,6 +42,7 @@ export function TaskWorkspace({
   onPrepareTaskSubmit,
   onSubmitTask,
   onProofReady,
+  onSessionExpired,
   onSubmitted
 }: TaskWorkspaceProps) {
   if (route.section === "orders") {
@@ -75,12 +78,14 @@ export function TaskWorkspace({
                 source={source}
                 task={selectedTask}
                 onProofReady={onProofReady}
+                onSessionExpired={onSessionExpired}
                 onSubmitted={onSubmitted}
               />
             )}
             evidenceSubmissionOwned={evidenceSubmissionOwned}
             onPrepareSubmit={onPrepareTaskSubmit}
             onProofReady={onProofReady}
+            onSessionExpired={onSessionExpired}
             onSubmitted={onSubmitted}
             onSubmitPrepared={onSubmitTask}
           />

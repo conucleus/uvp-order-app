@@ -51,6 +51,7 @@ export function ExecutorPatchPanel({
   task,
   targets,
   onProofReady,
+  onSessionExpired,
   onSubmitted
 }: {
   readonly actions: OrderAppActions;
@@ -61,6 +62,8 @@ export function ExecutorPatchPanel({
   readonly task: ProductTaskDTO;
   readonly targets: readonly SelectableTargetStageDTO[];
   readonly onProofReady: (proof: TaskSubmissionProof) => void;
+  /** 写路径 401（钱包会话失效）时清会话切登录面；返回是否已接管。 */
+  readonly onSessionExpired?: ((error: unknown) => boolean) | undefined;
   readonly onSubmitted?: (() => void) | undefined;
 }) {
   const [draft, setDraft] = useState<ExecutorPatchDraftState>(() => initialExecutorPatchDraft(task, targets, participantWallet));
@@ -164,6 +167,9 @@ export function ExecutorPatchPanel({
       if (taskScopeRef.current !== requestScopeKey) {
         return;
       }
+      if (onSessionExpired?.(caught)) {
+        return;
+      }
       setError(caught instanceof Error ? caught.message : "履约者选择准备失败");
       setPhase("error");
     }
@@ -231,6 +237,9 @@ export function ExecutorPatchPanel({
       onSubmitted?.();
     } catch (caught) {
       if (taskScopeRef.current !== requestScopeKey) {
+        return;
+      }
+      if (onSessionExpired?.(caught)) {
         return;
       }
       setError(caught instanceof Error ? caught.message : "签名提交失败");
@@ -528,8 +537,11 @@ function executorPatchBlockers(input: {
 }): readonly string[] {
   const blockers: string[] = [];
   const authorizedWallet = input.task.participantWallet ?? input.task.assigneeWallet ?? input.participantWallet;
-  if (input.task.status !== "open") {
-    blockers.push("任务已关闭，不能继续提交。");
+  if (input.task.status === "blocked") {
+    blockers.push(input.task.blockedReason ?? "当前待办受阻，暂不能提交。");
+  }
+  if (input.task.status === "submitted") {
+    blockers.push("已提交，正在等待链上确认。");
   }
   if (input.task.canSubmit === false) {
     blockers.push("当前钱包暂不能提交此待办。请确认你使用的钱包与订单登记的一致。");

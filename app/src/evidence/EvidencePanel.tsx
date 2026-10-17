@@ -55,6 +55,8 @@ interface EvidencePanelProps {
   readonly task?: ProductTaskDTO | undefined;
   readonly participantWallet?: string | undefined;
   readonly onProofReady: (proof: TaskSubmissionProof) => void;
+  /** 写路径 401（钱包会话失效）时清会话切登录面；返回是否已接管。 */
+  readonly onSessionExpired?: ((error: unknown) => boolean) | undefined;
   /** 提交成功（非终态失败）后回调一次，触发上层刷新任务投影。 */
   readonly onSubmitted?: (() => void) | undefined;
 }
@@ -88,6 +90,7 @@ export function EvidencePanel({
   task,
   participantWallet,
   onProofReady,
+  onSessionExpired,
   onSubmitted
 }: EvidencePanelProps) {
   const [captures, setCaptures] = useState<Readonly<Record<string, CapturedEvidence>>>({});
@@ -230,6 +233,9 @@ export function EvidencePanel({
       if (taskScopeRef.current !== requestScopeKey) {
         return;
       }
+      if (onSessionExpired?.(error)) {
+        return;
+      }
       setCaptures((current) => ({
         ...current,
         [requirement.slotId]: failedCapture(
@@ -264,6 +270,9 @@ export function EvidencePanel({
       setPrepareState({ status: "prepared", prepared });
     } catch (error) {
       if (taskScopeRef.current !== requestScopeKey) {
+        return;
+      }
+      if (onSessionExpired?.(error)) {
         return;
       }
       setPrepareState({
@@ -370,6 +379,9 @@ export function EvidencePanel({
       onSubmitted?.();
     } catch (error) {
       if (taskScopeRef.current !== requestScopeKey) {
+        return;
+      }
+      if (onSessionExpired?.(error)) {
         return;
       }
       setPrepareState({
@@ -877,8 +889,11 @@ function preflightBlockers(input: {
   if (input.staleSlotLabels.length > 0) {
     blockers.push(`字段已变更，请重新上传以更新指纹：${input.staleSlotLabels.join("、")}`);
   }
-  if (input.task.status !== "open") {
-    blockers.push("任务已关闭，不能继续提交。");
+  if (input.task.status === "blocked") {
+    blockers.push(input.task.blockedReason ?? "当前待办受阻，暂不能提交。");
+  }
+  if (input.task.status === "submitted") {
+    blockers.push("已提交，正在等待链上确认。");
   }
   if (input.task.canSubmit === false) {
     blockers.push("当前钱包暂不能提交此待办。请确认你使用的钱包与订单登记的一致。");

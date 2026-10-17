@@ -60,6 +60,8 @@ export interface TaskPluginHostProps {
   readonly evidenceSubmissionOwned?: boolean | undefined;
   readonly onPrepareSubmit: (taskId: string, input: PrepareSubmitInput) => Promise<PreparedTaskSubmit>;
   readonly onProofReady: (proof: TaskSubmissionProof) => void;
+  /** 写路径 401（钱包会话失效）时清会话切登录面；返回是否已接管。 */
+  readonly onSessionExpired?: ((error: unknown) => boolean) | undefined;
   readonly onSubmitted?: (() => void) | undefined;
   readonly onSubmitPrepared: (taskId: string, input: SubmitPreparedInput) => Promise<ProductSubmission>;
 }
@@ -74,6 +76,7 @@ export function TaskPluginHost({
   evidenceSubmissionOwned,
   onPrepareSubmit,
   onProofReady,
+  onSessionExpired,
   onSubmitted,
   onSubmitPrepared
 }: TaskPluginHostProps) {
@@ -165,6 +168,9 @@ export function TaskPluginHost({
       if (taskScopeRef.current !== requestScopeKey) {
         return;
       }
+      if (onSessionExpired?.(caught)) {
+        return;
+      }
       setError(caught instanceof Error ? caught.message : "提交准备失败");
       setPhase("error");
     }
@@ -227,6 +233,9 @@ export function TaskPluginHost({
       if (taskScopeRef.current !== requestScopeKey) {
         return;
       }
+      if (onSessionExpired?.(caught)) {
+        return;
+      }
       setError(caught instanceof Error ? caught.message : "签名提交失败");
       setPhase("error");
     } finally {
@@ -281,6 +290,7 @@ export function TaskPluginHost({
           task={task}
           onPrepareSubmit={onPrepareSubmit}
           onProofReady={onProofReady}
+          onSessionExpired={onSessionExpired}
           onSubmitted={onSubmitted}
           onSubmitPrepared={onSubmitPrepared}
         />
@@ -302,6 +312,7 @@ export function TaskPluginHost({
           task={task}
           targets={patchTargets}
           onProofReady={onProofReady}
+          onSessionExpired={onSessionExpired}
           onSubmitted={onSubmitted}
         />
       ) : null}
@@ -316,6 +327,7 @@ export function TaskPluginHost({
           task={task}
           targets={patchTargets}
           onProofReady={onProofReady}
+          onSessionExpired={onSessionExpired}
           onSubmitted={onSubmitted}
         />
       ) : null}

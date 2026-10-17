@@ -186,6 +186,20 @@ function AppShell({ api }: { readonly api: ProductApiClient }) {
     loadParticipantHome(options);
   }
 
+  /**
+   * 写路径 401（wallet_identity_required）与读路径同口径：清残留 token 切
+   * 登录面；返回是否已接管，未接管时调用方维持现有错误展示。
+   */
+  function handleSessionExpired(error: unknown): boolean {
+    if (!isWalletIdentityRequired(error)) {
+      return false;
+    }
+    persistWalletSessionToken(undefined);
+    api.restoreSessionToken(undefined);
+    setLoadState({ status: "unauthenticated", message: error.message });
+    return true;
+  }
+
   function handleOpenNotification(notification: OrderAppNotificationDTO) {
     void notificationState.markRead(notification);
     navigate({
@@ -338,6 +352,7 @@ function AppShell({ api }: { readonly api: ProductApiClient }) {
                   ...current,
                   [proof.taskId]: proof
                 }))}
+                onSessionExpired={handleSessionExpired}
                 onSubmitted={() => handleRefresh({ silent: true })}
               />
             )}
