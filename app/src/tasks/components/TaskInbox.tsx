@@ -1,4 +1,4 @@
-import { AlertTriangle, CheckCircle2, Clock3, FileCheck2, PackageCheck, ShieldCheck, WalletCards } from "lucide-react";
+import { AlertTriangle, CheckCircle2, CircleSlash, Clock3, FileCheck2, PackageCheck, ShieldCheck, WalletCards } from "lucide-react";
 import type { ReactNode } from "react";
 import type { ProductTaskDTO } from "@uvp-eth/product-dto";
 import { shortWallet, walletOverrideAllowed } from "../../auth/participant";
@@ -125,7 +125,10 @@ function statusIcon(status: ParticipantTaskDisplayState) {
   if (status === "blocked") {
     return <AlertTriangle aria-hidden="true" />;
   }
-  if (status === "confirmed" || status === "submitted" || status === "indexing") {
+  if (status === "cancelled") {
+    return <CircleSlash aria-hidden="true" />;
+  }
+  if (status === "confirmed" || status === "submitted") {
     return <CheckCircle2 aria-hidden="true" />;
   }
   return <Clock3 aria-hidden="true" />;

@@ -397,7 +397,7 @@ describe("order app Product API boundary", () => {
           previousExecutor: "0x0000000000000000000000000000000000000003",
           patchHash: "0x2222222222222222222222222222222222222222222222222222222222222222",
           typedData: {
-            domain: { name: "UVPStagePatchModule", version: "0.1", chainId: 31337 },
+            domain: { name: "UVPStagePatchModule", version: "0.2", chainId: 31337 },
             types: {
               UVPStagePatchModuleStageExecutorPatch: [
                 { name: "selector", type: "address" },
@@ -438,7 +438,7 @@ describe("order app Product API boundary", () => {
           policyHash: "0x4444444444444444444444444444444444444444444444444444444444444444",
           patchHash: "0x5555555555555555555555555555555555555555555555555555555555555555",
           typedData: {
-            domain: { name: "UVPStagePatchModule", version: "0.1", chainId: 31337 },
+            domain: { name: "UVPStagePatchModule", version: "0.2", chainId: 31337 },
             types: { UVPStagePatchModuleStageResourcePatch: [{ name: "selector", type: "address" }] },
             primaryType: "UVPStagePatchModuleStageResourcePatch",
             message: { selector: "0x9d8A62f656a8d1615C1294FD71E9cfB3e4855A4F" }
@@ -562,10 +562,10 @@ describe("wallet session recovery (non-local entry)", () => {
   });
 
   it("persists the proven token and restores it into a fresh client (page reload)", async () => {
-    // node 环境没有 sessionStorage：安装最小桩，测试后卸载。
+    // node 环境没有 localStorage：安装最小桩，测试后卸载。
     const store = new Map<string, string>();
-    const previousSessionStorage = (globalThis as { sessionStorage?: Storage }).sessionStorage;
-    (globalThis as { sessionStorage?: Storage }).sessionStorage = {
+    const previousLocalStorage = (globalThis as { localStorage?: Storage }).localStorage;
+    (globalThis as { localStorage?: Storage }).localStorage = {
       getItem: (key: string) => store.get(key) ?? null,
       setItem: (key: string, value: string) => void store.set(key, value),
       removeItem: (key: string) => void store.delete(key),
@@ -628,10 +628,10 @@ describe("wallet session recovery (non-local entry)", () => {
         "restored session token must ride every participant request"
       );
     } finally {
-      const globalsWithStorage = globalThis as { sessionStorage?: Storage };
-      delete globalsWithStorage.sessionStorage;
-      if (previousSessionStorage !== undefined) {
-        globalsWithStorage.sessionStorage = previousSessionStorage;
+      const globalsWithStorage = globalThis as { localStorage?: Storage };
+      delete globalsWithStorage.localStorage;
+      if (previousLocalStorage !== undefined) {
+        globalsWithStorage.localStorage = previousLocalStorage;
       }
       persistWalletSessionToken(undefined);
     }

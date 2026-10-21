@@ -5,9 +5,8 @@ export type ParticipantTaskDisplayState =
   | "ready"
   | "blocked"
   | "submitted"
-  | "indexing"
   | "confirmed"
-  | "failed";
+  | "cancelled";
 
 export interface ParticipantTaskDisplay {
   readonly state: ParticipantTaskDisplayState;
@@ -17,10 +16,10 @@ export interface ParticipantTaskDisplay {
   readonly isOverdue: boolean;
 }
 
+// BFF 在任务行上附加的链上状态（值域 ready/submitted/cancelled/unknown），
+// 是链侧状态的唯一来源。
 interface TaskStatusExtensions {
   readonly chainStatus?: string;
-  readonly submissionStatus?: string;
-  readonly errorCode?: string;
 }
 
 export interface TaskFilterResult {
@@ -100,25 +99,21 @@ export function sortParticipantTasks(
 
 export function taskDisplay(task: ProductTaskDTO, now: Date = new Date()): ParticipantTaskDisplay {
   const extension = task as ProductTaskDTO & TaskStatusExtensions;
-  const rawStatus = extension.submissionStatus ?? extension.chainStatus;
+  const chainStatus = extension.chainStatus;
   const isOverdue = task.status === "open" && isDeadlineOverdue(task.deadline, now);
 
-  // confirmed 是链上索引超前的展示：任务已进入 submitted（等待索引）时
-  // 投影残留的 confirmed 才作为确认呈现；不得改写权威 open/blocked
-  // 态（同函数对 submissionStatus/errorCode 的裁定：投影残留不覆盖权威态）。
-  // 服务端任务词表只有 open/submitted/blocked，不存在别的完成词。
-  if (task.status === "submitted" && rawStatus === "confirmed") {
+  // 链上 cancelled 是终态事实：即使任务行同时携带受阻原因，也如实展示已取消。
+  if (chainStatus === "cancelled") {
     return {
-      state: "confirmed",
-      label: "已确认",
-      bucketLabel: "最近完成",
-      rank: 5,
+      state: "cancelled",
+      label: "已取消",
+      bucketLabel: "已取消",
+      rank: 4,
       isOverdue: false
     };
   }
 
-  // blocked/open 是服务端权威任务态，先于失败判定：投影残留的
-  // submissionStatus/errorCode 扩展不得把可重试或受阻的任务改写成"提交失败"。
+  // blocked 是服务端权威受阻态：不可提交的任务不改写成待办或等待确认。
   if (task.status === "blocked") {
     return {
       state: "blocked",
@@ -130,17 +125,19 @@ export function taskDisplay(task: ProductTaskDTO, now: Date = new Date()): Parti
   }
 
   if (task.status === "submitted") {
-    if (rawStatus === "failed" || extension.errorCode) {
+    // chainStatus=submitted 即链上已确认：值域内没有更深的确认信号。
+    // unknown/缺省仍在等索引，显示等待链上确认。
+    if (chainStatus === "submitted") {
       return {
-        state: "failed",
-        label: "提交失败",
-        bucketLabel: "提交失败",
-        rank: 4,
-        isOverdue
+        state: "confirmed",
+        label: "已确认",
+        bucketLabel: "最近完成",
+        rank: 5,
+        isOverdue: false
       };
     }
     return {
-      state: rawStatus === "indexing" ? "indexing" : "submitted",
+      state: "submitted",
       label: "等待链上确认",
       bucketLabel: "等待链上确认",
       rank: 3,
@@ -148,6 +145,7 @@ export function taskDisplay(task: ProductTaskDTO, now: Date = new Date()): Parti
     };
   }
 
+  // open（链上 ready）：可提交的待办，逾期时置顶提醒。
   if (isOverdue) {
     return {
       state: "ready",

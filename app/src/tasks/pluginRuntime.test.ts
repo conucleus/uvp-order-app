@@ -728,14 +728,15 @@ describe("participant task inbox helpers", () => {
     assert.equal(filterResult.filteredOutCount, 1);
   });
 
-  it("sorts ready overdue, ready, blocked, submitted, then failed tasks", () => {
+  it("sorts ready overdue, ready, blocked, submitted, cancelled, then confirmed tasks", () => {
     const now = new Date("2026-04-29T12:00:00Z");
     const ordered = sortParticipantTasks([
       taskFixture("delivery_update", { taskId: "ready", status: "open", deadline: "2026-05-01 18:00" }),
       taskFixture("delivery_update", { taskId: "overdue", status: "open", deadline: "2026-04-20 18:00" }),
+      taskFixture("delivery_update", { taskId: "confirmed", status: "submitted", deadline: "2026-04-21 18:00", chainStatus: "submitted" }),
       taskFixture("delivery_update", { taskId: "submitted", status: "submitted", deadline: "2026-04-21 18:00" }),
       taskFixture("delivery_update", { taskId: "blocked", status: "blocked", deadline: "2026-04-21 18:00" }),
-      taskFixture("delivery_update", { taskId: "failed", status: "submitted", deadline: "2026-04-21 18:00", errorCode: "REVERTED" })
+      taskFixture("delivery_update", { taskId: "cancelled", status: "blocked", deadline: "2026-04-21 18:00", chainStatus: "cancelled" })
     ], now);
 
     assert.deepEqual(ordered.map((task) => task.taskId), [
@@ -743,12 +744,13 @@ describe("participant task inbox helpers", () => {
       "ready",
       "blocked",
       "submitted",
-      "failed"
+      "cancelled",
+      "confirmed"
     ]);
     assert.equal(taskDisplay(ordered[0]!, now).label, "逾期待办");
   });
 
-  it("renders submitted tasks as waiting-for-indexing, never as confirmed", () => {
+  it("renders submitted tasks without chain confirmation as waiting for the chain", () => {
     const submitted = taskFixture("delivery_update", { taskId: "submitted-only", status: "submitted" });
 
     const display = taskDisplay(submitted);
@@ -757,49 +759,40 @@ describe("participant task inbox helpers", () => {
     assert.equal(display.label, "等待链上确认");
   });
 
-  it("keeps a residual confirmed projection from overriding the authoritative open status", () => {
-    // 权威 open 优先：早先尝试残留的 submissionStatus=confirmed 只在任务
-    // 已进入 submitted（等待索引）时才算确认，不得把仍开放的任务改写成
-    // "已确认"（同函数对 errorCode 残留的裁定口径）。
-    const openWithResidualConfirmed = taskFixture("delivery_update", {
-      taskId: "open-residual-confirmed",
-      status: "open",
-      deadline: "2099-05-01 18:00",
-      submissionStatus: "confirmed"
-    });
-    assert.equal(taskDisplay(openWithResidualConfirmed).state, "ready");
-    assert.equal(taskDisplay(openWithResidualConfirmed).label, "待办");
-
-    const blockedWithResidualConfirmed = taskFixture("delivery_update", {
-      taskId: "blocked-residual-confirmed",
-      status: "blocked",
-      submissionStatus: "confirmed"
-    });
-    assert.equal(taskDisplay(blockedWithResidualConfirmed).state, "blocked");
-
-    // 权威 submitted + 投影 confirmed（索引超前）仍按已确认展示。
-    const submittedWithConfirmed = taskFixture("delivery_update", {
-      taskId: "submitted-confirmed",
+  it("renders chain-submitted tasks as confirmed", () => {
+    // chainStatus=submitted 即链上已确认：域内没有更深的确认信号。
+    const display = taskDisplay(taskFixture("delivery_update", {
+      taskId: "chain-submitted",
       status: "submitted",
-      submissionStatus: "confirmed"
-    });
-    assert.equal(taskDisplay(submittedWithConfirmed).state, "confirmed");
+      chainStatus: "submitted"
+    }));
+
+    assert.equal(display.state, "confirmed");
+    assert.equal(display.label, "已确认");
+    assert.equal(display.bucketLabel, "最近完成");
   });
 
-  it("keeps blocked and open tasks out of the failed bucket when a stale errorCode lingers", () => {
-    // 残留的失败扩展不得改写服务端权威任务态：blocked 显示受阻、open 显示待办，
-    // 只有 submitted 中间态才允许由失败扩展判"提交失败"。
-    const blocked = taskDisplay(taskFixture("delivery_update", { taskId: "blocked-stale", status: "blocked", errorCode: "REVERTED" }));
+  it("renders chain-cancelled tasks as cancelled even when the row is blocked", () => {
+    const display = taskDisplay(taskFixture("delivery_update", {
+      taskId: "chain-cancelled",
+      status: "blocked",
+      chainStatus: "cancelled"
+    }));
+
+    assert.equal(display.state, "cancelled");
+    assert.equal(display.label, "已取消");
+  });
+
+  it("keeps blocked and open tasks out of the confirmed bucket when chain confirmation is absent", () => {
+    // 服务端权威任务态优先：受阻任务显示受阻，开放任务显示待办；
+    // 只有 submitted 任务按 chainStatus 分流确认/等待。
+    const blocked = taskDisplay(taskFixture("delivery_update", { taskId: "blocked-plain", status: "blocked" }));
     assert.equal(blocked.state, "blocked");
     assert.equal(blocked.label, "受阻");
 
-    const open = taskDisplay(taskFixture("delivery_update", { taskId: "open-stale", status: "open", errorCode: "REVERTED", deadline: "2099-05-01 18:00" }));
+    const open = taskDisplay(taskFixture("delivery_update", { taskId: "open-plain", status: "open", deadline: "2099-05-01 18:00" }));
     assert.equal(open.state, "ready");
     assert.equal(open.label, "待办");
-
-    const submitted = taskDisplay(taskFixture("delivery_update", { taskId: "submitted-failed", status: "submitted", errorCode: "REVERTED" }));
-    assert.equal(submitted.state, "failed");
-    assert.equal(submitted.label, "提交失败");
   });
 
   it("returns all tasks unfiltered when no wallet is provided", () => {
@@ -862,8 +855,6 @@ describe("participant task inbox helpers", () => {
 function taskFixture(
   kind: FulfillmentPluginKind,
   overrides: Partial<ProductTaskWithAddOns> & {
-    readonly errorCode?: string;
-    readonly submissionStatus?: string;
     readonly chainStatus?: string;
   } = {}
 ): ProductTaskDTO {

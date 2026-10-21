@@ -59,9 +59,9 @@ interface OrderTimelineEvent {
 
 interface SlaRow {
   readonly task: ProductTaskDTO;
-  readonly status: "ready" | "near_deadline" | "overdue" | "blocked" | "indexing";
+  readonly status: "ready" | "near_deadline" | "overdue" | "blocked" | "indexing" | "confirmed" | "cancelled";
   readonly label: string;
-  readonly tone: "info" | "warn" | "danger";
+  readonly tone: "info" | "warn" | "danger" | "ok";
   readonly blockedBy: string;
   readonly escalation: string;
 }
@@ -340,12 +340,19 @@ function buildSlaRows(tasks: readonly ProductTaskDTO[]): readonly SlaRow[] {
 }
 
 function slaStatus(task: ProductTaskDTO): SlaRow["status"] {
-  // 服务端任务词表只有 open/submitted/blocked：submitted 只是等待索引的
-  // 中间态，不落入 confirmed 绿勾（与 taskStatus/ProofPanel 口径一致）。
-  if (task.status === "submitted") {
+  // 链侧状态与 taskDisplay 同口径：submitted 即链上已确认，没有更深的
+  // 确认信号；unknown/缺省才停留在等待索引。
+  const display = taskDisplay(task);
+  if (display.state === "confirmed") {
+    return "confirmed";
+  }
+  if (display.state === "cancelled") {
+    return "cancelled";
+  }
+  if (display.state === "submitted") {
     return "indexing";
   }
-  if (task.status === "blocked") {
+  if (display.state === "blocked") {
     return "blocked";
   }
   const deadline = parseDeadline(task.deadline);
@@ -370,6 +377,10 @@ function slaLabel(status: SlaRow["status"]): string {
       return "Blocked";
     case "indexing":
       return "等待索引确认";
+    case "confirmed":
+      return "已确认";
+    case "cancelled":
+      return "已取消";
   }
 }
 
@@ -381,6 +392,9 @@ function slaTone(status: SlaRow["status"]): SlaRow["tone"] {
     case "near_deadline":
     case "indexing":
       return "warn";
+    case "confirmed":
+      return "ok";
+    case "cancelled":
     case "ready":
       return "info";
   }
@@ -395,7 +409,11 @@ function escalationHint(status: SlaRow["status"]): string {
     case "near_deadline":
       return "优先完成当前责任，必要时联系订单运营";
     case "indexing":
-      return "已提交，等待链上索引确认；确认前不会显示为完成";
+      return "已提交，等待链上索引确认。";
+    case "confirmed":
+      return "已完成并经链上确认，无需提醒。";
+    case "cancelled":
+      return "链上条件已取消，本任务不再需要提交。";
     case "ready":
       return "由责任方使用授权钱包提交";
   }
@@ -405,7 +423,10 @@ function slaIcon(status: SlaRow["status"]) {
   switch (status) {
     case "blocked":
     case "overdue":
+    case "cancelled":
       return <XCircle aria-hidden="true" />;
+    case "confirmed":
+      return <CheckCircle2 aria-hidden="true" />;
     case "near_deadline":
     case "indexing":
       return <Clock3 aria-hidden="true" />;

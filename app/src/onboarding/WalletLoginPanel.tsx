@@ -38,7 +38,7 @@ export function WalletLoginPanel({
       <h2>需要钱包登录</h2>
       <p>
         此部署要求钱包会话锚定参与者身份。连接浏览器钱包完成一次签名即可查看你的订单与待办；
-        登录在当前标签页内保持，过期后重新签名。
+        登录在本浏览器内保持（跨标签页共用），过期后重新签名。
       </p>
       {hasWallet ? (
         <button className="primary-button" type="button" disabled={busy} onClick={() => void handleLogin()}>

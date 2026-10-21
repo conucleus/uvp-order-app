@@ -273,7 +273,7 @@ export function TaskPluginHost({
           <p className="blocked-copy">{task.blockedReason}</p>
         ) : null}
         <div className={`task-runtime-status task-runtime-status-${display.state}`}>
-          {display.state === "blocked" || display.state === "failed"
+          {display.state === "blocked" || display.state === "cancelled"
             ? <AlertTriangle aria-hidden="true" />
             : <CheckCircle2 aria-hidden="true" />}
           <span>{display.bucketLabel}</span>

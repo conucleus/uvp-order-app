@@ -75,7 +75,7 @@ export interface ProductApiClient {
   /** 客户端当前持有的钱包会话 token（proveWalletControl 成功后留存），供通知等旁路请求复用同一会话锚定。 */
   currentSessionToken(): string | undefined;
   /**
-   * 恢复/清除钱包会话 token（页面刷新时从 sessionStorage 恢复；服务端
+   * 恢复/清除钱包会话 token（页面刷新或新开标签页时从 localStorage 恢复；服务端
    * 判定会话失效时清除）。返回是否真的改变了客户端持有的 token。
    */
   restoreSessionToken(token: string | undefined): boolean;
@@ -391,12 +391,12 @@ export class ProductApiError extends Error {
 /** 401 + 该码表示参与者面请求缺有效钱包会话：界面据此切换到钱包登录入口。 */
 export const WALLET_IDENTITY_REQUIRED_CODE = "wallet_identity_required";
 
-/** 钱包会话 token 的会话级持久化键：刷新页面可恢复会话，关标签页即失效。 */
+/** 钱包会话 token 的浏览器级持久化键：刷新页面与新开标签页共用同一会话（与 Store 同口径）。 */
 const WALLET_SESSION_STORAGE_KEY = "uvp-order-app:wallet-session";
 
 export function readPersistedWalletSessionToken(): string | undefined {
   try {
-    return globalThis.sessionStorage?.getItem(WALLET_SESSION_STORAGE_KEY) ?? undefined;
+    return globalThis.localStorage?.getItem(WALLET_SESSION_STORAGE_KEY) ?? undefined;
   } catch {
     return undefined;
   }
@@ -405,12 +405,12 @@ export function readPersistedWalletSessionToken(): string | undefined {
 export function persistWalletSessionToken(token: string | undefined): void {
   try {
     if (token === undefined) {
-      globalThis.sessionStorage?.removeItem(WALLET_SESSION_STORAGE_KEY);
+      globalThis.localStorage?.removeItem(WALLET_SESSION_STORAGE_KEY);
     } else {
-      globalThis.sessionStorage?.setItem(WALLET_SESSION_STORAGE_KEY, token);
+      globalThis.localStorage?.setItem(WALLET_SESSION_STORAGE_KEY, token);
     }
   } catch {
-    // 存储不可用（隐私模式/测试环境）只损失刷新恢复，登录流程本身不受影响。
+    // 存储不可用（隐私模式/测试环境）只损失跨页恢复，登录流程本身不受影响。
   }
 }
 

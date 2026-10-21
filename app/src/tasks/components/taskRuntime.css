@@ -91,16 +91,12 @@
   background: var(--app-blue);
 }
 
-.status-indexing {
-  background: var(--app-amber);
-}
-
 .status-confirmed {
   background: var(--app-green);
 }
 
-.status-failed {
-  background: var(--app-red);
+.status-cancelled {
+  background: var(--app-muted);
 }
 
 .task-status-ready {
@@ -108,19 +104,14 @@
   background: var(--app-blue-soft);
 }
 
-.task-status-indexing {
-  color: var(--app-amber);
-  background: var(--app-amber-soft);
-}
-
 .task-status-confirmed {
   color: var(--app-green);
   background: var(--app-green-soft);
 }
 
-.task-status-failed {
-  color: var(--app-red);
-  background: var(--app-red-soft);
+.task-status-cancelled {
+  color: var(--app-muted);
+  background: var(--app-surface-muted);
 }
 
 .task-runtime-status {
@@ -134,8 +125,7 @@
 }
 
 .task-runtime-status-ready,
-.task-runtime-status-submitted,
-.task-runtime-status-indexing {
+.task-runtime-status-submitted {
   color: var(--app-blue);
   background: var(--app-blue-soft);
 }
@@ -145,10 +135,14 @@
   background: var(--app-green-soft);
 }
 
-.task-runtime-status-blocked,
-.task-runtime-status-failed {
+.task-runtime-status-blocked {
   color: var(--app-red);
   background: var(--app-red-soft);
+}
+
+.task-runtime-status-cancelled {
+  color: var(--app-muted);
+  background: var(--app-surface-muted);
 }
 
 .signal-container-summary {
@@ -568,9 +562,12 @@
   border-color: #bbf7d0;
 }
 
-.task-runtime-status-blocked,
-.task-runtime-status-failed {
+.task-runtime-status-blocked {
   border-color: #fecaca;
+}
+
+.task-runtime-status-cancelled {
+  border-color: #e2e8f0;
 }
 
 .signal-container-summary {
