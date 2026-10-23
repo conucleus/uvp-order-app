@@ -4,13 +4,14 @@ import {
   ClipboardList,
   Clock3,
   FileCheck2,
+  Fingerprint,
   FolderKanban,
   RefreshCw,
   ShieldCheck
 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { ReactElement } from "react";
-import type { ProductOrderDTO, ProductTaskDTO } from "@uvp-eth/product-dto";
+import type { ProductOrderDTO, ProductTaskDTO, ZhixuDetailDTO } from "@uvp-eth/product-dto";
 import {
   createProductApiClient,
   isWalletIdentityRequired,
@@ -25,11 +26,18 @@ import { NotificationCenter, useOrderAppNotifications } from "./notifications/No
 import type { OrderAppNotificationDTO } from "./notifications/types";
 import { InviteOnboarding } from "./onboarding/InviteOnboarding";
 import { WalletLoginPanel } from "./onboarding/WalletLoginPanel";
+import { decorateTaskEvidenceSpec } from "./decoration/decorationSupport";
+import { useOrderAppDecorations } from "./decoration/useZhixuDecorations";
+import { DecorationPage } from "./reader/DecorationPage";
+import { RegistrationPage } from "./registration";
 import {
+  clearDecorationSearchParam,
   clearInviteSearchParams,
+  readDecorationEntryFromSearch,
   readInviteEntryFromSearch,
   readOrderAppRoute,
   routeHash,
+  type DecorationEntry,
   type InviteEntry,
   type OrderAppRoute,
   type OrderAppSection
@@ -103,6 +111,9 @@ function AppShell({ api }: { readonly api: ProductApiClient }) {
   // 先恢复再请求——非 local 部署没有会话锚定身份的请求一律 401。
   const [sessionRestored] = useState(() => api.restoreSessionToken(readPersistedWalletSessionToken()));
   const [route, setRoute] = useState<OrderAppRoute>(() => readOrderAppRoute());
+  // Reader 装修入口（?decoration=<zhixuId>）：只读展示，不要求钱包会话；
+  // 离开时清搜索参数，刷新后回到参与者主界面。
+  const [decorationEntry, setDecorationEntry] = useState<DecorationEntry | undefined>(() => readDecorationEntryFromSearch());
   // ?invite=&inviteToken= 只作为进入应用的邀请入口读取进 state；地址栏上的
   // 一次性令牌保留到流程终态（accept/reject 成功或明确离开）才清除——
   // 中途失败/刷新必须能重新读到令牌重试，挂载即清会把可重试失败变成死路。
@@ -123,8 +134,12 @@ function AppShell({ api }: { readonly api: ProductApiClient }) {
   }, []);
 
   useEffect(() => {
+    // reader 装修页是公共读页面：不发参与者身份请求，避免无会话时误跳登录面。
+    if (decorationEntry) {
+      return;
+    }
     loadParticipantHome();
-  }, [api, session, sessionRestored]);
+  }, [api, session, sessionRestored, decorationEntry]);
 
   function loadParticipantHome(options: { readonly silent?: boolean } = {}) {
     const sequence = loadSequenceRef.current + 1;
@@ -166,7 +181,49 @@ function AppShell({ api }: { readonly api: ProductApiClient }) {
   }
 
   const data = loadState.status === "ready" ? loadState.data : undefined;
-  const selectedTask = useMemo(() => selectTask(data?.tasks ?? [], route.taskId), [data?.tasks, route.taskId]);
+  // 装修数据（Store 读侧）：按当前订单/任务涉及的 zhixu 拉取；reader 页自己加载。
+  const zhixuIds = useMemo(() => {
+    const ids = new Set<string>();
+    for (const task of data?.tasks ?? []) {
+      ids.add(task.zhixuId);
+    }
+    for (const order of data?.orders ?? []) {
+      ids.add(order.zhixuId);
+    }
+    return [...ids].filter((id) => id.trim().length > 0).sort();
+  }, [data]);
+  const decorations = useOrderAppDecorations(api, zhixuIds, decorationEntry === undefined);
+  // 任务证据要求：任务自带 spec 优先；缺失时按 taskId→stageId 用装修声明补位，
+  // 补位来源单独标记，界面如实注明"来自装修"。
+  const decoratedTasks = useMemo(() => {
+    const fromDecoration = new Set<string>();
+    const decorated = (data?.tasks ?? []).map((task) => {
+      const snapshot = decorations.byZhixuId[task.zhixuId];
+      const result = decorateTaskEvidenceSpec(task, snapshot?.decoration);
+      if (result.source === "decoration") {
+        fromDecoration.add(result.task.taskId);
+      }
+      return result.task;
+    });
+    return { tasks: decorated, fromDecoration };
+  }, [data, decorations.byZhixuId]);
+  const zhixuById = useMemo(() => {
+    const byId: Record<string, ZhixuDetailDTO> = {};
+    for (const [zhixuId, snapshot] of Object.entries(decorations.byZhixuId)) {
+      if (snapshot.zhixu) {
+        byId[zhixuId] = snapshot.zhixu;
+      }
+    }
+    return byId;
+  }, [decorations.byZhixuId]);
+  const workspaceData = useMemo<ProductHomeData | undefined>(
+    () => (data ? { ...data, tasks: decoratedTasks.tasks } : undefined),
+    [data, decoratedTasks.tasks]
+  );
+  const selectedTask = useMemo(
+    () => selectTask(decoratedTasks.tasks, route.taskId),
+    [decoratedTasks.tasks, route.taskId]
+  );
   const selectedOrder = useMemo(
     () => selectOrder(data?.orders ?? [], route.orderId, selectedTask),
     [data?.orders, route.orderId, selectedTask]
@@ -247,7 +304,16 @@ function AppShell({ api }: { readonly api: ProductApiClient }) {
         <SystemBanner tone="error" title="参与者服务加载失败" text={loadState.message} />
       ) : null}
 
-      {route.inviteId || inviteEntry ? (
+      {decorationEntry ? (
+        <DecorationPage
+          api={api}
+          zhixuId={decorationEntry.zhixuId}
+          onEnterTasks={() => {
+            clearDecorationSearchParam();
+            setDecorationEntry(undefined);
+          }}
+        />
+      ) : route.inviteId || inviteEntry ? (
         <InviteOnboarding
           inviteId={route.inviteId ?? inviteEntry?.inviteId ?? ""}
           inviteToken={inviteEntry?.inviteToken}
@@ -257,10 +323,30 @@ function AppShell({ api }: { readonly api: ProductApiClient }) {
           onRejected={clearInviteSearchParams}
           onDismiss={dismissInviteEntry}
         />
+      ) : route.section === "registration" ? (
+        // 注册与身份：实体注册写路径 blocker 见 registration/README.md；钱包
+        // 绑定复用现有 SIWE 会话（OrderAppActions + api 会话 token）。未登录
+        // 也可进入（公开身份事实只读），登录后地址绑定才可用。
+        <RegistrationPage
+          session={{ currentSessionToken: () => api.currentSessionToken() }}
+          wallet={actions}
+          initialAddress={data?.participant.walletAddress ?? session.walletAddress}
+          onBack={() =>
+            navigate({
+              section: "tasks",
+              taskId: selectedTask?.taskId,
+              orderId: selectedOrder?.orderId
+            })
+          }
+        />
       ) : loadState.status === "unauthenticated" ? (
         // 非 local 部署的无会话态：登录是唯一可用入口，不渲染待办工作区
         //（渲染了也只是一整屏 401 派生错误）。
-        <WalletLoginPanel hasWallet={actions.hasInjectedWallet()} onLogin={handleWalletLogin} />
+        <WalletLoginPanel
+          hasWallet={actions.hasInjectedWallet()}
+          onLogin={handleWalletLogin}
+          onOpenRegistration={() => navigate({ section: "registration" })}
+        />
       ) : (
         <>
           <section className="participant-strip" aria-label="参与者信息">
@@ -280,6 +366,15 @@ function AppShell({ api }: { readonly api: ProductApiClient }) {
                   : "用于匹配订单职责和提交签名"}
               </small>
             </div>
+            <button
+              className="quiet-button"
+              type="button"
+              onClick={() => navigate({ section: "registration", taskId: selectedTask?.taskId, orderId: selectedOrder?.orderId })}
+              data-testid="open-registration-button"
+            >
+              <Fingerprint aria-hidden="true" />
+              注册与身份
+            </button>
             <button
               className="quiet-button notification-toggle"
               type="button"
@@ -335,7 +430,9 @@ function AppShell({ api }: { readonly api: ProductApiClient }) {
             ) : (
               <TaskWorkspace
                 actions={actions}
-                data={data}
+                data={workspaceData}
+                decorationEvidenceTaskIds={decoratedTasks.fromDecoration}
+                zhixuById={zhixuById}
                 route={route}
                 selectedOrder={selectedOrder}
                 selectedTask={selectedTask}

@@ -1,6 +1,7 @@
 import { ClipboardList } from "lucide-react";
-import type { ProductOrderDTO, ProductTaskDTO } from "@uvp-eth/product-dto";
+import type { ProductOrderDTO, ProductTaskDTO, ZhixuDetailDTO } from "@uvp-eth/product-dto";
 import type { ProductApiSource, ProductHomeData } from "../api/productApi";
+import { selectableTargetsFromZhixuStage } from "../decoration/decorationSupport";
 import type { OrderAppActions } from "../actions/orderAppActions";
 import { EvidencePanel } from "../evidence/EvidencePanel";
 import { planTaskEvidence } from "../evidence/evidenceSpec";
@@ -14,6 +15,10 @@ import type { PrepareSubmitInput } from "../tasks";
 interface TaskWorkspaceProps {
   readonly actions: OrderAppActions;
   readonly data: ProductHomeData | undefined;
+  /** 证据要求由装修声明补位的任务：界面如实标注来源，不冒充任务自带配置。 */
+  readonly decorationEvidenceTaskIds?: ReadonlySet<string> | undefined;
+  /** 任务所属秩序详情：为 DSL selectedStages 派生订单内执行者选择目标。 */
+  readonly zhixuById?: Readonly<Record<string, ZhixuDetailDTO>> | undefined;
   readonly route: OrderAppRoute;
   readonly selectedOrder?: ProductOrderDTO | undefined;
   readonly selectedTask?: ProductTaskDTO | undefined;
@@ -32,6 +37,8 @@ interface TaskWorkspaceProps {
 export function TaskWorkspace({
   actions,
   data,
+  decorationEvidenceTaskIds,
+  zhixuById,
   route,
   selectedOrder,
   selectedTask,
@@ -54,6 +61,15 @@ export function TaskWorkspace({
   // 凭证槽位判定与 EvidencePanel 内部同一单源（planTaskEvidence）：
   // 有槽位时凭证面板持有提交边界，TaskPluginHost 互斥隐藏自带边界。
   const evidenceSubmissionOwned = Boolean(selectedTask && planTaskEvidence(selectedTask).slots.length > 0);
+  const evidenceFromDecoration = Boolean(selectedTask && decorationEvidenceTaskIds?.has(selectedTask.taskId));
+  // DSL selectedStages 的执行者选择目标：投影自带 selectableTargets 时由插件
+  // 流程消费，这里只做"阶段声明了订单内选择目标"时的补位。
+  const derivedExecutorTargets = selectedTask
+    ? selectableTargetsFromZhixuStage(
+        selectedTask.zhixuId ? zhixuById?.[selectedTask.zhixuId] : undefined,
+        selectedTask
+      )
+    : [];
   return (
     <div className="task-workspace">
       <TaskInbox
@@ -63,6 +79,12 @@ export function TaskWorkspace({
         onSelectTask={onSelectTask}
       />
       <aside className="task-detail" aria-label="待办详情">
+        {selectedTask && evidenceFromDecoration ? (
+          <p className="notice-line" data-testid="task-evidence-source-note">
+            <ClipboardList aria-hidden="true" />
+            <span>该待办的材料要求来自秩序装修数据（发布方随秩序提供）。</span>
+          </p>
+        ) : null}
         {selectedTask ? (
           <TaskPluginHost
             actions={actions}
@@ -70,6 +92,7 @@ export function TaskWorkspace({
             order={selectedOrder}
             participantWallet={participantWallet}
             source={source}
+            extraExecutorTargets={derivedExecutorTargets}
             standardEvidencePanel={(
               <EvidencePanel
                 actions={actions}

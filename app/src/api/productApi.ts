@@ -9,9 +9,18 @@ import {
   type ProductSubmissionStatus,
   type ProductSubmitIntent,
   type ProductTaskDTO,
-  type SubmitProductTaskInput
+  type SubmitProductTaskInput,
+  type ZhixuDetailDTO
 } from "@uvp-eth/product-dto";
 import type { ProductSubmitTypedData } from "@uvp-eth/executor-kit/participant";
+import type {
+  DecorationDataView,
+  DecorationEvidenceSlotView,
+  DecorationTaskDeclarationView,
+  DecorationThemeView,
+  DecorationVersionView,
+  ZhixuDecorationView
+} from "../decoration/types";
 import { participantPath } from "./participantPath";
 import { deadlineSortMs } from "../tasks/model/taskUtils";
 
@@ -63,6 +72,10 @@ export interface ProductApiClient {
   loadParticipantHome(input?: ParticipantQueryInput): Promise<ProductHomeData>;
   getOrder(orderId: string): Promise<ProductOrderDTO>;
   getTask(taskId: string, input?: ParticipantQueryInput): Promise<ProductTaskDTO>;
+  /** 秩序详情（reader 装修页/阶段数据源；Product API 公共读，不需要钱包会话）。 */
+  getZhixu(zhixuId: string): Promise<ZhixuDetailDTO>;
+  /** Store 装修数据（Store 数据域读侧；缺失即空版本，不是链上事实）。 */
+  getDecoration(planId: string): Promise<ZhixuDecorationView>;
   previewInvite(inviteId: string, input?: ParticipantQueryInput): Promise<ProductInvitePreviewDTO>;
   acceptInvite(inviteId: string, input: AcceptInviteInput, options?: InviteRequestOptions): Promise<ProductInviteAcceptanceDTO>;
   rejectInvite(inviteId: string, input?: RejectInviteInput): Promise<ProductInviteAcceptanceDTO>;
@@ -515,6 +528,22 @@ class BrowserProductApiClient implements ProductApiClient {
     return response.task;
   }
 
+  async getZhixu(zhixuId: string): Promise<ZhixuDetailDTO> {
+    const pathname = `/product/zhixus/${encodeURIComponent(zhixuId)}`;
+    const response = await this.getJson<{ readonly zhixu?: ZhixuDetailDTO }>(pathname);
+    // fail-closed：详情缺失即畸形响应，不用空对象冒充"没有阶段/角色"。
+    if (!response.zhixu || typeof response.zhixu.zhixuId !== "string") {
+      throw new ProductApiError(0, pathname, "秩序详情响应缺少 zhixu");
+    }
+    return response.zhixu;
+  }
+
+  async getDecoration(planId: string): Promise<ZhixuDecorationView> {
+    const pathname = `/store/decoration/${encodeURIComponent(planId)}`;
+    const response = await this.getJson<unknown>(pathname);
+    return decorationViewFromResponse(planId, response);
+  }
+
   async previewInvite(inviteId: string, input: ParticipantQueryInput = {}): Promise<ProductInvitePreviewDTO> {
     // 与 accept/reject 同一请求形态：token 是与 accept 同权的一次性凭据，
     // 走 body 而不是 URL query（query 会随 URL/Referer/代理日志留痕）；
@@ -828,3 +857,151 @@ async function responseText(response: Response): Promise<string> {
   const text = await response.text();
   return text.length > 0 ? text : `${response.status} ${response.statusText}`;
 }
+
+/**
+ * 装修数据响应读取（fail-closed 只在形状层面：顶层必须是对象、versions 必须是
+ * 数组）。单个版本/字段不合法即跳过该版本/字段——装修是 Store 展示投影，
+ * 不参与权限或状态判定，读坏一条不能让 reader 页整体误报"没有装修数据"：
+ * 空版本与请求失败由调用方分别呈现。
+ */
+function decorationViewFromResponse(planId: string, response: unknown): ZhixuDecorationView {
+  if (!isRecord(response)) {
+    throw new ProductApiError(0, `/store/decoration/${encodeURIComponent(planId)}`, "装修数据响应不是 JSON 对象");
+  }
+  if (!Array.isArray(response.versions)) {
+    throw new ProductApiError(0, `/store/decoration/${encodeURIComponent(planId)}`, "装修数据响应缺少 versions");
+  }
+  const versions = response.versions
+    .map(decorationVersionFrom)
+    .filter((version): version is DecorationVersionView => version !== undefined)
+    .sort((left, right) => left.version - right.version);
+  const currentVersion = decorationVersionFrom(response.current);
+  const current = currentVersion ?? versions[versions.length - 1];
+  return {
+    planId: typeof response.planId === "string" && response.planId.trim().length > 0 ? response.planId : planId,
+    ...(current ? { current } : {}),
+    versions
+  };
+}
+
+function decorationVersionFrom(value: unknown): DecorationVersionView | undefined {
+  if (!isRecord(value)) {
+    return undefined;
+  }
+  const version = typeof value.version === "number" && Number.isSafeInteger(value.version) && value.version > 0
+    ? value.version
+    : undefined;
+  const data = decorationDataFrom(value.data);
+  if (version === undefined || !data) {
+    return undefined;
+  }
+  return {
+    version,
+    data,
+    ...(typeof value.createdAt === "string" ? { createdAt: value.createdAt } : {})
+  };
+}
+
+function decorationDataFrom(value: unknown): DecorationDataView | undefined {
+  if (!isRecord(value) || value.schemaVersion !== "store-zhixu-decoration.v1") {
+    return undefined;
+  }
+  const theme = decorationThemeFrom(value.theme);
+  const taskDeclarations = Array.isArray(value.taskDeclarations)
+    ? value.taskDeclarations
+        .map(decorationDeclarationFrom)
+        .filter((declaration): declaration is DecorationTaskDeclarationView => declaration !== undefined)
+    : [];
+  return {
+    schemaVersion: "store-zhixu-decoration.v1",
+    ...(theme ? { theme } : {}),
+    ...(taskDeclarations.length > 0 ? { taskDeclarations } : {})
+  };
+}
+
+function decorationThemeFrom(value: unknown): DecorationThemeView | undefined {
+  if (!isRecord(value)) {
+    return undefined;
+  }
+  const displayName = cleanDecorationText(value.displayName);
+  const description = cleanDecorationText(value.description);
+  const tags = cleanDecorationTextList(value.tags);
+  const highlights = cleanDecorationTextList(value.highlights);
+  if (!displayName && !description && tags.length === 0 && highlights.length === 0) {
+    return undefined;
+  }
+  return {
+    ...(displayName ? { displayName } : {}),
+    ...(description ? { description } : {}),
+    ...(tags.length > 0 ? { tags } : {}),
+    ...(highlights.length > 0 ? { highlights } : {})
+  };
+}
+
+function decorationDeclarationFrom(value: unknown): DecorationTaskDeclarationView | undefined {
+  if (!isRecord(value)) {
+    return undefined;
+  }
+  const stageId = cleanDecorationText(value.stageId);
+  const taskId = cleanDecorationText(value.taskId);
+  const evidenceSpec = Array.isArray(value.evidenceSpec)
+    ? value.evidenceSpec
+        .map(decorationEvidenceSlotFrom)
+        .filter((slot): slot is DecorationEvidenceSlotView => slot !== undefined)
+    : [];
+  if (!stageId && !taskId) {
+    return undefined;
+  }
+  return {
+    ...(stageId ? { stageId } : {}),
+    ...(taskId ? { taskId } : {}),
+    ...(evidenceSpec.length > 0 ? { evidenceSpec } : {})
+  };
+}
+
+function decorationEvidenceSlotFrom(value: unknown): DecorationEvidenceSlotView | undefined {
+  if (!isRecord(value)) {
+    return undefined;
+  }
+  const key = cleanDecorationText(value.key);
+  const label = cleanDecorationText(value.label);
+  if (!key || !label) {
+    return undefined;
+  }
+  const inputKind = value.inputKind === "file" || value.inputKind === "text" || value.inputKind === "date"
+    ? value.inputKind
+    : undefined;
+  const accept = cleanDecorationTextList(value.accept);
+  const required = typeof value.required === "boolean" ? value.required : undefined;
+  const description = cleanDecorationText(value.description);
+  return {
+    key,
+    label,
+    ...(inputKind ? { inputKind } : {}),
+    ...(accept.length > 0 ? { accept } : {}),
+    ...(required !== undefined ? { required } : {}),
+    ...(description ? { description } : {})
+  };
+}
+
+function cleanDecorationText(value: unknown): string | undefined {
+  if (typeof value !== "string") {
+    return undefined;
+  }
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : undefined;
+}
+
+function cleanDecorationTextList(value: unknown): readonly string[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  return value
+    .map(cleanDecorationText)
+    .filter((item): item is string => item !== undefined);
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+

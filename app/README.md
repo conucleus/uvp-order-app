@@ -27,6 +27,13 @@ pnpm --filter @uvp-eth/order-app test:e2e
 
 未配置 `VITE_UVP_CHAIN_SERVICES_URL` 时启动即报错，错误信息包含该变量名；应用只显示未配置错误提示，不生成任务或证明。
 
+## 装修数据（reader 装修页与任务证据要求）
+
+- Reader 装修页入口：`/?decoration=<zhixuId>`（只读，不需要钱包会话；链接可分享、刷新可重开）。页面用产业语言渲染 theme（展示名/描述/标签/亮点）、参与方与责任、阶段与材料要求。
+- 数据来源：`GET /product/zhixus/<zhixuId>`（秩序详情，公共读）+ `GET /store/decoration/<planId>`（Store 装修数据，取 `zhixu.planPublication.planId`）。装修是 Store 数据域的可删除投影，不是链上事实；取不到时页面显式提示，不冒充"没有装修数据"。
+- 任务证据要求：任务投影自带 `evidenceSpec` 时以投影为准；缺失时按 `taskId`（精确）→ `stageId` 用装修 `taskDeclarations` 补位，任务详情标注"材料要求来自秩序装修数据"。
+- 执行者选择：任务投影带 `selectableTargets` 时走既有 stage executor patch 流程；缺失但秩序阶段声明了 `selectedStageTargets`（DSL `selectedStages`）时，按秩序详情派生目标阶段入口。界面不引入"静态/动态执行者"概念。
+
 ## 通用任务动作
 
 Order App 支持 Signal 提交、stage executor patch、stage resource patch 和 Store 编写的 participant add-on manifest。Manifest 描述表单与按钮，不能授予链上权限。

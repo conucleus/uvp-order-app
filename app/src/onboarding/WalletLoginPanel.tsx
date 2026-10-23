@@ -1,4 +1,4 @@
-import { KeyRound, Wallet } from "lucide-react";
+import { Fingerprint, KeyRound, Wallet } from "lucide-react";
 import { useState } from "react";
 
 /**
@@ -8,11 +8,14 @@ import { useState } from "react";
  */
 export function WalletLoginPanel({
   hasWallet,
-  onLogin
+  onLogin,
+  onOpenRegistration
 }: {
   /** 是否检测到浏览器钱包注入。 */
   readonly hasWallet: boolean;
   readonly onLogin: () => Promise<void>;
+  /** 注册与身份入口：未登录的新实体可先查看注册页（公开身份事实只读）。 */
+  readonly onOpenRegistration?: (() => void) | undefined;
 }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | undefined>();
@@ -49,6 +52,12 @@ export function WalletLoginPanel({
         <p>未检测到浏览器钱包：请先安装钱包扩展（如 MetaMask）后刷新本页。</p>
       )}
       {error ? <p role="alert">{error}</p> : null}
+      {onOpenRegistration ? (
+        <button className="quiet-button" type="button" onClick={onOpenRegistration} data-testid="open-registration-button">
+          <Fingerprint aria-hidden="true" />
+          注册与身份
+        </button>
+      ) : null}
     </section>
   );
 }

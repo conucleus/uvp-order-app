@@ -11,7 +11,7 @@ import type { ProductOrderDTO, ProductTaskDTO } from "@uvp-eth/product-dto";
 import type { ProductApiSource } from "../api/productApi";
 import type { OrderAppActions } from "../actions/orderAppActions";
 import type { TaskSubmissionProof } from "../task-model";
-import { addOnManifestForTask, selectableTargetsForTask } from "./model/addOnTypes";
+import { addOnManifestForTask, selectableTargetsForTask, type SelectableTargetStageDTO } from "./model/addOnTypes";
 import {
   createInitialTaskPluginState,
   pluginForTask,
@@ -51,6 +51,12 @@ export interface TaskPluginHostProps {
   readonly source?: ProductApiSource | undefined;
   readonly standardEvidencePanel?: ReactNode | undefined;
   /**
+   * 订单内执行者选择目标补位：秩序阶段声明了 selectedStageTargets（DSL
+   * selectedStages）而任务投影未带 selectableTargets 时，由调用方从秩序详情
+   * 派生传入；不改变插件自身的动作类型判定。
+   */
+  readonly extraExecutorTargets?: readonly SelectableTargetStageDTO[] | undefined;
+  /**
    * 凭证面板持有提交边界（任务有 evidenceSpec/资源文件槽位，由调用方用
    * planTaskEvidence 同一单源判定——tasks/ 不得反向 import evidence/，
    * 导入边界由 importBoundaries.test 强制）。为真时本组件不渲染自带的
@@ -73,6 +79,7 @@ export function TaskPluginHost({
   participantWallet,
   source,
   standardEvidencePanel,
+  extraExecutorTargets,
   evidenceSubmissionOwned,
   onPrepareSubmit,
   onProofReady,
@@ -115,15 +122,23 @@ export function TaskPluginHost({
   }), [participantWallet, state, task]);
   const validation = plugin.validate(runtimeState);
   const display = taskDisplay(task);
-  const patchTargets = useMemo(() => selectableTargetsForTask(task), [task]);
+  const projectedPatchTargets = useMemo(() => selectableTargetsForTask(task), [task]);
+  // 投影有 selectableTargets 时以投影为准（服务端带 allowed/disabledReason）；
+  // 缺失时才用秩序 selectedStageTargets 派生的补位目标。
+  const patchTargets = projectedPatchTargets.length > 0 ? projectedPatchTargets : extraExecutorTargets ?? [];
   const usesManifestFlow = Boolean(addOnManifest);
-  const usesExecutorPatchFlow = !usesManifestFlow && plugin.kind === "stage_executor_patch" && patchTargets.length > 0;
+  const usesProjectedExecutorFlow = plugin.kind === "stage_executor_patch" && projectedPatchTargets.length > 0;
+  const usesDerivedExecutorFlow = plugin.kind !== "stage_executor_patch" && projectedPatchTargets.length === 0 && (extraExecutorTargets?.length ?? 0) > 0;
+  const usesExecutorPatchFlow = !usesManifestFlow && (usesProjectedExecutorFlow || usesDerivedExecutorFlow);
   const usesResourcePatchFlow = !usesManifestFlow && plugin.kind === "stage_resource_patch" && patchTargets.length > 0;
   const usesPatchFlow = usesExecutorPatchFlow || usesResourcePatchFlow;
   // 凭证槽位（evidenceSpec 或资源要求）存在时，EvidencePanel 自带完整的
   // 准备→签名→提交边界且校验槽位；与插件"提交确认"边界互斥渲染（判定由
-  // 调用方以 planTaskEvidence 同一单源传入）。
-  const usesEvidenceFlow = !usesPatchFlow && !usesManifestFlow && evidenceSubmissionOwned === true;
+  // 调用方以 planTaskEvidence 同一单源传入）。派生执行者选择（订单内选择
+  // 目标阶段执行者）与凭证提交是两条独立动作，不互斥。
+  const usesEvidenceFlow = evidenceSubmissionOwned === true &&
+    !usesManifestFlow &&
+    (!usesPatchFlow || usesDerivedExecutorFlow);
 
   function updateValue(inputId: string, value: string) {
     setPrepared(undefined);
@@ -305,7 +320,7 @@ export function TaskPluginHost({
       {usesExecutorPatchFlow ? (
         <ExecutorPatchPanel
           actions={actions}
-          actionLabel={pluginPresentation.primaryActionLabel}
+          actionLabel={usesDerivedExecutorFlow ? "选择阶段执行者" : pluginPresentation.primaryActionLabel}
           order={order}
           participantWallet={participantWallet}
           source={source}

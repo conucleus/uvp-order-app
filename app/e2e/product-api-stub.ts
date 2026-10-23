@@ -5,7 +5,8 @@ import type {
   ProductOrderDTO,
   ProductParticipantProfileDTO,
   ProductResourceRequirementDTO,
-  ProductTaskDTO
+  ProductTaskDTO,
+  ZhixuDetailDTO
 } from "@uvp-eth/product-dto";
 import {
   buildProductSubmitTypedData,
@@ -596,6 +597,128 @@ export function resourcePatchTask(overrides: Partial<ProductTaskWithAddOns> = {}
   });
 }
 
+
+/** 装修数据桩：与 used-car 装修同形（theme + 按 stage 绑定的 evidenceSpec）。 */
+const usedCarPlanId = "0xusedcar0000000000000000000000000000000000000000000000000000001";
+const emptyDecorationPlanId = "0xempty0000000000000000000000000000000000000000000000000000000001";
+const usedCarDecorationZhixuId = "zhixu-used-car-export-v0";
+
+const usedCarDecoration = {
+  planId: usedCarPlanId,
+  current: {
+    version: 1,
+    data: {
+      schemaVersion: "store-zhixu-decoration.v1",
+      theme: {
+        displayName: "中国—中亚二手车出口 · 九步逐段确认",
+        description: "九个阶段逐段确认：每阶段先交材料，再由约定的验收方确认放行。",
+        tags: ["二手车出口", "中亚", "独立检测"],
+        highlights: ["每阶段先交材料，再由约定的验收方确认", "检测、物流执行方由当事人在订单内选定"]
+      },
+      taskDeclarations: [
+        {
+          stageId: "customs-complete",
+          evidenceSpec: [
+            {
+              key: "decoration_customs_declaration",
+              label: "装修材料：出口报关单",
+              inputKind: "file",
+              accept: ["application/pdf", ".pdf"],
+              required: true,
+              description: "装修数据提供的材料要求。"
+            }
+          ]
+        },
+        {
+          stageId: "demand",
+          evidenceSpec: [
+            { key: "demand_vehicle", label: "意向车型与年份", inputKind: "text", required: true }
+          ]
+        }
+      ]
+    },
+    createdAt: "2026-10-23T00:00:00.000Z"
+  },
+  versions: []
+} as const;
+
+function usedCarZhixuDetail(zhixuId: string, planId: string): ZhixuDetailDTO {
+  return {
+    zhixuId,
+    title: "二手车出口秩序",
+    subtitle: "九个阶段逐段确认",
+    reviewStatus: "approved",
+    reviewLabel: "已审核",
+    riskLevel: "中",
+    applicableBusiness: ["二手车出口"],
+    excludedBusiness: [],
+    stageCount: 2,
+    roleSlotCount: 2,
+    supportedPaymentMethods: [],
+    maintainer: "运营方",
+    updatedAt: "2026-10-23T00:00:00.000Z",
+    planPublication: {
+      status: "published",
+      label: "已发布",
+      stateMachineLabel: "UVPStateMachine",
+      planId,
+      planHash: "0xhash-used-car"
+    },
+    roleSlots: [
+      { slotId: "buyer", title: "买方", label: "采购方", duty: "确认需求与验收", evidence: ["验收确认"], status: "required", tone: "info", required: true },
+      { slotId: "seller", title: "卖方", label: "出口商", duty: "交付车辆与单证", evidence: ["报关单"], status: "required", tone: "ok", required: true }
+    ],
+    dockableModules: [],
+    stages: [
+      {
+        stageId: "demand",
+        index: 0,
+        name: "需求确认",
+        evidence: ["意向车型"],
+        ownerRole: "买方",
+        status: "active",
+        selectedStageTargets: ["inspection"]
+      },
+      {
+        stageId: "inspection",
+        index: 1,
+        name: "独立检测",
+        evidence: ["检测报告"],
+        ownerRole: "检测方",
+        status: "pending"
+      },
+      {
+        stageId: "customs-complete",
+        index: 2,
+        name: "出口报关",
+        evidence: ["报关单"],
+        ownerRole: "卖方",
+        status: "pending"
+      }
+    ],
+    orderPermissionTable: [],
+    proofRows: [],
+    createOrderHint: "开单后按阶段提交材料。"
+  };
+}
+
+/** 缺失证据配置、且没有 add-on manifest 的任务：装修 evidenceSpec 单轨补位的展示面。 */
+export function decorationEvidenceTask(overrides: Partial<ProductTaskWithAddOns> = {}): ProductTaskDTO {
+  return readinessTask({
+    taskId: "task-decoration-evidence-001",
+    zhixuId: usedCarDecorationZhixuId,
+    stageId: "demand",
+    stageName: "需求确认",
+    title: "确认需求并提交材料",
+    subtitle: "本待办的材料要求由秩序装修数据提供。",
+    addOnKind: undefined,
+    addOnManifest: undefined,
+    selectableTargets: undefined,
+    evidenceSpec: undefined,
+    ...overrides
+  } as unknown as Partial<ProductTaskWithAddOns>);
+}
+
 export async function installProductApiStub(page: Page, options: StubOptions = {}): Promise<void> {
   if (process.env.UVP_ORDER_APP_E2E_PROFILE === "full") {
     throw new Error("Product API stubs cannot be installed when UVP_ORDER_APP_E2E_PROFILE=full");
@@ -661,6 +784,28 @@ export async function installProductApiStub(page: Page, options: StubOptions = {
 
     if (request.method() === "GET" && pathname === "/product/me/tasks") {
       await fulfillJson(route, { participant, tasks });
+      return;
+    }
+
+    // 装修接线：秩序详情（公共读）+ Store 装修数据。默认秩序返回空装修，
+    // 只有 used-car 秩序的桩带 theme/taskDeclarations，避免污染其他用例。
+    if (request.method() === "GET" && pathname.startsWith("/product/zhixus/")) {
+      const zhixuId = decodeURIComponent(pathname.slice("/product/zhixus/".length));
+      const planId = zhixuId === usedCarDecorationZhixuId ? usedCarPlanId : emptyDecorationPlanId;
+      await fulfillJson(route, { zhixu: usedCarZhixuDetail(zhixuId, planId) });
+      return;
+    }
+
+    // 注册页身份事实：公开只读投影（本桩返回空背书集，用于验证"没有记录"
+    // 与"读取失败"分开呈现；不伪造任何身份评价）。
+    if (request.method() === "GET" && pathname === "/identity/bindings") {
+      await fulfillJson(route, { bindings: [] });
+      return;
+    }
+
+    if (request.method() === "GET" && pathname.startsWith("/store/decoration/")) {
+      const planId = decodeURIComponent(pathname.slice("/store/decoration/".length));
+      await fulfillJson(route, planId === usedCarPlanId ? usedCarDecoration : { planId, versions: [] });
       return;
     }
 

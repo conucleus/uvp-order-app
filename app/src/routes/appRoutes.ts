@@ -1,4 +1,4 @@
-export type OrderAppSection = "tasks" | "orders" | "proof";
+export type OrderAppSection = "tasks" | "orders" | "proof" | "registration";
 
 export interface OrderAppRoute {
   readonly section: OrderAppSection;
@@ -13,7 +13,16 @@ export interface InviteEntry {
   readonly inviteToken?: string | undefined;
 }
 
-const sections = new Set<OrderAppSection>(["tasks", "orders", "proof"]);
+/**
+ * Reader 装修页入口：?decoration=<zhixuId>。
+ * 只带秩序 id（公共读），不含一次性凭据，因此链接可分享、刷新可重开；
+ * 与邀请入口互不消费，两者同时出现时邀请优先（加入流程更需要上下文）。
+ */
+export interface DecorationEntry {
+  readonly zhixuId: string;
+}
+
+const sections = new Set<OrderAppSection>(["tasks", "orders", "proof", "registration"]);
 const inviteSearchKeys = ["invite", "inviteToken"] as const;
 
 /**
@@ -61,6 +70,25 @@ export function readInviteEntryFromSearch(search = readSearch()): InviteEntry | 
   }
   const inviteToken = params.get("inviteToken")?.trim();
   return { inviteId, ...(inviteToken ? { inviteToken } : {}) };
+}
+
+/** 读取 reader 装修入口（?decoration=<zhixuId>）；缺失或空白返回 undefined。 */
+export function readDecorationEntryFromSearch(search = readSearch()): DecorationEntry | undefined {
+  const zhixuId = new URLSearchParams(search ?? "").get("decoration")?.trim();
+  return zhixuId ? { zhixuId } : undefined;
+}
+
+/** 离开 reader 装修页时移除 decoration 搜索参数，避免刷新后回到装修页。 */
+export function clearDecorationSearchParam(history = window.history): void {
+  if (typeof window === "undefined") {
+    return;
+  }
+  const url = new URL(window.location.href);
+  if (!url.searchParams.has("decoration")) {
+    return;
+  }
+  url.searchParams.delete("decoration");
+  history.replaceState(null, "", `${url.pathname}${url.search}${url.hash}`);
 }
 
 /**
