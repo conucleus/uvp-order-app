@@ -79,11 +79,40 @@ export interface WalletAddressBindingDTO {
   readonly addresses: readonly AccountAddressDTO[];
 }
 
-export type EntityRegistrationField = "entityName" | "registrationNumber" | "contactName";
+export type EntityRegistrationStatus = "self_declared" | "pending_review";
+
+/**
+ * POST /product/registration 与 GET /product/registration/me 返回的链下实体
+ * 登记档案。形态单源在 chain-services `store/registration/service.ts`：
+ * `verified`/`chainWritten` 由服务端恒返回 false——自助登记不是身份核验，
+ * 也不是链上身份绑定。
+ */
+export interface EntityRegistrationDTO {
+  readonly registrationId: string;
+  readonly accountAddress: string;
+  readonly accountId?: string | undefined;
+  readonly legalName: string;
+  readonly registrationNumber: string;
+  readonly contactName: string;
+  readonly status: EntityRegistrationStatus;
+  readonly verified: false;
+  readonly chainWritten: false;
+  readonly createdAt: string;
+  readonly updatedAt: string;
+}
+
+/** 实体登记写请求：账号地址由服务端从钱包会话取，客户端不得传。 */
+export interface RegisterEntityInput {
+  readonly legalName: string;
+  readonly registrationNumber: string;
+  readonly contactName: string;
+}
+
+export type EntityRegistrationField = "legalName" | "registrationNumber" | "contactName";
 
 /** 实体注册表单草稿（企业名称、注册号、联系人）。 */
 export interface EntityRegistrationDraft {
-  readonly entityName: string;
+  readonly legalName: string;
   readonly registrationNumber: string;
   readonly contactName: string;
 }

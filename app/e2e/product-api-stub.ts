@@ -29,6 +29,11 @@ interface StubOptions {
   readonly walletMode?: "available" | "missing" | "reject";
   /** 凭证核验记录的核验态：mismatch/missing_file 驱动签名前的核验闸负向路径。 */
   readonly evidenceProofStatus?: "matched" | "unbound" | "mismatch" | "missing_file";
+  /**
+   * 实体登记写路径：ready 正常落档案；unavailable 返回 503；network_error
+   * 直接断开连接（验证页面把服务端失败与网络失败分开呈现）。
+   */
+  readonly registrationMode?: "ready" | "unavailable" | "network_error";
 }
 
 const participant: ProductParticipantProfileDTO = {
@@ -730,6 +735,18 @@ export async function installProductApiStub(page: Page, options: StubOptions = {
   const evidenceId = "ev-customs-pdf-001";
   const payloadHash = "0x2222222222222222222222222222222222222222222222222222222222222222";
   const walletMode = options.walletMode ?? "available";
+  let entityRegistration: {
+    registrationId: string;
+    accountAddress: string;
+    legalName: string;
+    registrationNumber: string;
+    contactName: string;
+    status: "self_declared" | "pending_review";
+    verified: false;
+    chainWritten: false;
+    createdAt: string;
+    updatedAt: string;
+  } | null = null;
 
   if (walletMode !== "missing") {
     await page.addInitScript(({ signature, reject }) => {
@@ -793,6 +810,47 @@ export async function installProductApiStub(page: Page, options: StubOptions = {
       const zhixuId = decodeURIComponent(pathname.slice("/product/zhixus/".length));
       const planId = zhixuId === usedCarDecorationZhixuId ? usedCarPlanId : emptyDecorationPlanId;
       await fulfillJson(route, { zhixu: usedCarZhixuDetail(zhixuId, planId) });
+      return;
+    }
+
+    // 注册页实体登记：与 chain-services /product/registration 同形。只存
+    // 链下档案，status 恒为 self_declared，verified/chainWritten 恒为 false。
+    if (request.method() === "GET" && pathname === "/product/registration/me") {
+      await fulfillJson(route, { registration: entityRegistration });
+      return;
+    }
+
+    if (request.method() === "POST" && pathname === "/product/registration") {
+      if (options.registrationMode === "network_error") {
+        await route.abort("failed");
+        return;
+      }
+      if (options.registrationMode === "unavailable") {
+        await fulfillJson(route, {
+          error: "product_storage_unavailable",
+          message: "registration store unavailable",
+          retryable: true
+        }, 503);
+        return;
+      }
+      const body = JSON.parse(request.postData() ?? "{}") as {
+        readonly legalName?: string;
+        readonly registrationNumber?: string;
+        readonly contactName?: string;
+      };
+      entityRegistration = {
+        registrationId: "registration_e2e_001",
+        accountAddress: participantWallet.toLowerCase(),
+        legalName: (body.legalName ?? "").trim(),
+        registrationNumber: (body.registrationNumber ?? "").trim(),
+        contactName: (body.contactName ?? "").trim(),
+        status: "self_declared",
+        verified: false,
+        chainWritten: false,
+        createdAt: "2026-10-23T12:00:00.000Z",
+        updatedAt: "2026-10-23T12:00:00.000Z"
+      };
+      await fulfillJson(route, { registration: entityRegistration }, 201);
       return;
     }
 

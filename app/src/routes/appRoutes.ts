@@ -1,4 +1,4 @@
-export type OrderAppSection = "tasks" | "orders" | "proof" | "registration";
+export type OrderAppSection = "tasks" | "orders" | "create" | "proof" | "registration";
 
 export interface OrderAppRoute {
   readonly section: OrderAppSection;
@@ -22,7 +22,7 @@ export interface DecorationEntry {
   readonly zhixuId: string;
 }
 
-const sections = new Set<OrderAppSection>(["tasks", "orders", "proof", "registration"]);
+const sections = new Set<OrderAppSection>(["tasks", "orders", "create", "proof", "registration"]);
 const inviteSearchKeys = ["invite", "inviteToken"] as const;
 
 /**

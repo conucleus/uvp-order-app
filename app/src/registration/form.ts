@@ -1,7 +1,7 @@
 /**
- * 实体注册表单的本地校验：服务端没有可对照的写入契约（见 blockers.ts），
- * 这里只校验"登记信息是否填写完整"（必填与长度上限），不发明注册号格式
- * 规则；格式规则等 A 层/服务端接口给出后再单源。
+ * 实体注册表单的本地校验：与服务端 `store/registration/service.ts` 的
+ * 必填/长度上限同口径，只做提交前的快速反馈；注册号格式仍未定义（服务端
+ * 也没有格式契约），这里不发明格式规则。
  */
 import type {
   EntityRegistrationDraft,
@@ -11,7 +11,7 @@ import type {
 } from "./types";
 
 const limits: Readonly<Record<EntityRegistrationField, { readonly label: string; readonly maxLength: number }>> = {
-  entityName: { label: "企业名称", maxLength: 120 },
+  legalName: { label: "企业名称", maxLength: 120 },
   registrationNumber: { label: "注册号", maxLength: 64 },
   contactName: { label: "联系人", maxLength: 40 },
 };

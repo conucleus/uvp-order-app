@@ -16,21 +16,24 @@ export type {
   RegistrationFetcher,
   RegistrationWalletSigner,
 } from "./client";
-export { entityRegistrationBlocker } from "./blockers";
-export type { EntityRegistrationBlocker } from "./blockers";
+export { entityRegistrationReadiness } from "./blockers";
+export type { EntityRegistrationReadiness } from "./blockers";
 export { validateEntityRegistrationDraft } from "./form";
 export type {
   AccountAddressDTO,
   AccountAddressesDTO,
   AccountAddressStatus,
   ChainFactPointerDTO,
+  EntityRegistrationDTO,
   EntityRegistrationDraft,
   EntityRegistrationErrors,
   EntityRegistrationField,
+  EntityRegistrationStatus,
   EntityRegistrationValidation,
   IdentityBindingDTO,
   IdentityBindingQuery,
   IdentityBindingStatus,
   IdentityDescriptorSnapshotDTO,
+  RegisterEntityInput,
   WalletAddressBindingDTO,
 } from "./types";

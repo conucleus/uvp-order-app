@@ -1,32 +1,31 @@
 /**
- * 实体注册写路径缺失的精确 blocker：页面与 README 共用这一份事实，避免
- * 界面文案与交付说明各写一套。服务端出现可用写接口后先改这里，再接线，
- * 不让页面继续宣称"不可提交"。
+ * 实体注册写路径现状（页面与 README 共用的单一事实源）。
+ *
+ * 2026-10-23：Chain Services 已提供参与者可用的 `POST /product/registration`
+ * 与 `GET /product/registration/me`（链下档案、会话锚定地址、单账号单活跃
+ * 记录）。这里不再宣称"不可提交"，但必须把"未核验"与 A 层边界写清楚，
+ * 避免把自助登记显示成身份核验或链上身份绑定。
  */
-export interface EntityRegistrationBlocker {
-  readonly code: string;
+export interface EntityRegistrationReadiness {
+  readonly code: "entity_registration_self_service_ready";
   readonly headline: string;
   readonly summary: string;
-  /** 已核对的候选写路径与不足（文件、路由、拒绝条件）。 */
-  readonly checkedPaths: readonly string[];
-  /** 解除本 blocker 的前提。 */
-  readonly unblockCondition: string;
+  /** 服务端 DTO 恒为 false 的事实：页面不得改写成"已验证"。 */
+  readonly verified: false;
+  /** 仍然存在的边界（人工核验 / A 机构 / 链上身份绑定）。 */
+  readonly remainingBoundaries: readonly string[];
 }
 
-export const entityRegistrationBlocker: EntityRegistrationBlocker = {
-  code: "entity_registration_write_path_missing",
-  headline: "实体注册暂不可提交",
+export const entityRegistrationReadiness: EntityRegistrationReadiness = {
+  code: "entity_registration_self_service_ready",
+  headline: "实体注册可自助提交（未核验）",
   summary:
-    "Chain Services 目前只有身份背书与登记档案的只读接口，没有任何接受企业名称、注册号、联系人的注册写入接口；本页不会发送请求，也不会伪造提交结果。",
-  checkedPaths: [
-    "GET /identity/bindings 与 GET /identity/descriptors/:subjectId(/:descriptorHash) 是公开只读投影（chain-services/service/src/api/routes/governance.ts:117-166），没有对应写路由。",
-    "POST /admin/governance/register-identity 只接受治理管理员（governance/service.ts:140-141），且要求已存在的供应商审核记录（缺失即 409 review_not_approved，:145-164）；descriptor 由审核记录构建，不接受注册表单字段。",
-    "POST /store/suppliers/:id/request-identity-registration 需要 store.supplier.identity.register 能力、已锚定会话与确认字段（api/routes/store-suppliers.ts:217-230），且只接受已存在的 supplier 记录。",
-    "POST /store/join-applications 是订单范围内的角色授权申请（planId/roleSlotId/authorizationKind，store/join/types.ts:18-62），不是实体注册。",
-    "链上 UVPIdentityRegistry.registerIdentityBinding 是 onlyOwner（uvp-protocol/contracts/uvp-contracts/src/UVPIdentityRegistry.sol:67-72），由治理服务登记，没有钱包自助登记路径。",
-    "Order App 消费的 Product API 路由（/product/*）没有注册或身份写入路由。",
-    "uvp-eth 全仓没有接受企业名称/注册号/联系人字段的接口；A 层（机构承认层，含实名/KYB 注册）在 used-car 的职责矩阵里仍是待接外部机构（docs/order-app-split-and-functions.md §1、docs/order-app-base-components.md §2.1）。",
+    "提交后只写入 Chain Services 的链下登记档案，状态为「自助登记」：不写链、不创建供应商、不生成身份绑定。核验仍需人工或 A 机构，页面不会把登记显示成已验证。",
+  verified: false,
+  remainingBoundaries: [
+    "实名/资质核验仍待人工或 A 机构（KYB）：当前登记状态恒为未核验，接口返回 verified: false。",
+    "链上 UVPIdentityRegistry 身份绑定仍由治理服务登记（registerIdentityBinding 为 onlyOwner），自助登记不写链、不冒充身份注册表。",
+    "不创建 Store 供应商档案，也不授予任何 Store 运营能力。",
+    "注册号不做格式校验：服务端只校验必填与长度上限，不预设统一社会信用代码等格式规则。",
   ],
-  unblockCondition:
-    "A 层或 Chain Services 提供参与者可用的实体注册/实名核验写接口（含三字段的服务端契约）后，表单提交按该接口接线；在那之前提交动作保持显式不可用。",
 };

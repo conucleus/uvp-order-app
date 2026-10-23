@@ -7,9 +7,11 @@ import { readPersistedWalletSessionToken } from "../api/productApi";
 import { personalSignWithInjectedWallet } from "../wallet/injectedWallet";
 import type {
   AccountAddressesDTO,
+  EntityRegistrationDTO,
   IdentityBindingDTO,
   IdentityBindingQuery,
   IdentityDescriptorSnapshotDTO,
+  RegisterEntityInput,
   WalletAddressBindingDTO,
 } from "./types";
 
@@ -39,6 +41,13 @@ export interface RegistrationClient {
    * x-uvp-store-session token 与同一注入钱包签名器）。
    */
   bindWalletAddress(input: { readonly address: string }): Promise<WalletAddressBindingDTO>;
+  /** GET /product/registration/me：当前会话锚定账号的登记档案；未登记返回 undefined（需会话）。 */
+  loadMyEntityRegistration(): Promise<EntityRegistrationDTO | undefined>;
+  /**
+   * POST /product/registration：自助登记/更新当前会话账号的链下实体档案。
+   * 账号地址由服务端从会话取；返回的 verified 恒为 false，不写链。
+   */
+  registerEntity(input: RegisterEntityInput): Promise<EntityRegistrationDTO>;
 }
 
 export class RegistrationApiError extends Error {
@@ -125,6 +134,34 @@ class HttpRegistrationClient implements RegistrationClient {
     return await this.requestJson<AccountAddressesDTO>("GET", "/store/auth/addresses", undefined, sessionToken);
   }
 
+  async loadMyEntityRegistration(): Promise<EntityRegistrationDTO | undefined> {
+    const endpoint = "/product/registration/me";
+    const sessionToken = this.requireSessionToken(endpoint);
+    const response = await this.requestJson<{ readonly registration: EntityRegistrationDTO | null }>(
+      "GET",
+      endpoint,
+      undefined,
+      sessionToken,
+    );
+    return response.registration ?? undefined;
+  }
+
+  async registerEntity(input: RegisterEntityInput): Promise<EntityRegistrationDTO> {
+    const endpoint = "/product/registration";
+    const sessionToken = this.requireSessionToken(endpoint);
+    const response = await this.requestJson<{ readonly registration: EntityRegistrationDTO }>(
+      "POST",
+      endpoint,
+      {
+        legalName: input.legalName.trim(),
+        registrationNumber: input.registrationNumber.trim(),
+        contactName: input.contactName.trim(),
+      },
+      sessionToken,
+    );
+    return response.registration;
+  }
+
   async bindWalletAddress(input: { readonly address: string }): Promise<WalletAddressBindingDTO> {
     const endpoint = "/store/auth/challenge";
     const sessionToken = this.requireSessionToken(endpoint);
@@ -155,7 +192,7 @@ class HttpRegistrationClient implements RegistrationClient {
       throw new RegistrationApiError(
         0,
         endpoint,
-        "需要钱包会话：请先完成钱包登录，再进行地址归属签名。",
+        "需要钱包会话：请先完成钱包登录，再读写账号级档案。",
         "store_session_required",
       );
     }

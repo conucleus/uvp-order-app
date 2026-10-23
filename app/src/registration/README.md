@@ -1,18 +1,18 @@
 # registration 模块（rough）
 
-order app 的最小注册模块：实体注册表单、钱包归属签名证明、身份背书事实展示。
-本目录之外的文件（含 `App.tsx`）由 Lead 接线时修改；本模块只导出
-`RegistrationPage` 与类型化 client。
+order app 的注册模块：实体自助登记（链下档案、明确未核验）、钱包归属签名
+证明、身份背书事实展示。本目录之外的文件（含 `App.tsx`）由 Lead 接线时
+修改；本模块只导出 `RegistrationPage` 与类型化 client。
 
 ## 1. 交付物
 
 | 文件 | 内容 |
 | --- | --- |
-| `RegistrationPage.tsx` | `RegistrationPage`：实体注册表单（企业名称/注册号/联系人，写路径未就绪时显式不可提交）、钱包归属签名证明、身份背书事实展示 |
-| `client.ts` | `RegistrationClient` / `createRegistrationClient`：身份背书与登记档案只读 + 钱包会话地址锚定写；`RegistrationApiError` 错误分类 |
+| `RegistrationPage.tsx` | `RegistrationPage`：实体自助登记表单（真实提交、成功/未登录/服务端失败/网络失败四态）、钱包归属签名证明、身份背书事实展示 |
+| `client.ts` | `RegistrationClient` / `createRegistrationClient`：身份背书与登记档案只读 + 钱包会话地址锚定写 + 实体自助登记读写；`RegistrationApiError` 错误分类 |
 | `types.ts` | 服务端响应 DTO 的只读镜像（形态单源在 chain-services，见 §2） |
-| `blockers.ts` | 实体注册写路径缺失的精确 blocker（页面展示与本文共用的单一事实源） |
-| `form.ts` | 表单本地校验（只做必填与长度上限；无服务端格式契约可依） |
+| `blockers.ts` | 实体注册写路径现状（`entityRegistrationReadiness`）：可自助提交、未核验、A 层边界；页面与本文共用 |
+| `form.ts` | 表单本地校验（必填与长度上限，与服务端同口径；无注册号格式契约可依） |
 | `registration.css` | 本页样式（复用 app 的 CSS token 与通用按钮/横幅类） |
 | `index.ts` | 对外导出 |
 
@@ -54,49 +54,45 @@ CORS 侧 `x-uvp-store-session` 在服务端 allow-headers 白名单内
 （`service/src/api/server.ts:636`）；跨源部署仍需 `UVP_API_CORS_ALLOWED_ORIGINS`
 精确配置（`:618-626`）。
 
-## 3. 实体注册：精确 blocker（没有可用写路径）
+### 2.3 实体自助登记（链下档案，写路径已就绪）
 
-**blocker 单源：`src/registration/blockers.ts`（`entityRegistrationBlocker`）。**
-页面提交按钮不发送任何请求，只显示该事实；不存在"假成功"实现。
+2026-10-23 起 Chain Services 提供参与者可用的实体登记写/读接口。页面提交走
+真实接口，不再有"不可提交"分支。
 
-已核对并排除的候选写路径：
+| 调用 | 路由 | 服务端单源 |
+| --- | --- | --- |
+| `client.registerEntity({ legalName, registrationNumber, contactName })` | `POST /product/registration`（`x-uvp-store-session`）→ `201 { registration }` | `api/routes/product-registration.ts`；`store/registration/service.ts`；表 `store_entity_registration`（迁移 `0028_store_entity_registration.sql` / `migrations/postgres/0028_…`） |
+| `client.loadMyEntityRegistration()` | `GET /product/registration/me`（`x-uvp-store-session`）→ `200 { registration }`；未登记为 `{ registration: null }` | 同上 |
 
-1. **公开身份路由只有读**。`/identity/bindings`、`/identity/descriptors/…`
-   都是 GET 投影/快照（`api/routes/governance.ts:117-166`），没有 POST/PUT。
-2. **治理登记写只属于治理管理员，且要求已存在的审核记录**。
-   `POST /admin/governance/register-identity`（`api/routes/governance.ts:84-89`）
-   先经 `adminPrincipalFromHeaders` 门禁（`:38-44`），服务层再断言
-   `GOVERNANCE_ADMIN_ROLES`（`governance/service.ts:140-141`）；没有供应商审核记录
-   直接 409 `review_not_approved`（`:145-164`）。descriptor 由审核记录构建
-   （`:167-173`），不接受请求体里的企业名称/注册号/联系人。
-3. **供应商身份登记写属于 Store 运营面**。
-   `POST /store/suppliers/:id/request-identity-registration`
-   （`api/routes/store-suppliers.ts:143, 217-230`）需要
-   `store.supplier.identity.register` 能力（`:328-338`）、会话已锚定（`:183-187`）、
-   确认字段（`:341-362`），且 supplier 记录必须已存在。
-4. **加入闭环不是实体注册**。`POST /store/join-applications`
-   （`api/routes/store-join.ts:22-31`）提交的是订单范围内的角色授权申请
-   （`store/join/types.ts:18-24, 41-62`：planId/roleSlotId/authorizationKind/
-   applicantSubjectId…），字段与实体注册无关，且要求锚定 Store 会话。
-5. **链上注册表没有自助写入**。`UVPIdentityRegistry.registerIdentityBinding`
-   是 `onlyOwner`（`uvp-protocol/contracts/uvp-contracts/src/UVPIdentityRegistry.sol:67-72`），
-   registrar = 治理服务签名地址；钱包只能签名证明地址控制权，不能自行登记绑定。
-6. **Order App 消费的 Product API 没有注册/身份写路由**。`/product/*` 路由只做
-   参与者身份解析与订单/任务/证据/邀请（`api/routes/product-read.ts`、
-   `api/routes/product-bff.ts`），grep 无注册写入端点。
-7. **全仓没有任何地方接受这三个字段**。在 uvp-eth 源码内检索
-   `registrationNumber|businessLicense|legalName|contactName|companyName|统一社会信用代码`
-   （排除 node_modules/dist/out 与本模块）无命中；产品语义侧明确"注册/实名/钱包 →
-   A 就绪后切 A"（`/Users/uyhendu/project/used-car/docs/order-app-split-and-functions.md` §1 职责矩阵、
-   §2.1），A 层接口目前只读（`/Users/uyhendu/project/used-car/docs/store-ab-layer.md` §4），
-   实体注册属订单 app 基座范围（`/Users/uyhendu/project/used-car/docs/order-app-base-components.md` §2.1）。
+服务端契约：
 
-**解除条件**（`entityRegistrationBlocker.unblockCondition`）：A 层或 Chain Services
-提供参与者可用的实体注册/实名核验写接口（包含三字段的服务端契约）后，表单提交
-按该接口接线；在此之前保持显式不可用。
+- **账号地址只从会话锚定地址派生**（钱包会话 `x-uvp-store-session`，local 可显式
+  dev 锚定头）；请求体里的 `account/accountAddress/walletAddress/status/verified`
+  一律 `400 immutable_field`。未登录 `401 wallet_identity_required`。
+- 落库字段：`registration_id`、`account_address`、`account_id`(可选)、
+  `legal_name`、`registration_number`、`contact_name`、`status`、`created_at`、
+  `updated_at`。`status` 词表：`self_declared | pending_review`。
+- **单账号单活跃记录**：`account_address` 唯一索引；重复提交更新同一行（保留
+  首次 `registrationId`/`createdAt`，刷新 `updatedAt`），不追加历史。
+- 响应恒为 `verified: false`、`chainWritten: false`。写路径**不写链、不调用
+  governance register-identity、不创建 supplier**。
 
-> 如果只把"注册表单"接到某个 Store 运营接口，会把参与者注册伪装成治理动作
-> （需要管理员身份/审核记录），本模块不这么做。
+## 3. 口径：自助登记，不是身份核验
+
+**写路径已就绪（自助登记，未核验）；不存在"实体注册暂不可提交"的 blocker。**
+`blockers.ts` 的旧 blocker 解除条件（"Chain Services 提供参与者可用的实体注册
+写接口"）已满足，本模块改为 `entityRegistrationReadiness`，只保留未核验/A 层边界：
+
+1. 实名/资质核验仍待人工或 A 机构（KYB）：登记状态恒为未核验，接口返回
+   `verified: false`。
+2. 链上 `UVPIdentityRegistry` 身份绑定仍由治理服务登记
+   （`registerIdentityBinding` 为 `onlyOwner`），自助登记不写链、不冒充身份注册表。
+3. 不创建 Store 供应商档案，也不授予任何 Store 运营能力。
+4. 注册号不做格式校验：服务端只校验必填与长度上限，不预设统一社会信用代码等
+   格式规则。
+
+页面因此只显示"已登记（未核验）/ 自助登记（未核验）"，不会出现"已验证/可信/
+已认证"之类评价，也不会把登记成功写成链上身份绑定成功。
 
 ## 4. 身份事实展示口径
 
@@ -138,48 +134,46 @@ import { RegistrationPage } from "./registration";
 ```bash
 cd /Users/uyhendu/project/uvp-eth/uvp-order-app/app
 
-# 1) 全仓 typecheck（包含本模块全部 .ts/.tsx）
+# 1) 全仓 typecheck（包含本模块全部 .ts/.tsx 与 e2e 类型）
 pnpm typecheck
 # => exit 0
 
-# 2) 全仓 build（tsc --noEmit + vite build）
-pnpm build
-# => exit 0；vite: 2197 modules transformed，dist 产物生成成功
-
-# 3) 本模块独立严格类型检查（隔离并行改动的影响；与 app tsconfig 同严格度）
-./node_modules/.bin/tsc --noEmit --strict --exactOptionalPropertyTypes \
-  --noUncheckedIndexedAccess --jsx react-jsx --module esnext \
-  --moduleResolution bundler --target ES2022 --lib ES2022,DOM,DOM.Iterable \
-  --skipLibCheck --types vite/client,node src/registration/index.ts
-# => exit 0
-
-# 4) 本模块 JSX/CSS 打包检查（App.tsx 尚未接线，vite build 不包含本页）
-#    在 src/registration/ 内以 esbuild 打包 index.ts 的完整导入图 => 成功
-
-# 5) 现有单测回归（未新增测试）
+# 2) 现有单测回归
 pnpm test
-# => 155 tests / 31 suites，pass 155，fail 0
+# => 165 tests / 33 suites，pass 165，fail 0
+
+# 3) 注册 spec（成功 / 未登录 / 服务端失败 / 网络失败四条）
+pnpm exec playwright test e2e/order-app.registration.spec.ts --project=chromium
+# => 4 passed
 ```
 
-说明：
-- 验证期间有并行队友在改 `App.tsx`、`e2e/product-api-stub.ts` 等本模块范围外的
-  文件；首次全仓 typecheck 曾因其瞬时类型错误失败（与本模块无关），其落定后
-  重跑通过。
-- `vite build` 目前不含本页（`App.tsx` 未接线），故另做第 4 项模块级打包检查。
-- 未新增单测：理由见 §7。
+服务端侧（`/Users/uyhendu/project/uvp-eth/uvp-chain-services/service`）：
+
+```bash
+pnpm typecheck
+# => exit 0
+
+./node_modules/.bin/vitest run tests/entity-registration.test.ts
+# => 5 tests passed（401 门、账号锚定、immutable_field、upsert 单行、sqlite 重开读回）
+```
+
+真实请求验证（sqlite local）见交付报告；POST 落库后 GET 读回同一
+`registrationId`，重复 POST 更新同一行。
 
 ## 7. Rough 边界（已知，不假称完成）
 
-- **实体注册提交不可用**：原因与解除条件见 §3；表单不发送请求。
-- **钱包绑定只到会话账号地址清单**，不是链上 `UVPIdentityRegistry` 绑定；链上
-  绑定仍需治理服务登记（`registerIdentity`），本模块不越权。
+- **核验未做**：自助登记只产生 `self_declared`（未核验）档案；人工核验与
+  A 机构实名/KYB 接通后，核验结果需要新接口/新状态承载，本模块不预先伪造。
+- **链上身份绑定未做**：钱包绑定只到会话账号地址清单，不是链上
+  `UVPIdentityRegistry` 绑定；链上绑定仍需治理服务登记（`registerIdentity`）。
+- **不创建 supplier**：实体登记与 Store 供应商档案是两套记录，前者不授予后者
+  的运营能力或审核状态。
 - **撤销地址/档案快照列表未做 UI**：`POST /store/auth/addresses/revoke` 与
   `GET /identity/descriptors/:subjectId` 已存在，需要时可接。
-- **未新增单测**：按测试纪律（仓库零测试默认、新测试是申请项），本次验证以
-  typecheck/build 为准；`form.ts` 的校验逻辑是纯函数，需要时可在拥有层补测。
+- **注册号无格式规则**：服务端和页面都只校验必填与长度上限；格式契约待产品/
+  A 层给出后再单源。
 - **HTTP transport 局部实现**：`client.ts` 自带 fetch/超时/错误解析（与
   `productApi` 的私有 transport 同口径但未共享），因为 `productApi` 在本次
   写入范围之外。后续可抽公共 client 收敛，当前不宣称单源。
 - 身份事实接口公开可读是服务端现状（`/identity/bindings`、`/identity/descriptors`），
   本模块不额外加鉴权，也不把公开读当成身份证明。
-

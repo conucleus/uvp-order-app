@@ -10,7 +10,8 @@ import {
   type ProductSubmitIntent,
   type ProductTaskDTO,
   type SubmitProductTaskInput,
-  type ZhixuDetailDTO
+  type ZhixuDetailDTO,
+  type ZhixuSummaryDTO
 } from "@uvp-eth/product-dto";
 import type { ProductSubmitTypedData } from "@uvp-eth/executor-kit/participant";
 import type {
@@ -35,7 +36,8 @@ export type {
   ProductSubmissionDTO,
   ProductSubmissionStatus,
   ProductSubmitIntent,
-  SubmitProductTaskInput
+  SubmitProductTaskInput,
+  ZhixuSummaryDTO
 } from "@uvp-eth/product-dto";
 
 type Hex = `0x${string}`;
@@ -68,12 +70,171 @@ export interface ProductHomeData {
   readonly source: ProductApiSource;
 }
 
+/**
+ * 开单草稿（Product BFF `/product/order-drafts` 档案面）。
+ *
+ * 状态词表与服务端一致：草稿内容进入触发流程后不可再改；`ready_to_trigger`
+ * 表示参与方条件已满足、可以准备本人确认。草稿是"订单从何而来"的档案，
+ * 不是链上事实本身。
+ */
+export type ProductOrderDraftStatus =
+  | "draft"
+  | "awaiting_participants"
+  | "ready_to_trigger"
+  | "triggering"
+  | "triggered"
+  | "failed"
+  | "cancelled";
+
+export type DraftParticipantStatus = "missing" | "invited" | "accepted" | "rejected" | "replaced";
+
+export interface ProductOrderDraftDTO {
+  readonly draftId: string;
+  readonly zhixuId: string;
+  readonly planId: string;
+  readonly planHash: string;
+  readonly title: string;
+  readonly businessType: string;
+  readonly goods?: readonly string[] | undefined;
+  readonly totalAmount: string;
+  readonly currency: string;
+  readonly exportRegion?: string | undefined;
+  readonly destinationRegion?: string | undefined;
+  readonly expectedCompletionDate?: string | undefined;
+  readonly notes?: string | undefined;
+  readonly status: ProductOrderDraftStatus;
+  readonly createdBy: string;
+  readonly createdAt: string;
+  readonly updatedAt: string;
+  readonly triggeredOrderId?: string | undefined;
+  readonly triggerTxHash?: string | undefined;
+}
+
+/** 草稿参与方：按秩序角色槽位在建单时生成，确认状态来自邀请接受事实。 */
+export interface DraftParticipantDTO {
+  readonly participantId: string;
+  readonly draftId: string;
+  readonly roleSlotId: string;
+  readonly roleLabel: string;
+  readonly displayName: string;
+  readonly walletAddress?: string | undefined;
+  readonly contact: string;
+  readonly status: DraftParticipantStatus;
+  readonly required: boolean;
+  readonly acceptedAt?: string | undefined;
+  readonly rejectedAt?: string | undefined;
+}
+
+export interface CreateOrderDraftInput {
+  readonly zhixuId: string;
+  readonly title: string;
+  readonly businessType: string;
+  readonly goods?: readonly string[];
+  readonly totalAmount: string;
+  readonly currency: string;
+  readonly notes?: string;
+}
+
+export type UpdateOrderDraftInput = Partial<
+  Pick<
+    ProductOrderDraftDTO,
+    | "title"
+    | "businessType"
+    | "goods"
+    | "totalAmount"
+    | "currency"
+    | "exportRegion"
+    | "destinationRegion"
+    | "expectedCompletionDate"
+    | "notes"
+  >
+>;
+
+export interface CreateOrderInviteInput {
+  readonly roleSlotId: string;
+  readonly contact: string;
+  readonly displayName?: string | undefined;
+}
+
+/** 邀请记录（服务端不下发 token 明文，tokenHash 也不在产品面展示）。 */
+export interface ProductOrderInviteDTO {
+  readonly inviteId: string;
+  readonly draftId: string;
+  readonly participantId: string;
+  readonly roleSlotId: string;
+  readonly status: string;
+  readonly expiresAt: string;
+  readonly createdAt: string;
+}
+
+/** 邀请创建响应：一次性明文 token 只在本次响应出现，用于拼邀请链接。 */
+export interface ProductOrderInviteCreationDTO {
+  readonly invite: ProductOrderInviteDTO;
+  readonly draft: ProductOrderDraftDTO;
+  readonly inviteToken: string;
+}
+
+/** 草稿详情读取：内容 + 当前参与方确认状态（服务端同一响应返回）。 */
+export interface ProductOrderDraftDetailDTO {
+  readonly draft: ProductOrderDraftDTO;
+  readonly participants: readonly DraftParticipantDTO[];
+}
+
+/**
+ * prepare 结果：签名对象 + 本次触发身份。
+ * `stateMachineAddress` 从 trigger 记录单独取出，供签名前与签名域交叉核对
+ * （不信任同一响应里的 humanSummary/typedData 自洽）。
+ */
+export interface PreparedOrderTriggerDTO {
+  readonly prepareId: string;
+  readonly triggerId: string;
+  readonly draftId: string;
+  readonly orderId: string;
+  readonly expiresAt: string;
+  readonly submitter: string;
+  readonly stateMachineAddress: string;
+  readonly typedData: Eip712TypedDataDTO;
+  readonly summary?: Readonly<Record<string, unknown>> | undefined;
+}
+
+export interface TriggerOrderInput {
+  readonly prepareId: string;
+  readonly signature: string;
+  readonly walletAddress: string;
+}
+
+/** 触发提交回执：草稿状态 + 参与方 + 触发档案；草稿的 triggeredOrderId 可指向已创建订单。 */
+export interface TriggerOrderResultDTO {
+  readonly draft: ProductOrderDraftDTO;
+  readonly participants?: readonly DraftParticipantDTO[] | undefined;
+  readonly trigger?: Readonly<Record<string, unknown>> | undefined;
+}
+
 export interface ProductApiClient {
   loadParticipantHome(input?: ParticipantQueryInput): Promise<ProductHomeData>;
   getOrder(orderId: string): Promise<ProductOrderDTO>;
   getTask(taskId: string, input?: ParticipantQueryInput): Promise<ProductTaskDTO>;
   /** 秩序详情（reader 装修页/阶段数据源；Product API 公共读，不需要钱包会话）。 */
   getZhixu(zhixuId: string): Promise<ZhixuDetailDTO>;
+  /**
+   * 已发布秩序清单（开单入口）：GET /product/zhixus。
+   * 只返回服务端目录投影；是否"可开单"由页面按发布状态与开单声明判定，
+   * 不在客户端伪造发布事实。
+   */
+  listZhixus(): Promise<readonly ZhixuSummaryDTO[]>;
+  /** 创建订单草稿（开单第一步）：服务端按秩序角色槽位生成参与方清单。 */
+  createOrderDraft(input: CreateOrderDraftInput): Promise<ProductOrderDraftDTO>;
+  /** 修改草稿内容（参与方邀请/确认阶段）。进入触发流程后服务端拒绝修改。 */
+  updateOrderDraft(draftId: string, input: UpdateOrderDraftInput): Promise<ProductOrderDraftDTO>;
+  /** 草稿回读：内容 + 参与方确认状态（触发前必读一次，避免用本地陈旧状态判定）。 */
+  getOrderDraft(draftId: string): Promise<ProductOrderDraftDetailDTO>;
+  listOrderDraftParticipants(draftId: string): Promise<readonly DraftParticipantDTO[]>;
+  /** 生成参与方邀请链接；明文 token 只在本次响应出现一次。 */
+  createOrderDraftInvite(draftId: string, input: CreateOrderInviteInput): Promise<ProductOrderInviteCreationDTO>;
+  /** 准备开单确认：服务端按草稿/参与方/秩序生成签名对象（身份取会话锚定钱包）。 */
+  prepareOrderTrigger(draftId: string, input: { readonly walletAddress: string }): Promise<PreparedOrderTriggerDTO>;
+  /** 提交本人确认并创建订单；失败即失败，不返回假订单。 */
+  triggerOrder(draftId: string, input: TriggerOrderInput): Promise<TriggerOrderResultDTO>;
   /** Store 装修数据（Store 数据域读侧；缺失即空版本，不是链上事实）。 */
   getDecoration(planId: string): Promise<ZhixuDecorationView>;
   previewInvite(inviteId: string, input?: ParticipantQueryInput): Promise<ProductInvitePreviewDTO>;
@@ -538,12 +699,114 @@ class BrowserProductApiClient implements ProductApiClient {
     return response.zhixu;
   }
 
+  async listZhixus(): Promise<readonly ZhixuSummaryDTO[]> {
+    const pathname = "/product/zhixus";
+    const response = await this.getJson<unknown>(pathname);
+    if (!isRecord(response) || !Array.isArray(response.zhixus)) {
+      throw new ProductApiError(0, pathname, "秩序目录响应缺少 zhixus");
+    }
+    // 逐条 fail-closed：缺 zhixuId 的条目不可导航/不可开单，跳过而不是
+    // 用占位 id 伪造一条秩序。返回空数组由页面显示"没有已发布秩序"。
+    return response.zhixus.filter(
+      (item): item is ZhixuSummaryDTO => isRecord(item) && typeof item.zhixuId === "string" && item.zhixuId.trim().length > 0
+    );
+  }
+
+  async createOrderDraft(input: CreateOrderDraftInput): Promise<ProductOrderDraftDTO> {
+    const pathname = "/product/order-drafts";
+    const response = await this.postJson<unknown>(pathname, input);
+    return requiredDraft(response, pathname);
+  }
+
+  async updateOrderDraft(draftId: string, input: UpdateOrderDraftInput): Promise<ProductOrderDraftDTO> {
+    const pathname = `/product/order-drafts/${encodeURIComponent(draftId)}`;
+    const response = await this.requestJson<unknown>("PATCH", pathname, input, this.config.timeoutMs);
+    return requiredDraft(response, pathname);
+  }
+
+  async getOrderDraft(draftId: string): Promise<ProductOrderDraftDetailDTO> {
+    const pathname = `/product/order-drafts/${encodeURIComponent(draftId)}`;
+    const response = await this.getJson<unknown>(pathname);
+    const draft = requiredDraft(response, pathname);
+    if (!isRecord(response) || !Array.isArray(response.participants)) {
+      throw new ProductApiError(0, pathname, "草稿详情响应缺少参与方清单");
+    }
+    return { draft, participants: response.participants as readonly DraftParticipantDTO[] };
+  }
+
+  async listOrderDraftParticipants(draftId: string): Promise<readonly DraftParticipantDTO[]> {
+    const pathname = `/product/orders/${encodeURIComponent(draftId)}/participants`;
+    const response = await this.getJson<unknown>(pathname);
+    if (!isRecord(response) || !Array.isArray(response.participants)) {
+      throw new ProductApiError(0, pathname, "参与方响应缺少 participants");
+    }
+    return response.participants as readonly DraftParticipantDTO[];
+  }
+
+  async createOrderDraftInvite(draftId: string, input: CreateOrderInviteInput): Promise<ProductOrderInviteCreationDTO> {
+    const pathname = `/product/orders/${encodeURIComponent(draftId)}/invites`;
+    const response = await this.postJson<unknown>(pathname, input);
+    // 一次性明文 token 只随创建响应出现：缺失即畸形响应，不能拿无 token
+    // 的邀请链接冒充可用的邀请。
+    if (!isRecord(response) || typeof response.inviteToken !== "string" || response.inviteToken.length === 0) {
+      throw new ProductApiError(0, pathname, "邀请创建响应缺少一次性邀请凭据");
+    }
+    if (!isRecord(response.invite)) {
+      throw new ProductApiError(0, pathname, "邀请创建响应缺少邀请记录");
+    }
+    if (typeof response.invite.inviteId !== "string" || response.invite.inviteId.length === 0) {
+      throw new ProductApiError(0, pathname, "邀请创建响应缺少邀请编号");
+    }
+    return {
+      invite: response.invite as unknown as ProductOrderInviteDTO,
+      draft: requiredDraft(response, pathname),
+      inviteToken: response.inviteToken
+    };
+  }
+
+  async prepareOrderTrigger(
+    draftId: string,
+    input: { readonly walletAddress: string }
+  ): Promise<PreparedOrderTriggerDTO> {
+    const pathname = `/product/order-drafts/${encodeURIComponent(draftId)}/prepare-trigger`;
+    const response = await this.postJson<unknown>(pathname, input);
+    if (!isRecord(response) || !isRecord(response.prepared)) {
+      throw new ProductApiError(0, pathname, "开单准备响应缺少签名对象");
+    }
+    // 签名域交叉核对的独立事实：trigger 记录声明的部署地址必须存在且
+    // 形状合法，否则拒绝进入签名（不接受"没有域信息"的盲签）。
+    const stateMachineAddress = isRecord(response.trigger) ? response.trigger.stateMachineAddress : undefined;
+    if (typeof stateMachineAddress !== "string" || !/^0x[0-9a-fA-F]{40}$/u.test(stateMachineAddress)) {
+      throw new ProductApiError(0, pathname, "开单准备响应缺少可核对的部署地址");
+    }
+    const prepared = response.prepared;
+    if (typeof prepared.prepareId !== "string" || typeof prepared.submitter !== "string" || !isRecord(prepared.typedData)) {
+      throw new ProductApiError(0, pathname, "开单准备响应缺少本次确认的签名材料");
+    }
+    return {
+      ...(prepared as unknown as Omit<PreparedOrderTriggerDTO, "stateMachineAddress">),
+      stateMachineAddress
+    };
+  }
+
+  async triggerOrder(draftId: string, input: TriggerOrderInput): Promise<TriggerOrderResultDTO> {
+    const pathname = `/product/order-drafts/${encodeURIComponent(draftId)}/trigger`;
+    const response = await this.postJson<unknown>(pathname, input);
+    const draft = requiredDraft(response, pathname);
+    return {
+      draft,
+      ...(isRecord(response) && Array.isArray(response.participants)
+        ? { participants: response.participants as readonly DraftParticipantDTO[] }
+        : {}),
+      ...(isRecord(response) && isRecord(response.trigger) ? { trigger: response.trigger } : {})
+    };
+  }
+
   async getDecoration(planId: string): Promise<ZhixuDecorationView> {
     const pathname = `/store/decoration/${encodeURIComponent(planId)}`;
     const response = await this.getJson<unknown>(pathname);
     return decorationViewFromResponse(planId, response);
   }
-
   async previewInvite(inviteId: string, input: ParticipantQueryInput = {}): Promise<ProductInvitePreviewDTO> {
     // 与 accept/reject 同一请求形态：token 是与 accept 同权的一次性凭据，
     // 走 body 而不是 URL query（query 会随 URL/Referer/代理日志留痕）；
@@ -1003,5 +1266,16 @@ function cleanDecorationTextList(value: unknown): readonly string[] {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+/**
+ * 草稿响应的统一形状门：缺 draft/draftId 的 2xx 响应是畸形响应，不是
+ * "没有草稿"——按错误上抛，调用方不得拿空对象当已建草稿继续签名。
+ */
+function requiredDraft(response: unknown, pathname: string): ProductOrderDraftDTO {
+  if (!isRecord(response) || !isRecord(response.draft) || typeof response.draft.draftId !== "string") {
+    throw new ProductApiError(0, pathname, "响应缺少订单草稿");
+  }
+  return response.draft as unknown as ProductOrderDraftDTO;
 }
 

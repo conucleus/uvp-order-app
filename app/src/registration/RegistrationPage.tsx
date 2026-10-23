@@ -1,11 +1,11 @@
 /**
- * 注册页：实体注册表单（写路径未就绪时显式不可提交）、钱包归属签名证明、
- * 身份背书事实展示。数据只来自 registration/client 的类型化通路；页面不
- * 对身份作可信度评价，也不把"读取失败"显示成"没有记录"。
+ * 注册页：实体自助登记（链下档案、明确未核验）、钱包归属签名证明、身份
+ * 背书事实展示。数据只来自 registration/client 的类型化通路；页面不把
+ * 自助登记显示成身份核验或链上绑定，也不把"读取失败"显示成"没有记录"。
  */
 import { AlertCircle, FileCheck2, Fingerprint, RefreshCw, ShieldCheck, WalletCards } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { entityRegistrationBlocker } from "./blockers";
+import { entityRegistrationReadiness } from "./blockers";
 import {
   createRegistrationClient,
   isRegistrationApiError,
@@ -14,8 +14,10 @@ import {
 import { validateEntityRegistrationDraft } from "./form";
 import type {
   AccountAddressesDTO,
+  EntityRegistrationDTO,
   EntityRegistrationDraft,
   EntityRegistrationErrors,
+  EntityRegistrationStatus,
   IdentityBindingDTO,
   IdentityDescriptorSnapshotDTO,
 } from "./types";
@@ -75,10 +77,26 @@ type DescriptorState =
   | { readonly status: "ready"; readonly snapshot: IdentityDescriptorSnapshotDTO }
   | { readonly status: "error"; readonly message: string };
 
-type EntitySubmitState = { readonly status: "idle" } | { readonly status: "blocked"; readonly at: string };
+type EntityLookupState =
+  | { readonly status: "loading" }
+  | { readonly status: "signed_out" }
+  | { readonly status: "unavailable"; readonly message: string }
+  | { readonly status: "none" }
+  | { readonly status: "ready"; readonly registration: EntityRegistrationDTO }
+  | { readonly status: "error"; readonly message: string };
+
+type EntitySubmitFailure =
+  | { readonly kind: "signed_out"; readonly message: string }
+  | { readonly kind: "server"; readonly message: string }
+  | { readonly kind: "network"; readonly message: string };
+
+type EntitySubmitState =
+  | { readonly status: "idle" }
+  | { readonly status: "submitting" }
+  | { readonly status: "error"; readonly failure: EntitySubmitFailure };
 
 const emptyDraft: EntityRegistrationDraft = {
-  entityName: "",
+  legalName: "",
   registrationNumber: "",
   contactName: "",
 };
@@ -102,7 +120,9 @@ export function RegistrationPage(props: RegistrationPageProps) {
 
   const [draft, setDraft] = useState<EntityRegistrationDraft>(emptyDraft);
   const [fieldErrors, setFieldErrors] = useState<EntityRegistrationErrors>({});
+  const [entityLookup, setEntityLookup] = useState<EntityLookupState>({ status: "loading" });
   const [entitySubmitState, setEntitySubmitState] = useState<EntitySubmitState>({ status: "idle" });
+  const [entityNotice, setEntityNotice] = useState<string | undefined>(undefined);
 
   const [factsAddress, setFactsAddress] = useState((props.initialAddress ?? "").trim());
   const [factsState, setFactsState] = useState<IdentityFactsState>({ status: "idle" });
@@ -150,6 +170,40 @@ export function RegistrationPage(props: RegistrationPageProps) {
   }, [clientState.client, clientState.message, sessionProvided, sessionVersion]);
 
   useEffect(() => {
+    const client = clientState.client;
+    if (!client) {
+      setEntityLookup({ status: "unavailable", message: clientState.message ?? "参与者服务未配置。" });
+      return undefined;
+    }
+    if (sessionProvided && !props.session?.currentSessionToken()) {
+      setEntityLookup({ status: "signed_out" });
+      return undefined;
+    }
+    let active = true;
+    setEntityLookup({ status: "loading" });
+    void client.loadMyEntityRegistration()
+      .then((registration) => {
+        if (!active) {
+          return;
+        }
+        setEntityLookup(registration ? { status: "ready", registration } : { status: "none" });
+      })
+      .catch((error: unknown) => {
+        if (!active) {
+          return;
+        }
+        if (isSessionMissing(error)) {
+          setEntityLookup({ status: "signed_out" });
+          return;
+        }
+        setEntityLookup({ status: "error", message: errorMessage(error) });
+      });
+    return () => {
+      active = false;
+    };
+  }, [clientState.client, clientState.message, sessionProvided, sessionVersion]);
+
+  useEffect(() => {
     const address = (props.initialAddress ?? "").trim();
     if (!clientState.client || !isEvmWalletAddress(address)) {
       return;
@@ -157,6 +211,18 @@ export function RegistrationPage(props: RegistrationPageProps) {
     runFactsQuery(address);
     // runFactsQuery 是事件与初始查询共用的入口，序列号在函数内防旧响应覆盖。
   }, [clientState.client, props.initialAddress]);
+
+  useEffect(() => {
+    if (entityLookup.status !== "ready") {
+      return;
+    }
+    const registration = entityLookup.registration;
+    setDraft({
+      legalName: registration.legalName,
+      registrationNumber: registration.registrationNumber,
+      contactName: registration.contactName,
+    });
+  }, [entityLookup]);
 
   function runFactsQuery(rawAddress: string): void {
     const address = rawAddress.trim();
@@ -206,7 +272,10 @@ export function RegistrationPage(props: RegistrationPageProps) {
       });
   }
 
-  function handleEntitySubmit(): void {
+  async function handleEntitySubmit(): Promise<void> {
+    if (entitySubmitState.status === "submitting") {
+      return;
+    }
     const validation = validateEntityRegistrationDraft(draft);
     if (!validation.ok) {
       setFieldErrors(validation.errors);
@@ -214,7 +283,41 @@ export function RegistrationPage(props: RegistrationPageProps) {
       return;
     }
     setFieldErrors({});
-    setEntitySubmitState({ status: "blocked", at: new Date().toISOString() });
+    setEntityNotice(undefined);
+    const client = clientState.client;
+    if (!client) {
+      setEntitySubmitState({
+        status: "error",
+        failure: { kind: "network", message: clientState.message ?? "参与者服务未配置，没有发送登记请求。" },
+      });
+      return;
+    }
+    setEntitySubmitState({ status: "submitting" });
+    try {
+      const registration = await client.registerEntity({
+        legalName: draft.legalName.trim(),
+        registrationNumber: draft.registrationNumber.trim(),
+        contactName: draft.contactName.trim(),
+      });
+      setEntityLookup({ status: "ready", registration });
+      setEntityNotice(
+        `已登记（未核验）：登记号 ${registration.registrationId}。本次只写入链下登记档案，未写链、未生成身份绑定。`,
+      );
+      setEntitySubmitState({ status: "idle" });
+    } catch (error) {
+      if (isSessionMissing(error)) {
+        setEntityLookup({ status: "signed_out" });
+        setEntitySubmitState({
+          status: "error",
+          failure: {
+            kind: "signed_out",
+            message: "需要钱包会话：请先完成钱包登录，再提交实体登记。",
+          },
+        });
+        return;
+      }
+      setEntitySubmitState({ status: "error", failure: entitySubmitFailure(error) });
+    }
   }
 
   async function handleWalletLogin(): Promise<void> {
@@ -294,23 +397,63 @@ export function RegistrationPage(props: RegistrationPageProps) {
         <FileCheck2 aria-hidden="true" />
         <div>
           <h3 id="entity-registration-title">实体注册</h3>
-          <p>企业名称、注册号、联系人。</p>
+          <p>企业名称、注册号、联系人；提交后写入链下登记档案，状态为未核验。</p>
         </div>
       </div>
-      <section className="system-banner system-banner-warn" role="status">
-        <strong>{entityRegistrationBlocker.headline}</strong>
-        <span>{entityRegistrationBlocker.summary}</span>
+      <section className="system-banner system-banner-info" role="status">
+        <strong>{entityRegistrationReadiness.headline}</strong>
+        <span>{entityRegistrationReadiness.summary}</span>
       </section>
+
+      {entityLookup.status === "loading" ? (
+        <p className="muted-copy" aria-busy="true">正在读取当前会话的登记档案…</p>
+      ) : null}
+      {entityLookup.status === "signed_out" ? (
+        <p className="notice-line">
+          当前浏览器没有可用的钱包会话：登记与查询都用会话锚定账号。请先完成钱包登录。
+        </p>
+      ) : null}
+      {entityLookup.status === "unavailable" ? <p className="muted-copy">{entityLookup.message}</p> : null}
+      {entityLookup.status === "error" ? (
+        <div className="blocked-copy" role="alert">
+          <strong>登记档案读取失败</strong>
+          <p>{entityLookup.message}</p>
+          <p>读取失败不等于尚未登记；请核对服务后刷新重试。</p>
+        </div>
+      ) : null}
+      {entityLookup.status === "none" ? (
+        <p className="muted-copy">
+          当前会话账号还没有登记档案。填写下方信息并提交即可自助登记（未核验）。
+        </p>
+      ) : null}
+      {entityLookup.status === "ready" ? (
+        <div className="registration-registered" data-testid="entity-registration-status">
+          <strong>已登记（未核验）</strong>
+          <dl className="registration-facts">
+            <Fact label="登记号" value={entityLookup.registration.registrationId} mono />
+            <Fact label="状态" value={entityRegistrationStatusLabel(entityLookup.registration.status)} />
+            <Fact label="企业名称" value={entityLookup.registration.legalName} />
+            <Fact label="注册号" value={entityLookup.registration.registrationNumber} />
+            <Fact label="联系人" value={entityLookup.registration.contactName} />
+            <Fact label="登记账号" value={entityLookup.registration.accountAddress} mono />
+            <Fact label="更新时间" value={formatTimestamp(entityLookup.registration.updatedAt)} />
+          </dl>
+          <p className="registration-hint">
+            服务端事实：verified = false、chainWritten = false。人工核验与链上身份绑定均未发生。
+          </p>
+        </div>
+      ) : null}
+
       <div className="registration-fields">
         <label className="registration-field">
           <span>企业名称</span>
           <input
-            value={draft.entityName}
-            onChange={(event) => setDraft((current) => ({ ...current, entityName: event.target.value }))}
-            aria-invalid={fieldErrors.entityName ? "true" : undefined}
+            value={draft.legalName}
+            onChange={(event) => setDraft((current) => ({ ...current, legalName: event.target.value }))}
+            aria-invalid={fieldErrors.legalName ? "true" : undefined}
             autoComplete="organization"
           />
-          {fieldErrors.entityName ? <small className="registration-field-error" role="alert">{fieldErrors.entityName}</small> : null}
+          {fieldErrors.legalName ? <small className="registration-field-error" role="alert">{fieldErrors.legalName}</small> : null}
         </label>
         <label className="registration-field">
           <span>注册号</span>
@@ -322,7 +465,7 @@ export function RegistrationPage(props: RegistrationPageProps) {
           {fieldErrors.registrationNumber ? (
             <small className="registration-field-error" role="alert">{fieldErrors.registrationNumber}</small>
           ) : (
-            <small className="registration-field-hint">服务端尚无注册号格式契约，本页不预设格式规则。</small>
+            <small className="registration-field-hint">服务端只校验必填与长度上限，不预设注册号格式规则。</small>
           )}
         </label>
         <label className="registration-field">
@@ -337,24 +480,31 @@ export function RegistrationPage(props: RegistrationPageProps) {
         </label>
       </div>
       <div className="registration-actions">
-        <button className="primary-button" type="button" onClick={handleEntitySubmit}>提交注册</button>
+        <button
+          className="primary-button"
+          type="button"
+          disabled={entitySubmitState.status === "submitting"}
+          onClick={() => void handleEntitySubmit()}
+        >
+          {entitySubmitState.status === "submitting" ? "正在提交…" : "提交注册"}
+        </button>
       </div>
-      {entitySubmitState.status === "blocked" ? (
+      {entityNotice ? <p className="notice-line" role="status">{entityNotice}</p> : null}
+      {entitySubmitState.status === "error" ? (
         <div className="blocked-copy" role="alert">
-          <strong>未提交：本次没有发送任何请求。</strong>
-          <p>{entityRegistrationBlocker.summary}</p>
-          <details className="registration-technical">
-            <summary>已核对的写路径（为什么不可提交）</summary>
-            <ul>
-              {entityRegistrationBlocker.checkedPaths.map((path) => (
-                <li key={path}>{path}</li>
-              ))}
-            </ul>
-            <p>{entityRegistrationBlocker.unblockCondition}</p>
-          </details>
-          <p className="registration-hint">表单内容只保留在本页内存中，刷新即丢弃。</p>
+          <strong>{entitySubmitFailureTitle(entitySubmitState.failure.kind)}</strong>
+          <p>{entitySubmitState.failure.message}</p>
+          <p>{entitySubmitFailureDetail(entitySubmitState.failure.kind)}</p>
         </div>
       ) : null}
+      <details className="registration-technical">
+        <summary>当前边界（未核验 / A 机构 / 链上绑定）</summary>
+        <ul>
+          {entityRegistrationReadiness.remainingBoundaries.map((boundary) => (
+            <li key={boundary}>{boundary}</li>
+          ))}
+        </ul>
+      </details>
     </section>
   );
 
@@ -618,6 +768,57 @@ function Fact({ label, value, mono = false }: { readonly label: string; readonly
       <dd className={mono ? "registration-mono" : undefined}>{value}</dd>
     </div>
   );
+}
+
+function isSessionMissing(error: unknown): boolean {
+  return isRegistrationApiError(error) &&
+    (error.status === 401 ||
+      error.errorCode === "store_session_required" ||
+      error.errorCode === "wallet_identity_required");
+}
+
+function entityRegistrationStatusLabel(status: EntityRegistrationStatus): string {
+  return status === "self_declared" ? "自助登记（未核验）" : "待人工核验";
+}
+
+function entitySubmitFailure(error: unknown): EntitySubmitFailure {
+  if (isRegistrationApiError(error)) {
+    if (error.status === 0) {
+      return {
+        kind: "network",
+        message: `网络错误或请求超时：${error.message}`,
+      };
+    }
+    return {
+      kind: "server",
+      message: error.errorCode
+        ? `服务端拒绝（${error.status} / ${error.errorCode}）：${error.message}`
+        : `服务端失败（${error.status}）：${error.message}`,
+    };
+  }
+  return { kind: "network", message: `网络错误：${errorMessage(error)}` };
+}
+
+function entitySubmitFailureTitle(kind: EntitySubmitFailure["kind"]): string {
+  switch (kind) {
+    case "signed_out":
+      return "未登录：没有发送登记请求";
+    case "server":
+      return "登记未成功：服务端拒绝或失败";
+    case "network":
+      return "网络错误：没有收到成功响应";
+  }
+}
+
+function entitySubmitFailureDetail(kind: EntitySubmitFailure["kind"]): string {
+  switch (kind) {
+    case "signed_out":
+      return "本次没有写入任何记录；请先完成钱包登录。";
+    case "server":
+      return "服务端返回失败时不会伪造成功；请按错误提示核对登记信息后重试。";
+    case "network":
+      return "请求可能已到达服务端，也可能没有；请先刷新读取当前登记，再决定是否重新提交。";
+  }
 }
 
 function bindingStatusLabel(status: IdentityBindingDTO["status"]): string {

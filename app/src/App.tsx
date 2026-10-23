@@ -4,6 +4,7 @@ import {
   ClipboardList,
   Clock3,
   FileCheck2,
+  FilePlus2,
   Fingerprint,
   FolderKanban,
   RefreshCw,
@@ -26,6 +27,8 @@ import { NotificationCenter, useOrderAppNotifications } from "./notifications/No
 import type { OrderAppNotificationDTO } from "./notifications/types";
 import { InviteOnboarding } from "./onboarding/InviteOnboarding";
 import { WalletLoginPanel } from "./onboarding/WalletLoginPanel";
+import { CreateOrderPage } from "./orders/CreateOrderPage";
+import type { CreateOrderCreatedResult } from "./orders/useCreateOrderFlow";
 import { decorateTaskEvidenceSpec } from "./decoration/decorationSupport";
 import { useOrderAppDecorations } from "./decoration/useZhixuDecorations";
 import { DecorationPage } from "./reader/DecorationPage";
@@ -122,6 +125,12 @@ function AppShell({ api }: { readonly api: ProductApiClient }) {
   const [inviteEntry, setInviteEntry] = useState<InviteEntry | undefined>(() => readInviteEntryFromSearch());
   const [submissionProofs, setSubmissionProofs] = useState<Readonly<Record<string, TaskSubmissionProof>>>({});
   const [notificationsOpen, setNotificationsOpen] = useState(false);
+  // 开单成功提示：跳转订单页后仍保留，明确"已创建、正在同步"；同步完成前
+  // 新订单可能还不在投影里，不能因为列表暂时为空就呈现成创建失败。
+  const [createdOrderNotice, setCreatedOrderNotice] = useState<
+    { readonly title: string; readonly orderId?: string | undefined } | undefined
+  >(undefined);
+  const createdOrderNoticeTimerRef = useRef<number | undefined>(undefined);
   // 慢网下旧响应不得覆盖新响应：所有 loadParticipantHome 调用共用单调序号。
   const loadSequenceRef = useRef(0);
 
@@ -273,6 +282,29 @@ function AppShell({ api }: { readonly api: ProductApiClient }) {
     handleRefresh();
   }
 
+  /**
+   * 开单成功：订单已提交创建，立即刷新投影并跳到订单页。投影同步有延迟，
+   * 主壳横幅明确"已创建、正在同步"，避免把尚未索引误读成创建失败。
+   */
+  function handleOrderCreated(result: CreateOrderCreatedResult) {
+    setCreatedOrderNotice({
+      title: result.title,
+      ...(result.orderId ? { orderId: result.orderId } : {})
+    });
+    if (createdOrderNoticeTimerRef.current !== undefined) {
+      window.clearTimeout(createdOrderNoticeTimerRef.current);
+    }
+    createdOrderNoticeTimerRef.current = window.setTimeout(() => {
+      setCreatedOrderNotice(undefined);
+      createdOrderNoticeTimerRef.current = undefined;
+    }, 20_000);
+    navigate({
+      section: "orders",
+      ...(result.orderId ? { orderId: result.orderId } : {})
+    });
+    handleRefresh({ silent: true });
+  }
+
   function dismissInviteEntry() {
     // 明确离开邀请流程（放弃，或终态成功后的返回）才消费 URL 上的令牌。
     clearInviteSearchParams();
@@ -302,6 +334,14 @@ function AppShell({ api }: { readonly api: ProductApiClient }) {
 
       {loadState.status === "error" ? (
         <SystemBanner tone="error" title="参与者服务加载失败" text={loadState.message} />
+      ) : null}
+
+      {createdOrderNotice ? (
+        <SystemBanner
+          tone="info"
+          title="订单已创建"
+          text={`「${createdOrderNotice.title}」已提交创建，正在同步订单与任务；同步完成前可能暂时看不到新订单。`}
+        />
       ) : null}
 
       {decorationEntry ? (
@@ -338,6 +378,23 @@ function AppShell({ api }: { readonly api: ProductApiClient }) {
               orderId: selectedOrder?.orderId
             })
           }
+        />
+      ) : route.section === "create" && loadState.status !== "unauthenticated" ? (
+        // 开单：已发布秩序目录 + 装修 + 触发内容 + 参与方邀请 + 本人确认创建。
+        // 无会话时落到下方登录入口：草稿/邀请/准备都要求会话锚定身份，
+        // 渲染一个点不动的表单只会把可登录状态伪装成不可用。
+        <CreateOrderPage
+          api={api}
+          walletAddress={data?.participant.walletAddress ?? session.walletAddress}
+          onBack={() =>
+            navigate({
+              section: "tasks",
+              taskId: selectedTask?.taskId,
+              orderId: selectedOrder?.orderId
+            })
+          }
+          onCreated={handleOrderCreated}
+          onSessionExpired={handleSessionExpired}
         />
       ) : loadState.status === "unauthenticated" ? (
         // 非 local 部署的无会话态：登录是唯一可用入口，不渲染待办工作区
@@ -415,6 +472,12 @@ function AppShell({ api }: { readonly api: ProductApiClient }) {
               label="订单"
               icon={<FolderKanban />}
               onClick={() => navigate({ section: "orders", taskId: selectedTask?.taskId, orderId: selectedOrder?.orderId })}
+            />
+            <SectionButton
+              active={route.section === "create"}
+              label="开单"
+              icon={<FilePlus2 />}
+              onClick={() => navigate({ section: "create" })}
             />
             <SectionButton
               active={route.section === "proof"}
