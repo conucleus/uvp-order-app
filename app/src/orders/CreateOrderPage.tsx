@@ -31,25 +31,11 @@ import {
 } from "./useCreateOrderFlow";
 import "./orders.css";
 
-/**
- * 参与者开单页：选已发布秩序 → 读装修/阶段 → 填触发内容 → 参与方确认 →
- * 本人确认并创建订单。
- *
- * 边界：
- * - 秩序目录只展示服务端判定为已发布的条目（planPublication.status），
- *   没有发布秩序时显示空态，不伪造目录。
- * - 装修取不到与"没有装修"分开呈现；阶段/角色/证据来自秩序详情。
- * - 参与方邀请由创建人签发，邀请链接交给对方确认；未确认时不发签名请求。
- * - 阶段执行者当前接口只支持订单内选定：本页显式说明不可在此预选，不伪造。
- * - 界面用产业语言，不展示哈希/区块/地址。
- */
 export interface CreateOrderPageProps {
   readonly api: ProductApiClient;
-  /** 当前会话锚定钱包（准备/提交的身份声明；真实身份由服务端会话决定）。 */
   readonly walletAddress?: string | undefined;
   readonly onBack: () => void;
   readonly onCreated?: ((result: CreateOrderCreatedResult) => void) | undefined;
-  /** 写路径 401：宿主清会话切登录面；返回是否已接管。 */
   readonly onSessionExpired?: ((error: unknown) => boolean) | undefined;
 }
 
@@ -102,7 +88,6 @@ export function CreateOrderPage({
 
   const draft = flow.draft;
   const participantList = flow.participants.status === "ready" ? flow.participants.participants : [];
-  // 只统计必填角色的确认数：选填角色已确认不影响"能否创建"的判定。
   const acceptedRequiredCount = participantList.filter(
     (participant) => participant.required && participant.status === "accepted" && participant.walletAddress
   ).length;
@@ -115,7 +100,6 @@ export function CreateOrderPage({
       await navigator.clipboard.writeText(link);
       setCopiedRoleSlotId(roleSlotId);
     } catch {
-      // 剪贴板不可用时链接仍在只读输入框里，参与者可手动复制。
       setCopiedRoleSlotId(undefined);
     }
   }
@@ -636,4 +620,3 @@ function ActionNotice({
     </p>
   );
 }
-

@@ -140,7 +140,7 @@ pnpm typecheck
 
 # 2) 现有单测回归
 pnpm test
-# => 169 tests / 34 suites，pass 169，fail 0
+# => 161 tests / 33 suites，pass 161，fail 0
 
 # 3) 注册 spec（成功 / 未登录 / 服务端失败 / 网络失败四条）
 pnpm exec playwright test e2e/order-app.registration.spec.ts --project=chromium

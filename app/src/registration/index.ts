@@ -1,7 +1,5 @@
 /**
- * order app 注册模块（rough）：实体注册表单、钱包归属签名证明、身份背书事实。
- * 数据通路与写路径 blocker 见同目录 README.md；本包只导出 RegistrationPage
- * 与类型化 client，宿主接线不改本目录之外的文件。
+ * order app 注册模块的导出面。
  */
 export { RegistrationPage } from "./RegistrationPage";
 export type {

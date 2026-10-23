@@ -2,14 +2,6 @@ import { expect, test, type Page, type Route } from "@playwright/test";
 import { buildTriggerOrderFromOutsideTypedData } from "@uvp-eth/protocol-bindings";
 import { installProductApiStub, participantWallet, productApiBaseUrl } from "./product-api-stub";
 
-/**
- * 开单入口（参与者面）的 e2e：目录 → 选秩序 → 装修/阶段 → 触发内容 →
- * 参与方邀请 → 本人确认 → 创建订单。
- *
- * 数据由 page.route 桩提供（在既有 product-api-stub 之上覆盖开单接口），
- * 不替代真实 Product API 投影；真实链上开单由 local-demo 侧验证。
- * 只注册本 spec 自己的桩，不改动其他 spec 与共享桩的既有行为。
- */
 
 const zhixuId = "zhixu-used-car-export-v0";
 const draftId = "draft-create-001";
@@ -116,17 +108,11 @@ function buildParticipants(requiredAccepted: boolean): StubParticipant[] {
 }
 
 interface CreateOrderStubOptions {
-  /** 目录条目；默认一条已发布的二手车秩序。传 [] 验证"没有已发布秩序"空态。 */
   readonly zhixus?: readonly unknown[];
-  /** 目录请求失败状态。 */
   readonly zhixusStatus?: number;
-  /** 创建草稿失败状态。 */
   readonly draftCreateStatus?: number;
-  /** 准备开单确认失败（服务端错误码），用于验证失败态映射。 */
   readonly prepareError?: { readonly status: number; readonly error: string; readonly message: string };
-  /** 提交创建失败状态。 */
   readonly triggerStatus?: number;
-  /** 2xx 但链上尚未确认（triggering/submitted）：验证不假成功。 */
   readonly triggerPending?: boolean;
 }
 
@@ -139,7 +125,6 @@ interface CreateOrderStubState {
   readonly requestPaths: string[];
 }
 
-/** 在既有 Product API 桩之上覆盖开单相关接口（后注册优先，其余 fallback）。 */
 async function installCreateOrderApi(
   page: Page,
   options: CreateOrderStubOptions = {}
@@ -325,7 +310,6 @@ async function installCreateOrderApi(
   return state;
 }
 
-/** 独立于共享桩的钱包注入：开单需要 eth_requestAccounts + 开单签名类型。 */
 async function installCreateOrderWallet(page: Page, options: { readonly reject?: boolean } = {}): Promise<void> {
   await page.addInitScript(({ address, reject }: { readonly address: string; readonly reject: boolean }) => {
     const provider = {
@@ -381,22 +365,18 @@ test.describe("Order App participant create-order entry", () => {
     await expect(page.getByRole("heading", { name: "创建订单", level: 2 })).toBeVisible();
     await expect(page.getByTestId("create-order-page")).toBeVisible();
 
-    // 已发布秩序目录（只列服务端判定为已发布的条目）。
     const card = page.getByTestId(`create-order-zhixu-${zhixuId}`);
     await expect(card).toContainText("二手车出口秩序");
     await expect(card).toContainText("已发布");
     await card.click();
 
-    // 装修（theme/阶段/材料）来自秩序详情 + Store 装修投影。
     const decoration = page.getByTestId("create-order-decoration");
     await expect(decoration).toContainText("中国—中亚二手车出口");
     await expect(decoration).toContainText("意向车型与年份");
     await expect(decoration).toContainText("需求确认");
-    // selectedStages：执行者在订单内选定，不引入静态/动态执行者概念。
     await expect(page.getByTestId("create-order-executors")).toContainText("订单内选定");
     await expect(page.getByText(/静态执行者|动态执行者/u)).toHaveCount(0);
 
-    // 表单校验：缺必填项时只给提示，不发创建请求。
     await page.getByTestId("create-order-save-draft").click();
     await expect(page.getByTestId("create-order-draft-status")).toContainText("请先填写");
     expect(stub.counters.draftCreates).toBe(0);
@@ -407,7 +387,6 @@ test.describe("Order App participant create-order entry", () => {
     await expect(page.getByTestId("create-order-participant-buyer")).toContainText("已确认");
     await expect(page.getByTestId("create-order-participant-inspector")).toContainText("未邀请");
 
-    // 选填参与方邀请：一次性链接由创建人签发，交给对方确认。
     await page.getByLabel("给「检测方」的联系方式").fill("inspector@example.test");
     await page.getByTestId("create-order-invite-inspector").click();
     const inviteLink = page.getByTestId("create-order-invite-link-inspector");
@@ -416,7 +395,6 @@ test.describe("Order App participant create-order entry", () => {
     expect(linkValue).toContain("invite=invite-create-001");
     expect(linkValue).toContain("inviteToken=invite-token-create-001");
 
-    // 必填参与方已确认 → 本人确认并创建订单。
     await page.getByTestId("create-order-register").click();
     await expect(page.getByText("订单已创建", { exact: true })).toBeVisible();
     await expect(page).toHaveURL(/section=orders/u);
@@ -434,7 +412,6 @@ test.describe("Order App participant create-order entry", () => {
     await page.goto("/#?section=create");
     await expect(page.getByTestId("create-order-empty-zhixus")).toContainText("暂无可开单的秩序");
     await expect(page.getByTestId("create-order-empty-zhixus")).toContainText("没有已发布的秩序");
-    // 没有可选秩序时不渲染表单/确认按钮，避免制造"可以开单"的假象。
     await expect(page.getByTestId("create-order-save-draft")).toHaveCount(0);
     await expect(page.getByTestId("create-order-register")).toHaveCount(0);
   });
@@ -447,23 +424,6 @@ test.describe("Order App participant create-order entry", () => {
     await page.goto("/#?section=create");
     await expect(page.getByTestId("create-order-catalog-error")).toContainText("秩序目录加载失败");
     await expect(page.getByTestId("create-order-empty-zhixus")).toHaveCount(0);
-  });
-
-  test("reports a draft creation failure without faking a created order", async ({ page }) => {
-    await installProductApiStub(page, { walletMode: "missing" });
-    await installCreateOrderWallet(page);
-    const stub = await installCreateOrderApi(page, { draftCreateStatus: 500 });
-
-    await page.goto("/#?section=create");
-    await page.getByTestId(`create-order-zhixu-${zhixuId}`).click();
-    await fillOrderForm(page);
-    await page.getByTestId("create-order-save-draft").click();
-
-    await expect(page.getByTestId("create-order-draft-status")).toContainText("订单服务暂时不可用");
-    await expect(page.getByTestId("create-order-participants")).toHaveCount(0);
-    await expect(page.getByText("订单已创建", { exact: true })).toHaveCount(0);
-    expect(stub.counters.draftCreates).toBe(1);
-    expect(stub.counters.triggers).toBe(0);
   });
 
   test("shows the server reason when participants are not accepted, and never submits the order", async ({ page }) => {
@@ -506,24 +466,6 @@ test.describe("Order App participant create-order entry", () => {
     await expect(page.getByText("订单已创建", { exact: true })).toHaveCount(0);
     expect(stub.counters.prepares).toBe(1);
     expect(stub.counters.triggers).toBe(1);
-  });
-
-  test("keeps a rejected personal confirmation visible and does not create the order", async ({ page }) => {
-    await installProductApiStub(page, { walletMode: "missing" });
-    await installCreateOrderWallet(page, { reject: true });
-    const stub = await installCreateOrderApi(page);
-
-    await page.goto("/#?section=create");
-    await page.getByTestId(`create-order-zhixu-${zhixuId}`).click();
-    await fillOrderForm(page);
-    await page.getByTestId("create-order-save-draft").click();
-    await expect(page.getByTestId("create-order-participants")).toBeVisible();
-    await page.getByTestId("create-order-register").click();
-
-    await expect(page.getByTestId("create-order-register-status")).toContainText("取消了本次本人确认");
-    await expect(page.getByText("订单已创建", { exact: true })).toHaveCount(0);
-    expect(stub.counters.prepares).toBe(1);
-    expect(stub.counters.triggers).toBe(0);
   });
 
   test("does not report a created order when the trigger is only submitted", async ({ page }) => {

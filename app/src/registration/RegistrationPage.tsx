@@ -1,7 +1,5 @@
 /**
- * 注册页：实体自助登记（链下档案、明确未核验）、钱包归属签名证明、身份
- * 背书事实展示。数据只来自 registration/client 的类型化通路；页面不把
- * 自助登记显示成身份核验或链上绑定，也不把"读取失败"显示成"没有记录"。
+ * 注册页：实体自助登记（未核验）、钱包归属签名证明、身份背书事实展示。
  */
 import { AlertCircle, FileCheck2, Fingerprint, RefreshCw, ShieldCheck, WalletCards } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
@@ -27,7 +25,6 @@ export interface RegistrationSessionTokenSource {
   currentSessionToken(): string | undefined;
 }
 
-/** 与 OrderAppActions 结构兼容：宿主可直接把 createOrderAppActions(api) 传进来。 */
 export interface RegistrationWalletLogin {
   hasInjectedWallet(): boolean;
   requestWalletAddress(): Promise<string>;
@@ -38,13 +35,9 @@ export interface RegistrationWalletLogin {
 }
 
 export interface RegistrationPageProps {
-  /** 缺省按 VITE_UVP_CHAIN_SERVICES_URL 自建 client；宿主可注入以便测试或复用。 */
   readonly client?: RegistrationClient | undefined;
-  /** 现有钱包会话 token 取值器（宿主通常传 { currentSessionToken: () => api.currentSessionToken() }）。 */
   readonly session?: RegistrationSessionTokenSource | undefined;
-  /** 现有钱包登录动作（宿主通常直接传 createOrderAppActions(api)）。 */
   readonly wallet?: RegistrationWalletLogin | undefined;
-  /** 初始查询地址（宿主可传参与者会话钱包）。 */
   readonly initialAddress?: string | undefined;
   readonly onBack?: (() => void) | undefined;
 }
@@ -209,7 +202,6 @@ export function RegistrationPage(props: RegistrationPageProps) {
       return;
     }
     runFactsQuery(address);
-    // runFactsQuery 是事件与初始查询共用的入口，序列号在函数内防旧响应覆盖。
   }, [clientState.client, props.initialAddress]);
 
   useEffect(() => {

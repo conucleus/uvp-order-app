@@ -19,28 +19,12 @@ import {
 import { submitSignExpectation } from "../tasks/model/taskUtils";
 import { InjectedWalletError } from "../wallet/injectedWallet";
 
-/**
- * 开单确认的钱包边界（order app 自己的签名域组装）。
- *
- * 与任务提交通道同一套共享钱包内核（域校验、链核对、签名请求），但签名
- * 类型是开单专用 `UVPStateMachineTriggerOrderFromOutside`——order app 的
- * 任务签名封装只认任务/补丁三类 primaryType，这里不改造它，按同一共享
- * 内核补一条开单信封。
- *
- * 域预期来自构建期部署配置（VITE_UVP_STATE_MACHINE_ADDRESS /
- * VITE_UVP_CHAIN_ID），不读 prepare 响应自带的 humanSummary；缺配置即
- * 拒绝签名（fail-closed）。
- */
 
 const walletPorts: WalletPorts = {
   isUserRejectedRequestError,
   validateTypedDataEnvelope: validateTypedDataForSigning
 };
 
-/**
- * 拒绝 reason → 面向参与者文案。判定单源于 protocol-bindings，文案留宿主
- * （与 wallet/injectedWallet 同口径，覆盖开单信封的 signer 字段名）。
- */
 const mismatchTexts: TypedDataMismatchTexts = {
   missingDetail: "(缺失)",
   notTypedData: "确认对象不是可核对的确认内容",
@@ -69,10 +53,6 @@ export interface OrderTriggerSignExpectation {
   readonly chainId?: number | undefined;
 }
 
-/**
- * 开单签名域预期（部署配置注入的独立事实）。
- * 开单与任务提交共用 UVPStateMachine 域，故复用同一环境解析。
- */
 export function orderTriggerSignExpectation(): OrderTriggerSignExpectation {
   const { expected } = submitSignExpectation();
   return {
@@ -81,7 +61,6 @@ export function orderTriggerSignExpectation(): OrderTriggerSignExpectation {
   };
 }
 
-/** 连接并读取当前身份地址（eth_requestAccounts）；失败映射为可展示错误。 */
 export async function requestCreateOrderWalletAddress(): Promise<string> {
   try {
     return await connectWalletAddress({
@@ -96,11 +75,6 @@ export async function requestCreateOrderWalletAddress(): Promise<string> {
   }
 }
 
-/**
- * 对 prepare 下发的开单确认内容签名。
- * 调用钱包之前完成三层核对：信封（类型/域/字段/确认人）、prepared 记录
- * 声明的确认人、钱包当前链与确认环境一致。
- */
 export async function signOrderTriggerWithInjectedWallet(input: {
   readonly typedData: Eip712TypedDataDTO;
   readonly walletAddress: string;
@@ -136,7 +110,6 @@ export async function signOrderTriggerWithInjectedWallet(input: {
   }
 }
 
-/** 签名前信封核对（不触达钱包）：类型、域、字段、确认人三重比对。 */
 export function assertOrderTriggerEnvelope(
   typedData: Eip712TypedDataDTO,
   walletAddress: string,

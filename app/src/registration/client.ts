@@ -1,7 +1,5 @@
 /**
- * registration 模块的类型化数据通路：身份背书/登记档案只读接口与钱包会话
- * 地址锚定写接口。服务端路由单源见 README；本客户端只做 transport 与
- * 错误分类，不推导业务结论。
+ * registration 模块的类型化数据通路；只做 transport 与错误分类。
  */
 import { readPersistedWalletSessionToken } from "../api/productApi";
 import { personalSignWithInjectedWallet } from "../wallet/injectedWallet";
@@ -22,31 +20,16 @@ export interface RegistrationClientOptions {
   readonly baseUrl?: string | undefined;
   readonly fetcher?: RegistrationFetcher | undefined;
   readonly timeoutMs?: number | undefined;
-  /** 钱包会话 token 取值器：宿主应注入现有 ProductApiClient.currentSessionToken。 */
   readonly getSessionToken?: (() => string | undefined) | undefined;
-  /** personal_sign 签名器：缺省用浏览器注入钱包（与 order app 其余会话签名同一实现）。 */
   readonly signer?: RegistrationWalletSigner | undefined;
 }
 
 export interface RegistrationClient {
-  /** GET /identity/bindings?account=&activeOnly=：身份背书投影事实（公开只读）。 */
   loadIdentityBindings(query?: IdentityBindingQuery): Promise<readonly IdentityBindingDTO[]>;
-  /** GET /identity/descriptors/:subjectId/:descriptorHash：登记档案快照（公开只读）。 */
   loadIdentityDescriptor(subjectId: string, descriptorHash: string): Promise<IdentityDescriptorSnapshotDTO>;
-  /** GET /store/auth/addresses：当前钱包会话账号的地址清单（需会话）。 */
   loadAccountAddresses(): Promise<AccountAddressesDTO>;
-  /**
-   * 地址归属签名证明：challenge（intent=anchor_address）→ personal_sign →
-   * verify，把地址记入当前会话账号。复用 order app 现有钱包会话（同一
-   * x-uvp-store-session token 与同一注入钱包签名器）。
-   */
   bindWalletAddress(input: { readonly address: string }): Promise<WalletAddressBindingDTO>;
-  /** GET /product/registration/me：当前会话锚定账号的登记档案；未登记返回 undefined（需会话）。 */
   loadMyEntityRegistration(): Promise<EntityRegistrationDTO | undefined>;
-  /**
-   * POST /product/registration：自助登记/更新当前会话账号的链下实体档案。
-   * 账号地址由服务端从会话取；返回的 verified 恒为 false，不写链。
-   */
   registerEntity(input: RegisterEntityInput): Promise<EntityRegistrationDTO>;
 }
 
@@ -217,7 +200,6 @@ class HttpRegistrationClient implements RegistrationClient {
           method,
           headers,
           ...(body === undefined ? {} : { body: JSON.stringify(body) }),
-          // 与 productApi 同口径：携带会话头的请求不跟随重定向。
           redirect: "manual",
           signal,
         }),
@@ -249,7 +231,6 @@ class HttpRegistrationClient implements RegistrationClient {
           serverMessage = parsed.message;
         }
       } catch {
-        // 非 JSON 错误体只有文本可用。
       }
       throw new RegistrationApiError(
         response.status,

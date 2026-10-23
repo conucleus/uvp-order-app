@@ -1,13 +1,6 @@
 import { isWalletIdentityRequired, ProductApiError } from "../api/productApi";
-import type { DraftParticipantDTO } from "../api/productApi";
 import { InjectedWalletError } from "../wallet/injectedWallet";
 
-/**
- * 开单失败态的文案映射：服务端错误短码 → 产业语言。
- *
- * 原则：失败必须如实显示；不把"结果未知"写成"失败可重试"（超时后服务端
- * 可能已处理），也不把参与方未确认写成系统错误。
- */
 const ERROR_CODE_MESSAGES: Readonly<Record<string, string>> = {
   required_participant_missing: "还有必填参与方没有完成确认。请先生成邀请、等待对方确认，再刷新参与方状态。",
   trigger_executor_not_accepted: "开单确认人还没有完成本订单的角色确认，暂时不能创建订单。",
@@ -68,13 +61,4 @@ export function orderFailureMessage(error: unknown, fallback: string): string {
     return error.message;
   }
   return fallback;
-}
-
-/** 未确认的必填参与方名称（给页面/错误文案列出具体角色）。 */
-export function unconfirmedRequiredParticipantLabels(
-  participants: readonly DraftParticipantDTO[]
-): readonly string[] {
-  return participants
-    .filter((participant) => participant.required && (participant.status !== "accepted" || !participant.walletAddress))
-    .map((participant) => participant.displayName.trim() || participant.roleLabel);
 }

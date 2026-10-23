@@ -6,19 +6,13 @@ import type {
 } from "../api/productApi";
 import {
   buildInviteLink,
-  canPrepareOrderTrigger,
   createDraftInputFromValues,
-  isOrderDraftEditable,
   orderFormValidationError,
   publishedZhixuSummaries,
   updateDraftInputFromValues
 } from "./form";
+import { orderFailureMessage } from "./messages";
 import {
-  orderFailureMessage,
-  unconfirmedRequiredParticipantLabels
-} from "./messages";
-import {
-  DRAFT_STATUS_LABELS,
   IDLE_ORDER_ACTION,
   emptyOrderFormValues,
   type CreateOrderFormValues,
@@ -36,11 +30,8 @@ import {
 
 export interface CreateOrderFlowInput {
   readonly api: ProductApiClient;
-  /** 当前会话锚定钱包：开单准备/提交的身份声明（真实身份仍由会话决定）。 */
   readonly walletAddress?: string | undefined;
-  /** 创建成功回调（页面据此提示并跳到订单页）。 */
   readonly onCreated?: ((result: CreateOrderCreatedResult) => void) | undefined;
-  /** 写路径 401：宿主清会话切登录面；返回是否已接管。 */
   readonly onSessionExpired?: ((error: unknown) => boolean) | undefined;
 }
 
@@ -69,13 +60,6 @@ export interface CreateOrderFlow {
   readonly registerOrder: () => Promise<void>;
 }
 
-/**
- * 开单流程状态机（页面只渲染，不自行发请求）。
- *
- * 步骤：已发布秩序目录 → 选秩序（装修/阶段由页面读）→ 生成/保存订单内容草稿
- * → 参与方确认（邀请链接）→ 本人确认并创建订单。
- * 失败态一律落在对应动作状态里；没有草稿/没有参与方确认时不发签名请求。
- */
 export function useCreateOrderFlow(input: CreateOrderFlowInput): CreateOrderFlow {
   const { api, walletAddress, onCreated, onSessionExpired } = input;
   const [zhixus, setZhixus] = useState<ZhixuCatalogState>({ status: "loading" });
@@ -87,10 +71,8 @@ export function useCreateOrderFlow(input: CreateOrderFlowInput): CreateOrderFlow
   const [inviteActions, setInviteActions] = useState<OrderInviteActions>({});
   const [registerAction, setRegisterAction] = useState<OrderActionState>(IDLE_ORDER_ACTION);
 
-  // 慢网下旧响应不得覆盖新响应（与 App 的 home 加载同口径）。
   const catalogSequenceRef = useRef(0);
   const participantsSequenceRef = useRef(0);
-  // 长链路（准备→本人确认→提交）同步互斥：按钮 pending 生效前挡住第二次点击。
   const registerInflightRef = useRef(false);
 
   async function refreshZhixus(): Promise<void> {
@@ -116,7 +98,6 @@ export function useCreateOrderFlow(input: CreateOrderFlowInput): CreateOrderFlow
 
   useEffect(() => {
     void refreshZhixus();
-    // 目录只随客户端实例变化重载；refreshZhixus 是事件入口，不参与依赖。
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [api]);
 
@@ -124,7 +105,6 @@ export function useCreateOrderFlow(input: CreateOrderFlowInput): CreateOrderFlow
     if (zhixuId === selectedZhixuId) {
       return;
     }
-    // 切换秩序即作废旧草稿/参与方/动作状态：A→B 回切不得复用旧草稿。
     setSelectedZhixuId(zhixuId);
     setValues(emptyOrderFormValues());
     setDraft(undefined);
@@ -139,7 +119,6 @@ export function useCreateOrderFlow(input: CreateOrderFlowInput): CreateOrderFlow
     setValues((current) => ({ ...current, ...patch }));
   }
 
-  /** 草稿回读 + 参与方刷新：触发前的权威状态来源。 */
   async function loadDraftSnapshot(draftId: string): Promise<void> {
     const sequence = participantsSequenceRef.current + 1;
     participantsSequenceRef.current = sequence;
@@ -173,13 +152,6 @@ export function useCreateOrderFlow(input: CreateOrderFlowInput): CreateOrderFlow
     const validationError = orderFormValidationError(values);
     if (validationError) {
       setDraftAction({ phase: "error", message: validationError });
-      return;
-    }
-    if (draft && !isOrderDraftEditable(draft.status)) {
-      setDraftAction({
-        phase: "error",
-        message: `订单当前状态是「${DRAFT_STATUS_LABELS[draft.status]}」，内容不能再修改。`
-      });
       return;
     }
     setDraftAction({ phase: "pending", message: draft ? "正在保存订单内容" : "正在生成订单内容" });
@@ -275,25 +247,6 @@ export function useCreateOrderFlow(input: CreateOrderFlowInput): CreateOrderFlow
     registerInflightRef.current = true;
     setRegisterAction({ phase: "pending", message: "正在核对参与方确认状态" });
     try {
-      // 先用服务端当前状态判定，不拿本地陈旧参与方清单去签名。
-      const current = await api.getOrderDraft(draft.draftId);
-      setDraft(current.draft);
-      setParticipants({ status: "ready", participants: current.participants });
-      const missing = unconfirmedRequiredParticipantLabels(current.participants);
-      if (missing.length > 0) {
-        setRegisterAction({
-          phase: "error",
-          message: `还有必填参与方没有完成确认：${missing.join("、")}。请先生成邀请并等待对方确认。`
-        });
-        return;
-      }
-      if (!canPrepareOrderTrigger(current.draft.status)) {
-        setRegisterAction({
-          phase: "error",
-          message: `订单当前状态是「${DRAFT_STATUS_LABELS[current.draft.status]}」，还不能创建。请先完成参与方确认并刷新状态。`
-        });
-        return;
-      }
       setRegisterAction({ phase: "pending", message: "正在准备本次确认内容" });
       const account = await requestCreateOrderWalletAddress();
       const prepared = await api.prepareOrderTrigger(draft.draftId, { walletAddress: account });
@@ -315,8 +268,6 @@ export function useCreateOrderFlow(input: CreateOrderFlowInput): CreateOrderFlow
         walletAddress: account
       });
       setDraft(result.draft);
-      // 2xx 不等于订单已建：服务端在 submitted/indexing/pending 时也返回 200，
-      // 只有 draft 落 triggered 且带回 triggeredOrderId 才是链上确认的创建。
       const confirmedOrderId = result.draft.status === "triggered" ? result.draft.triggeredOrderId : undefined;
       if (!confirmedOrderId) {
         const triggerStatus = typeof result.trigger?.status === "string" ? result.trigger.status : "";

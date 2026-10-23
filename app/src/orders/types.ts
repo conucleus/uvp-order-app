@@ -6,14 +6,9 @@ import type {
   ProductOrderInviteDTO
 } from "../api/productApi";
 
-/**
- * 开单表单（触发内容）：字段按订单档案面取值，不内置任何行业必填项之外的
- * 业务 schema——业务类型/币种由发布方秩序与填写人约定，界面只做必填校验。
- */
 export interface CreateOrderFormValues {
   readonly title: string;
   readonly businessType: string;
-  /** 车辆/单证等交易内容摘要，每行一条，映射服务端 goods[]。 */
   readonly goodsText: string;
   readonly totalAmount: string;
   readonly currency: string;
@@ -22,13 +17,11 @@ export interface CreateOrderFormValues {
 
 export type OrderActionPhase = "idle" | "pending" | "success" | "error";
 
-/** 页面动作状态：phase 决定呈现，message 是给参与者看的可读文案。 */
 export interface OrderActionState {
   readonly phase: OrderActionPhase;
   readonly message?: string | undefined;
 }
 
-/** 邀请动作额外留存一次性链接（token 只随创建响应出现一次）。 */
 export interface OrderInviteActionState extends OrderActionState {
   readonly invite?: ProductOrderInviteDTO | undefined;
   readonly inviteLink?: string | undefined;
@@ -41,10 +34,6 @@ export type ZhixuCatalogState =
   | { readonly status: "ready"; readonly items: readonly PublishedZhixuSummary[] }
   | { readonly status: "error"; readonly message: string };
 
-/**
- * 目录条目：只保留开单入口需要的展示字段。
- * 是否已发布来自服务端 planPublication.status，不在客户端推断。
- */
 export interface PublishedZhixuSummary {
   readonly zhixuId: string;
   readonly title: string;
