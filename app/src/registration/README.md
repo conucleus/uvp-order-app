@@ -140,11 +140,11 @@ pnpm typecheck
 
 # 2) 现有单测回归
 pnpm test
-# => 165 tests / 33 suites，pass 165，fail 0
+# => 169 tests / 34 suites，pass 169，fail 0
 
 # 3) 注册 spec（成功 / 未登录 / 服务端失败 / 网络失败四条）
 pnpm exec playwright test e2e/order-app.registration.spec.ts --project=chromium
-# => 4 passed
+# => 4 passed（registration spec 4/4）
 ```
 
 服务端侧（`/Users/uyhendu/project/uvp-eth/uvp-chain-services/service`）：

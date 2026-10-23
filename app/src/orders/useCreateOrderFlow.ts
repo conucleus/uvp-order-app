@@ -315,11 +315,26 @@ export function useCreateOrderFlow(input: CreateOrderFlowInput): CreateOrderFlow
         walletAddress: account
       });
       setDraft(result.draft);
+      // 2xx 不等于订单已建：服务端在 submitted/indexing/pending 时也返回 200，
+      // 只有 draft 落 triggered 且带回 triggeredOrderId 才是链上确认的创建。
+      const confirmedOrderId = result.draft.status === "triggered" ? result.draft.triggeredOrderId : undefined;
+      if (!confirmedOrderId) {
+        const triggerStatus = typeof result.trigger?.status === "string" ? result.trigger.status : "";
+        setRegisterAction(
+          triggerStatus === "failed"
+            ? { phase: "error", message: "订单创建没有成功，请核对后重试。" }
+            : {
+                phase: "pending",
+                message: "创建请求已提交，等待链上确认；当前结果未知，请稍后刷新核对，不要重复提交。"
+              }
+        );
+        return;
+      }
       setRegisterAction({ phase: "success", message: "订单已创建，正在同步订单与任务。" });
       onCreated?.({
         draftId: draft.draftId,
         title: result.draft.title,
-        ...(result.draft.triggeredOrderId ? { orderId: result.draft.triggeredOrderId } : {})
+        orderId: confirmedOrderId
       });
     } catch (error) {
       if (onSessionExpired?.(error)) {

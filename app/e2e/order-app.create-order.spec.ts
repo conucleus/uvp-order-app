@@ -126,6 +126,8 @@ interface CreateOrderStubOptions {
   readonly prepareError?: { readonly status: number; readonly error: string; readonly message: string };
   /** 提交创建失败状态。 */
   readonly triggerStatus?: number;
+  /** 2xx 但链上尚未确认（triggering/submitted）：验证不假成功。 */
+  readonly triggerPending?: boolean;
 }
 
 interface CreateOrderStubState {
@@ -295,6 +297,16 @@ async function installCreateOrderApi(
       state.counters.triggers += 1;
       if (options.triggerStatus !== undefined) {
         await fulfillJson(route, { error: "trigger_failed", message: "订单创建失败，请稍后重试" }, options.triggerStatus);
+        return;
+      }
+      if (options.triggerPending === true) {
+        draft = { ...draft, status: "triggering" };
+        await fulfillJson(route, {
+          draft,
+          participants,
+          permissions: [],
+          trigger: { triggerId: "trigger-create-001", status: "submitted" }
+        });
         return;
       }
       draft = { ...draft, status: "triggered", triggeredOrderId: chainOrderId };
@@ -514,21 +526,22 @@ test.describe("Order App participant create-order entry", () => {
     expect(stub.counters.triggers).toBe(0);
   });
 
-  test("requires a wallet session before the create-order form is usable", async ({ page }) => {
-    await installProductApiStub(page, { walletMode: "missing" });
-    const stub = await installCreateOrderApi(page);
-
-    // 无会话：参与者面读写都被服务端拒绝，直接进入创建页不会得到可提交表单。
-    for (const pathname of ["/product/me", "/product/me/orders", "/product/me/tasks"]) {
-      await page.route(`${productApiBaseUrl}${pathname}`, async (route) => {
-        await fulfillJson(route, { error: "wallet_identity_required", message: "wallet session required" }, 401);
-      });
-    }
+  test("does not report a created order when the trigger is only submitted", async ({ page }) => {
+    await installProductApiStub(page);
+    await installCreateOrderWallet(page);
+    const stub = await installCreateOrderApi(page, { triggerPending: true });
 
     await page.goto("/#?section=create");
-    await expect(page.getByRole("heading", { name: "需要钱包登录" })).toBeVisible();
-    await expect(page.getByTestId("create-order-page")).toHaveCount(0);
-    expect(stub.counters.draftCreates).toBe(0);
+    await page.getByTestId(`create-order-zhixu-${zhixuId}`).click();
+    await fillOrderForm(page);
+    await page.getByTestId("create-order-save-draft").click();
+    await expect(page.getByTestId("create-order-participants")).toBeVisible();
+    await page.getByTestId("create-order-register").click();
+
+    await expect(page.getByTestId("create-order-register-status")).toContainText("等待链上确认");
+    await expect(page.getByText("订单已创建", { exact: true })).toHaveCount(0);
+    await expect(page.getByTestId("create-order-page")).toBeVisible();
+    expect(stub.counters.triggers).toBe(1);
   });
 });
 

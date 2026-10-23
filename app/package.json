@@ -11,7 +11,7 @@
     "preview": "vite preview",
     "test": "tsx --test \"src/**/*.test.ts\"",
     "test:full-mode-gate": "tsx --test src/testing/orderAppFullModeGate.test.ts",
-    "test:e2e": "playwright test e2e/order-app.smoke.spec.ts e2e/evidence-proof.spec.ts e2e/order-app.decoration.spec.ts e2e/order-app.registration.spec.ts",
+    "test:e2e": "playwright test e2e/order-app.smoke.spec.ts e2e/evidence-proof.spec.ts e2e/order-app.decoration.spec.ts e2e/order-app.registration.spec.ts e2e/order-app.create-order.spec.ts",
     "test:e2e:api-stub": "UVP_ORDER_APP_E2E_PROFILE=api-stub UVP_ORDER_APP_E2E_PORT=4184 playwright test e2e/order-app.readiness.spec.ts e2e/order-app.invite.spec.ts",
     "test:e2e:fail-closed": "UVP_ORDER_APP_E2E_PROFILE=fail-closed UVP_ORDER_APP_E2E_PORT=4186 playwright test e2e/order-app.fail-closed.spec.ts",
     "test:e2e:full": "UVP_ORDER_APP_E2E_PROFILE=full playwright test e2e/order-app.full.spec.ts --project=chromium",

@@ -301,7 +301,7 @@ export function RegistrationPage(props: RegistrationPageProps) {
       });
       setEntityLookup({ status: "ready", registration });
       setEntityNotice(
-        `已登记（未核验）：登记号 ${registration.registrationId}。本次只写入链下登记档案，未写链、未生成身份绑定。`,
+        `已登记（未核验）：档案编号 ${registration.registrationId}。本次只写入链下登记档案，未写链、未生成身份绑定。`,
       );
       setEntitySubmitState({ status: "idle" });
     } catch (error) {
@@ -430,7 +430,7 @@ export function RegistrationPage(props: RegistrationPageProps) {
         <div className="registration-registered" data-testid="entity-registration-status">
           <strong>已登记（未核验）</strong>
           <dl className="registration-facts">
-            <Fact label="登记号" value={entityLookup.registration.registrationId} mono />
+            <Fact label="档案编号" value={entityLookup.registration.registrationId} mono />
             <Fact label="状态" value={entityRegistrationStatusLabel(entityLookup.registration.status)} />
             <Fact label="企业名称" value={entityLookup.registration.legalName} />
             <Fact label="注册号" value={entityLookup.registration.registrationNumber} />

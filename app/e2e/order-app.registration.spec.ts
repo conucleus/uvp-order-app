@@ -71,9 +71,9 @@ test.describe("Order App registration wiring", () => {
     await expect(status.getByText("91310000MA1K000000")).toBeVisible();
     await expect(status.getByText("自助登记（未核验）")).toBeVisible();
     await expect(page.getByText("服务端事实：verified = false、chainWritten = false。人工核验与链上身份绑定均未发生。")).toBeVisible();
-    await expect(page.getByText("已登记（未核验）：登记号 registration_e2e_001。本次只写入链下登记档案，未写链、未生成身份绑定。")).toBeVisible();
+    await expect(page.getByText("已登记（未核验）：档案编号 registration_e2e_001。本次只写入链下登记档案，未写链、未生成身份绑定。")).toBeVisible();
 
-    // 重复提交走更新（同一登记号，不追加第二条）。
+    // 重复提交走更新（同一档案编号，不追加第二条）。
     await page.getByLabel("企业名称").fill("中亚二手车出口（更名）有限公司");
     await page.getByRole("button", { name: "提交注册" }).click();
     await expect(status.getByText("中亚二手车出口（更名）有限公司")).toBeVisible();
