@@ -297,8 +297,9 @@ function collectHexCandidates(
     }
     return out;
   }
-  for (const item of Object.values(value as Readonly<Record<string, unknown>>)) {
-    collectHexCandidates(item, depth + 1, seen, out);
+  const record = value as Readonly<Record<string, unknown>>;
+  for (const key of Object.getOwnPropertyNames(record)) {
+    collectHexCandidates(record[key], depth + 1, seen, out);
   }
   return out;
 }

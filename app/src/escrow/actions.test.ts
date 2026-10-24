@@ -1,7 +1,9 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
+import { encodeErrorResult } from "viem";
+import { STAGE_ESCROW_ABI } from "./abi.js";
 import { EscrowActionError, buildStageEscrowCall } from "./actions.js";
-import { escrowRevertMessage } from "./wallet.js";
+import { escrowRevertMessage, findDecodedRevert } from "./wallet.js";
 
 const trancheId = `0x${"22".repeat(32)}`;
 const wallet = "0x1111111111111111111111111111111111111111";
@@ -40,6 +42,16 @@ describe("escrow action parameters and revert copy", () => {
     assert.match(
       escrowRevertMessage("InvalidSettlement", [200000n, 800000n, 1000000n]),
       /0\.200000 \+ 履约方 0\.800000 必须等于冻款金额 1\.000000/u
+    );
+    // 钱包把 revert 藏在嵌套 error.data 里（MetaMask/viem 常见形状）时仍能定位。
+    const nestedRevert = encodeErrorResult({
+      abi: STAGE_ESCROW_ABI,
+      errorName: "InvalidTrancheState",
+      args: [trancheId as `0x${string}`, 5]
+    });
+    assert.equal(
+      findDecodedRevert({ code: -32603, data: { originalError: { data: nestedRevert } } })?.name,
+      "InvalidTrancheState"
     );
   });
 });
