@@ -1,6 +1,8 @@
-/* 阶段托管 e2e（api-stub，单条聚焦）：订单三个阶段的 tranche 列表渲染
- * state/金额，切换阶段后按钱包角色显示 StageEscrow 动作按钮（不实际发
- * 交易）。桩只模拟 chain-services product-escrow 的读路由与订单投影。
+/* 阶段托管 e2e（api-stub，单条聚焦）：订单四个阶段的 tranche 列表渲染
+ * state/金额，切换阶段后按钱包角色与 Started 矩阵显示 StageEscrow 动作
+ * 按钮（不实际发交易；payee 仅在 frozen 开始履约，verifier 仅在 started
+ * 验收，挂起只有双方合意结算）。桩只模拟 chain-services product-escrow
+ * 的读路由与订单投影。
  * 运行需注入托管配置（playwright config 的 api-stub 命令不含这些变量）：
  * VITE_UVP_ESCROW_ADDRESS=0x55..55 VITE_UVP_ESCROW_CHAIN_ID=31337 \
  * UVP_ORDER_APP_E2E_PROFILE=api-stub UVP_ORDER_APP_E2E_PORT=4187 \
@@ -13,7 +15,8 @@ const orderId = `0x${"11".repeat(32)}`;
 const stage = {
   purchase: `0x${"a1".repeat(32)}`,
   inspection: `0x${"a2".repeat(32)}`,
-  logistics: `0x${"a3".repeat(32)}`
+  logistics: `0x${"a3".repeat(32)}`,
+  handover: `0x${"a4".repeat(32)}`
 } as const;
 const otherParty = "0x2222222222222222222222222222222222222222";
 const verifierWallet = "0x3333333333333333333333333333333333333333";
@@ -84,8 +87,7 @@ const tranches: readonly StubTranche[] = [
     payee: verifierWallet,
     verifier: participantWallet,
     amount: "2000000",
-    state: "approved",
-    approvedAt: "2026-10-20T08:00:00.000Z"
+    state: "started"
   }),
   tranche({
     stageId: stage.logistics,
@@ -94,6 +96,15 @@ const tranches: readonly StubTranche[] = [
     payee: participantWallet,
     verifier: verifierWallet,
     amount: "3000000",
+    state: "frozen"
+  }),
+  tranche({
+    stageId: stage.handover,
+    trancheId: `0x${"b4".repeat(32)}`,
+    payer: otherParty,
+    payee: participantWallet,
+    verifier: verifierWallet,
+    amount: "4000000",
     state: "suspended",
     suspendedAt: "2026-10-21T08:00:00.000Z"
   })
@@ -102,7 +113,8 @@ const tranches: readonly StubTranche[] = [
 const orderStages = [
   { stageId: stage.purchase, index: 0, name: "采购阶段", evidence: [], ownerRole: "采购", status: "active" },
   { stageId: stage.inspection, index: 1, name: "验车阶段", evidence: [], ownerRole: "验收", status: "pending" },
-  { stageId: stage.logistics, index: 2, name: "物流阶段", evidence: [], ownerRole: "物流", status: "pending" }
+  { stageId: stage.logistics, index: 2, name: "物流阶段", evidence: [], ownerRole: "物流", status: "pending" },
+  { stageId: stage.handover, index: 3, name: "交付阶段", evidence: [], ownerRole: "交付", status: "pending" }
 ];
 
 const order = {
@@ -218,24 +230,36 @@ test("renders tranche states and role-scoped escrow actions", async ({ page }) =
   await expect(page.getByTestId("escrow-tranche-list")).toBeVisible();
   await expect(page.getByTestId("escrow-tranche-0")).toContainText("采购阶段");
   await expect(page.getByTestId("escrow-tranche-0")).toContainText("已冻款");
-  await expect(page.getByTestId("escrow-tranche-1")).toContainText("观察期");
-  await expect(page.getByTestId("escrow-tranche-2")).toContainText("已挂起");
+  await expect(page.getByTestId("escrow-tranche-1")).toContainText("已开始履约");
   await expect(page.getByTestId("escrow-tranche-1")).toContainText("2.000000 USDT");
+  await expect(page.getByTestId("escrow-tranche-2")).toContainText("已冻款");
+  await expect(page.getByTestId("escrow-tranche-3")).toContainText("交付阶段");
+  await expect(page.getByTestId("escrow-tranche-3")).toContainText("已挂起");
 
-  await expect(page.getByTestId("escrow-action-payNow")).toBeVisible();
+  // 付款方 frozen：只能退冻/挂起，payNow 仅在 started/approved 后出现。
+  await expect(page.getByTestId("escrow-action-payNow")).toHaveCount(0);
   await expect(page.getByTestId("escrow-action-refundByPayer")).toBeVisible();
   await expect(page.getByTestId("escrow-action-suspend")).toBeVisible();
-  await expect(page.getByTestId("escrow-action-approve")).toHaveCount(0);
 
+  // 验收者 started：approve/reject 不再在 frozen/approved 出现。
   await page.getByTestId("escrow-tranche-1").click();
   await expect(page.getByTestId("escrow-action-approve")).toBeVisible();
   await expect(page.getByTestId("escrow-action-reject")).toBeVisible();
-  await expect(page.getByTestId("escrow-action-payNow")).toHaveCount(0);
 
+  // 履约方 frozen：开始履约 + 退款/挂起；合意结算尚未开放。
   await page.getByTestId("escrow-tranche-2").click();
+  await expect(page.getByTestId("escrow-action-markStarted")).toBeVisible();
   await expect(page.getByTestId("escrow-action-refundByPayee")).toBeVisible();
+  await expect(page.getByTestId("escrow-action-suspend")).toBeVisible();
+  await expect(page.getByTestId("escrow-action-consentSettlement")).toHaveCount(0);
+  await expect(page.getByTestId("escrow-settle-payer")).toHaveCount(0);
+
+  // 履约方 suspended：只剩双方合意结算。
+  await page.getByTestId("escrow-tranche-3").click();
   await expect(page.getByTestId("escrow-settle-payer")).toBeVisible();
   await expect(page.getByTestId("escrow-settle-payee")).toBeVisible();
   await expect(page.getByTestId("escrow-action-consentSettlement")).toBeVisible();
-  await expect(page.getByTestId("escrow-action-refundByPayer")).toHaveCount(0);
+  await expect(page.getByTestId("escrow-action-refundByPayee")).toHaveCount(0);
+  await expect(page.getByTestId("escrow-action-markStarted")).toHaveCount(0);
+  await expect(page.getByTestId("escrow-action-suspend")).toHaveCount(0);
 });
