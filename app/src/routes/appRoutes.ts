@@ -1,10 +1,12 @@
-export type OrderAppSection = "tasks" | "orders" | "create" | "proof" | "registration";
+export type OrderAppSection = "tasks" | "orders" | "create" | "proof" | "registration" | "requirements";
 
 export interface OrderAppRoute {
   readonly section: OrderAppSection;
   readonly taskId?: string | undefined;
   readonly orderId?: string | undefined;
   readonly inviteId?: string | undefined;
+  /** V1 订单要求包入口：草稿编号（要求包以草稿为锚，链上只放 hash）。 */
+  readonly draftId?: string | undefined;
 }
 
 /** 邀请入口：?invite=<inviteId>&inviteToken=<一次性令牌> 只在进入应用时读取一次。 */
@@ -22,7 +24,7 @@ export interface DecorationEntry {
   readonly zhixuId: string;
 }
 
-const sections = new Set<OrderAppSection>(["tasks", "orders", "create", "proof", "registration"]);
+const sections = new Set<OrderAppSection>(["tasks", "orders", "create", "proof", "registration", "requirements"]);
 const inviteSearchKeys = ["invite", "inviteToken"] as const;
 
 /**
@@ -41,7 +43,8 @@ export function readOrderAppRoute(hash = window.location.hash): OrderAppRoute {
     section: section && sections.has(section as OrderAppSection) ? section as OrderAppSection : "tasks",
     taskId: params.get("task") ?? undefined,
     orderId: params.get("order") ?? undefined,
-    inviteId: params.get("invite") ?? undefined
+    inviteId: params.get("invite") ?? undefined,
+    draftId: params.get("draftId") ?? undefined
   };
 }
 
@@ -55,6 +58,9 @@ export function routeHash(route: OrderAppRoute): string {
   }
   if (route.inviteId) {
     params.set("invite", route.inviteId);
+  }
+  if (route.draftId) {
+    params.set("draftId", route.draftId);
   }
   return `#${params.toString()}`;
 }

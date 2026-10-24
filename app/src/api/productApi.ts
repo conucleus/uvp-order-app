@@ -1,6 +1,9 @@
 import {
   type ChainProofRowDTO,
   type EvidenceProofDTO,
+  type OrderRequirementsBundleDTO,
+  type OrderRequirementsConsentDTO,
+  type OrderRequirementsTriggerAnchorDTO,
   type PrepareProductTaskSubmitInput,
   type ProductExecutorPatchMode,
   type ProductOrderDTO,
@@ -181,6 +184,38 @@ export interface ProductOrderDraftDetailDTO {
 }
 
 /**
+ * 订单要求包读取结果：bundle 本身是 product-dto 单源，draft/editable/
+ * triggerAnchor 是同一次服务端读取附带的草稿与触发锚字段。
+ */
+export interface OrderRequirementsReadResult {
+  readonly bundle: OrderRequirementsBundleDTO;
+  readonly draft: ProductOrderDraftDTO;
+  /** 服务端下发的合意签名消息（格式单源在 product-dto，客户端不自拼）。 */
+  readonly consentMessage: string;
+  /** 当前草稿是否仍允许改要求包（读面展示旗标，不改写）。 */
+  readonly editable: boolean;
+  readonly triggerAnchor?: OrderRequirementsTriggerAnchorDTO | undefined;
+}
+
+/**
+ * 相对方合意：requirementsHash 必须取自服务端读面，客户端不自算/不自报；
+ * 签名覆盖 (draftId, requirementsHash)，密钥/凭据不进请求。
+ */
+export interface SubmitOrderRequirementsConsentInput {
+  readonly requirementsHash: string;
+  readonly signature: string;
+  /** local 运行时的自报钱包声明；非 local 以会话锚定地址为准。 */
+  readonly walletAddress?: string | undefined;
+}
+
+/** 合意回执：服务端落库后的合意记录、当前合意集合与触发锚。 */
+export interface OrderRequirementsConsentResultDTO {
+  readonly consent: OrderRequirementsConsentDTO;
+  readonly consents: readonly OrderRequirementsConsentDTO[];
+  readonly triggerAnchor: OrderRequirementsTriggerAnchorDTO;
+}
+
+/**
  * prepare 结果：签名对象 + 本次触发身份。
  * `stateMachineAddress` 从 trigger 记录单独取出，供签名前与签名域交叉核对
  * （不信任同一响应里的 humanSummary/typedData 自洽）。
@@ -228,6 +263,13 @@ export interface ProductApiClient {
   updateOrderDraft(draftId: string, input: UpdateOrderDraftInput): Promise<ProductOrderDraftDTO>;
   /** 草稿回读：内容 + 参与方确认状态（触发前必读一次，避免用本地陈旧状态判定）。 */
   getOrderDraft(draftId: string): Promise<ProductOrderDraftDetailDTO>;
+  /** 读取草稿的要求包（句柄集合 + 预设引用 + 服务端算出的 requirementsHash）。 */
+  getOrderRequirementsBundle(draftId: string, input?: ParticipantQueryInput): Promise<OrderRequirementsReadResult>;
+  /** 相对方对当前 requirementsHash 显式签名合意；失败按服务端错误码返回。 */
+  consentOrderRequirements(
+    draftId: string,
+    input: SubmitOrderRequirementsConsentInput
+  ): Promise<OrderRequirementsConsentResultDTO>;
   listOrderDraftParticipants(draftId: string): Promise<readonly DraftParticipantDTO[]>;
   /** 生成参与方邀请链接；明文 token 只在本次响应出现一次。 */
   createOrderDraftInvite(draftId: string, input: CreateOrderInviteInput): Promise<ProductOrderInviteCreationDTO>;
@@ -612,6 +654,7 @@ export function createProductApiClient(options: ProductApiClientOptions = {}): P
 
 /** 与 zhixu-store 工作台同一超时口径：任一请求挂起不得让页面永久 loading。 */
 const DEFAULT_FETCH_TIMEOUT_MS = 6000;
+const HASH_PATTERN = /^0x[0-9a-fA-F]{64}$/u;
 // 证据上传携带 base64 载荷（上限 10MB），超时单独放宽。
 const DEFAULT_UPLOAD_TIMEOUT_MS = 60_000;
 
@@ -732,6 +775,74 @@ class BrowserProductApiClient implements ProductApiClient {
       throw new ProductApiError(0, pathname, "草稿详情响应缺少参与方清单");
     }
     return { draft, participants: response.participants as readonly DraftParticipantDTO[] };
+  }
+
+  async getOrderRequirementsBundle(
+    draftId: string,
+    input: ParticipantQueryInput = {}
+  ): Promise<OrderRequirementsReadResult> {
+    const pathname = participantPath(
+      `/product/order-drafts/${encodeURIComponent(draftId)}/requirements`,
+      input.walletAddress
+    );
+    const response = await this.getJson<unknown>(pathname);
+    if (!isRecord(response) || !isRecord(response.bundle)) {
+      throw new ProductApiError(0, pathname, "要求包响应缺少 bundle");
+    }
+    const bundle = response.bundle;
+    if (typeof bundle.requirementsHash !== "string" || !HASH_PATTERN.test(bundle.requirementsHash)) {
+      throw new ProductApiError(0, pathname, "要求包响应缺少合法的 requirementsHash");
+    }
+    if (typeof bundle.schemaVersion !== "string" || bundle.schemaVersion.trim().length === 0) {
+      throw new ProductApiError(0, pathname, "要求包响应缺少 schemaVersion");
+    }
+    if (typeof bundle.declaredBy !== "string" || bundle.declaredBy.trim().length === 0) {
+      throw new ProductApiError(0, pathname, "要求包响应缺少 declaredBy");
+    }
+    if (!Array.isArray(bundle.requirements) || !Array.isArray(bundle.presets)) {
+      throw new ProductApiError(0, pathname, "要求包响应缺少 requirements/presets");
+    }
+    if (typeof response.consentMessage !== "string" || response.consentMessage.trim().length === 0) {
+      throw new ProductApiError(0, pathname, "要求包响应缺少合意签名消息");
+    }
+    return {
+      bundle: bundle as unknown as OrderRequirementsBundleDTO,
+      draft: requiredDraft(response, pathname),
+      consentMessage: response.consentMessage,
+      editable: response.editable === true,
+      ...(isRecord(response.triggerAnchor)
+        ? { triggerAnchor: response.triggerAnchor as unknown as OrderRequirementsTriggerAnchorDTO }
+        : {})
+    };
+  }
+
+  async consentOrderRequirements(
+    draftId: string,
+    input: SubmitOrderRequirementsConsentInput
+  ): Promise<OrderRequirementsConsentResultDTO> {
+    const pathname = `/product/order-drafts/${encodeURIComponent(draftId)}/requirements/consents`;
+    const response = await this.postJson<unknown>(pathname, input);
+    if (!isRecord(response) || !isRecord(response.consent) || !Array.isArray(response.consents)) {
+      throw new ProductApiError(0, pathname, "合意回执缺少 consent/consents");
+    }
+    const consent = response.consent;
+    for (const field of ["walletAddress", "requirementsHash", "signature", "signedAt"] as const) {
+      if (typeof consent[field] !== "string" || consent[field].trim().length === 0) {
+        throw new ProductApiError(0, pathname, `合意回执缺少 ${field}`);
+      }
+    }
+    const returnedRequirementsHash = consent.requirementsHash as string;
+    if (returnedRequirementsHash.toLowerCase() !== input.requirementsHash.toLowerCase()) {
+      throw new ProductApiError(0, pathname, "合意回执的 requirementsHash 与当前要求包不一致");
+    }
+    if (!isRecord(response.triggerAnchor)) {
+      throw new ProductApiError(0, pathname, "合意回执缺少 triggerAnchor");
+    }
+    return {
+      consent: consent as unknown as OrderRequirementsConsentDTO,
+      consents: response.consents as readonly OrderRequirementsConsentDTO[],
+      triggerAnchor: response.triggerAnchor as unknown as OrderRequirementsTriggerAnchorDTO
+    };
   }
 
   async listOrderDraftParticipants(draftId: string): Promise<readonly DraftParticipantDTO[]> {

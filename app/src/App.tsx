@@ -33,6 +33,7 @@ import { decorateTaskEvidenceSpec } from "./decoration/decorationSupport";
 import { useOrderAppDecorations } from "./decoration/useZhixuDecorations";
 import { DecorationPage } from "./reader/DecorationPage";
 import { RegistrationPage } from "./registration";
+import { RequirementsPage } from "./requirements";
 import {
   clearDecorationSearchParam,
   clearInviteSearchParams,
@@ -114,6 +115,7 @@ function AppShell({ api }: { readonly api: ProductApiClient }) {
   // 先恢复再请求——非 local 部署没有会话锚定身份的请求一律 401。
   const [sessionRestored] = useState(() => api.restoreSessionToken(readPersistedWalletSessionToken()));
   const [route, setRoute] = useState<OrderAppRoute>(() => readOrderAppRoute());
+  const requirementsSection = route.section === "requirements";
   // Reader 装修入口（?decoration=<zhixuId>）：只读展示，不要求钱包会话；
   // 离开时清搜索参数，刷新后回到参与者主界面。
   const [decorationEntry, setDecorationEntry] = useState<DecorationEntry | undefined>(() => readDecorationEntryFromSearch());
@@ -379,6 +381,39 @@ function AppShell({ api }: { readonly api: ProductApiClient }) {
             })
           }
         />
+      ) : route.section === "requirements" ? (
+        loadState.status === "unauthenticated" ? (
+          <WalletLoginPanel
+            hasWallet={actions.hasInjectedWallet()}
+            onLogin={handleWalletLogin}
+            onOpenRegistration={() => navigate({ section: "registration" })}
+          />
+        ) : (
+          <RequirementsPage
+            api={api}
+            actions={actions}
+            draftId={route.draftId}
+            taskId={route.taskId}
+            walletAddress={data?.participant.walletAddress ?? session.walletAddress}
+            onBack={() =>
+              navigate({
+                section: "tasks",
+                taskId: selectedTask?.taskId,
+                orderId: selectedOrder?.orderId
+              })
+            }
+            onOpenDraft={(draftId) =>
+              navigate({
+                section: "requirements",
+                draftId,
+                taskId: route.taskId,
+                orderId: selectedOrder?.orderId
+              })
+            }
+            onSessionExpired={handleSessionExpired}
+            onSubmitted={() => handleRefresh({ silent: true })}
+          />
+        )
       ) : route.section === "create" && loadState.status !== "unauthenticated" ? (
         // 开单：已发布秩序目录 + 装修 + 触发内容 + 参与方邀请 + 本人确认创建。
         // 无会话时落到下方登录入口：草稿/邀请/准备都要求会话锚定身份，
@@ -472,6 +507,19 @@ function AppShell({ api }: { readonly api: ProductApiClient }) {
               label="订单"
               icon={<FolderKanban />}
               onClick={() => navigate({ section: "orders", taskId: selectedTask?.taskId, orderId: selectedOrder?.orderId })}
+            />
+            <SectionButton
+              active={requirementsSection}
+              label="要求"
+              icon={<FileCheck2 />}
+              onClick={() =>
+                navigate({
+                  section: "requirements",
+                  draftId: route.draftId,
+                  taskId: selectedTask?.taskId,
+                  orderId: selectedOrder?.orderId
+                })
+              }
             />
             <SectionButton
               active={route.section === "create"}
