@@ -1,5 +1,5 @@
-// 阶段托管模块导出面：通用 EscrowPage 与其读模型/动作构造（测试直接按文件
-// 导入，避免把内部钱包边界扩大成公共 API）。
+// 阶段托管模块导出面：通用 EscrowPage 与其读模型/动作构造（headless 实现已
+// 在 @uvp-eth/order-kernel，本文件保留 app 的既有导出面）。
 
 export { EscrowPage, type EscrowPageProps } from "./EscrowPage";
 export {
@@ -9,13 +9,13 @@ export {
   type EscrowActionInput,
   type EscrowActionName,
   type StageEscrowCall
-} from "./actions";
+} from "@uvp-eth/order-kernel/escrow";
 export {
   escrowActionFailureCopy,
   escrowRevertMessage,
   EscrowActionError
-} from "./wallet";
-export { readEscrowAllocations, type EscrowAllocationsView } from "./allocations";
+} from "@uvp-eth/order-kernel/escrow";
+export { readEscrowAllocations, type EscrowAllocationsView } from "@uvp-eth/order-kernel/escrow";
 export {
   escrowDeadlineView,
   escrowStateLabel,
@@ -23,11 +23,11 @@ export {
   formatFeeBps,
   formatRemaining,
   formatTokenAmount
-} from "./format";
-export { parseOrderEscrowList, parseOrderEscrowTranche } from "./read";
+} from "@uvp-eth/order-kernel/escrow";
+export { parseOrderEscrowList, parseOrderEscrowTranche } from "@uvp-eth/order-kernel/escrow";
 export { resolveEscrowConfig, readRuntimeEscrowConfig } from "./config";
 export type {
   EscrowTrancheDTO,
   EscrowTrancheState,
   OrderEscrowReadResult
-} from "./types";
+} from "@uvp-eth/order-kernel/escrow";

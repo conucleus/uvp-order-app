@@ -9,18 +9,28 @@ import {
   STAGE_RESOURCE_PATCH_DOMAIN_VERSION,
   STAGE_RESOURCE_PATCH_PRIMARY_TYPE,
   requestProductSubmitSignature,
-  type Eip1193Provider,
   type ProductSubmitTypedData
 } from "@uvp-eth/executor-kit/participant";
 import {
   isUserRejectedRequestError,
   validateTypedDataForSigning,
 } from "@uvp-eth/protocol-bindings";
+import {
+  getBrowserEthereumProvider,
+  type Eip1193Provider
+} from "@uvp-eth/order-kernel/wallet/provider";
+import {
+  UnsupportedWalletTargetError,
+  walletConnectorFor,
+  type GenericTypedData,
+  type TypedDataDomainExpectation,
+  type WalletConnector,
+  type WalletTarget
+} from "@uvp-eth/order-kernel/wallet/types";
+import { InjectedWalletError } from "@uvp-eth/order-kernel/wallet/errors";
 import { connectWalletAddress, personalSignWithProvider } from "../shared/chain/wallet/connect";
 import { ChainWalletError } from "../shared/chain/wallet/errors";
 import type { WalletErrorCode } from "../shared/chain/wallet/errors";
-import { getBrowserEthereumProvider, walletConnectorFor } from "../shared/chain/wallet/provider";
-import { UnsupportedWalletTargetError } from "../shared/chain/wallet/provider";
 import {
   assertTypedDataEnvelopeMatches,
   ensureCurrentChainMatchesDomain,
@@ -29,22 +39,8 @@ import {
 import type { TypedDataMismatchTexts } from "../shared/chain/wallet/typed-data";
 
 export type { Eip1193Provider, ProductSubmitTypedData };
-export type WalletTarget = "evm" | "solana";
-
-export {
-  /**
-   * 目标链轨保留但未实现：fail-closed 抛错。类身份已上收 chain 轨单源
-   * （两端 instanceof 同类），此处按原路径 re-export。
-   */
-  UnsupportedWalletTargetError
-};
-
-export type GenericTypedData = Readonly<{
-  readonly domain: Readonly<Record<string, unknown>>;
-  readonly types: Readonly<Record<string, readonly { readonly name: string; readonly type: string }[]>>;
-  readonly primaryType: string;
-  readonly message: Readonly<Record<string, unknown>>;
-}>;
+export type { GenericTypedData, TypedDataDomainExpectation, WalletConnector, WalletTarget };
+export { UnsupportedWalletTargetError, InjectedWalletError };
 
 declare global {
   interface Window {
@@ -82,49 +78,6 @@ const envelopeExpectations: Readonly<Record<string, TypedDataEnvelopeExpectation
     signerField: "selector"
   }
 };
-
-export class InjectedWalletError extends Error {
-  override readonly name = "InjectedWalletError";
-
-  constructor(
-    readonly code:
-      | "missing_wallet"
-      | "wallet_rejected"
-      | "wallet_signature_failed"
-      | "typed_data_mismatch",
-    message: string
-  ) {
-    super(message);
-  }
-}
-
-export interface WalletConnector {
-  readonly target: WalletTarget;
-  signProductSubmit(input: {
-    readonly typedData: ProductSubmitTypedData;
-    readonly walletAddress: string;
-    readonly provider?: Eip1193Provider;
-    readonly expected?: TypedDataDomainExpectation | undefined;
-    readonly preparedSubmitters?: readonly (string | undefined)[] | undefined;
-  }): Promise<`0x${string}`>;
-  signTypedData(input: {
-    readonly typedData: GenericTypedData;
-    readonly walletAddress: string;
-    readonly provider?: Eip1193Provider;
-    readonly expected?: TypedDataDomainExpectation | undefined;
-    readonly preparedSubmitters?: readonly (string | undefined)[] | undefined;
-  }): Promise<`0x${string}`>;
-}
-
-/**
- * 域校验预期：chainId/verifyingContract 是部署参数（随 prepare 的 typedData
- * 下发），调用方有独立来源（如任务投影的 stateMachineAddress）时提供，
- * 签名前严格比对，防止被攻陷 BFF 让参与者对无效域签名。
- */
-export interface TypedDataDomainExpectation {
-  readonly chainId?: number | undefined;
-  readonly verifyingContract?: string | undefined;
-}
 
 /**
  * 本端钱包内核 = chain 轨共享面 + protocol-bindings 端口注入：判定

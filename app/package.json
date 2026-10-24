@@ -21,6 +21,7 @@
   },
   "dependencies": {
     "@uvp-eth/executor-kit": "workspace:*",
+    "@uvp-eth/order-kernel": "workspace:*",
     "@uvp-eth/product-dto": "workspace:*",
     "@uvp-eth/protocol-bindings": "workspace:*",
     "lucide-react": "^1.7.0",

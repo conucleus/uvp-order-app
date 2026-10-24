@@ -1,84 +1,41 @@
-import type { ParticipantQueryInput } from "../api/productApi";
+// 参与者会话纯逻辑已迁入 kernel；本文件保留 app 的构建期 env、地址栏与
+// sessionStorage 适配，保持既有导入面与开发运行时覆写行为。
 
-export interface ParticipantSession {
-  readonly walletAddress?: string;
-  readonly walletSource?: "env" | "override";
-}
+import {
+  readParticipantSession as readKernelParticipantSession,
+  walletOverrideAllowed as kernelWalletOverrideAllowed,
+  type ParticipantSession,
+  type ParticipantSessionReadInput
+} from "@uvp-eth/order-kernel/session/participant";
 
-export interface ParticipantSessionReadInput {
-  readonly env?: Readonly<Record<string, string | boolean | undefined>>;
-  readonly locationSearch?: string;
-  readonly sessionStorage?: Pick<Storage, "getItem" | "removeItem" | "setItem">;
-}
+export {
+  participantQueryFromSession,
+  shortWallet
+} from "@uvp-eth/order-kernel/session/participant";
+export type {
+  ParticipantSession,
+  ParticipantSessionReadInput,
+  SessionStorageLike
+} from "@uvp-eth/order-kernel/session/participant";
 
 export const walletOverrideSessionKey = "uvp-order-app:participant-wallet-override";
 const walletOverrideQueryKeys = ["participantWallet", "uvpParticipantWallet", "uvpOrderAppWallet"];
-const allowedOverrideRuntimes = new Set(["local", "localhost", "development", "dev"]);
 
 export function readParticipantSession(input: ParticipantSessionReadInput = {}): ParticipantSession {
-  const env = input.env ?? buildTimeEnv();
-  const overrideWallet = readWalletAddressOverride(input, env);
-  if (overrideWallet) {
-    return { walletAddress: overrideWallet, walletSource: "override" };
-  }
-  const walletAddress = readWalletAddressEnv(env);
-  return walletAddress ? { walletAddress, walletSource: "env" } : {};
+  return readKernelParticipantSession({
+    ...input,
+    walletOverrideSessionKey: input.walletOverrideSessionKey ?? walletOverrideSessionKey,
+    walletOverrideQueryKeys: input.walletOverrideQueryKeys ?? walletOverrideQueryKeys,
+    env: input.env ?? buildTimeEnv(),
+    locationSearch: input.locationSearch ?? readBrowserLocationSearch(),
+    sessionStorage: input.sessionStorage ?? readBrowserSessionStorage()
+  });
 }
 
-export function participantQueryFromSession(session: ParticipantSession): ParticipantQueryInput {
-  return session.walletAddress ? { walletAddress: session.walletAddress } : {};
-}
-
-export function shortWallet(walletAddress: string | undefined): string {
-  if (!walletAddress) {
-    return "未绑定钱包";
-  }
-  return `${walletAddress.slice(0, 6)}...${walletAddress.slice(-4)}`;
-}
-
-function readWalletAddressEnv(env: Readonly<Record<string, string | boolean | undefined>> | undefined): string | undefined {
-  return envString(env, "VITE_UVP_ORDER_APP_WALLET_ADDRESS")?.trim() || undefined;
-}
-
-function readWalletAddressOverride(
-  input: ParticipantSessionReadInput,
-  env: Readonly<Record<string, string | boolean | undefined>> | undefined
-): string | undefined {
-  if (!walletOverrideAllowed(env)) {
-    return undefined;
-  }
-  const sessionStorage = input.sessionStorage ?? readBrowserSessionStorage();
-  const locationSearch = input.locationSearch ?? readBrowserLocationSearch() ?? "";
-  if (!sessionStorage) {
-    return undefined;
-  }
-
-  const params = new URLSearchParams(locationSearch.startsWith("?") ? locationSearch.slice(1) : locationSearch);
-  for (const key of walletOverrideQueryKeys) {
-    if (!params.has(key)) {
-      continue;
-    }
-    const value = cleanWalletAddress(params.get(key));
-    if (!value) {
-      sessionStorage.removeItem(walletOverrideSessionKey);
-      return undefined;
-    }
-    sessionStorage.setItem(walletOverrideSessionKey, value);
-    return value;
-  }
-
-  return cleanWalletAddress(sessionStorage.getItem(walletOverrideSessionKey));
-}
-
-export function walletOverrideAllowed(env: Readonly<Record<string, string | boolean | undefined>> | undefined = buildTimeEnv()): boolean {
-  const runtime = (
-    envString(env, "VITE_UVP_RUNTIME_ENV") ??
-    envString(env, "MODE")
-  )?.trim().toLowerCase();
-  if (runtime) {
-    return allowedOverrideRuntimes.has(runtime);
-  }
-  return env?.DEV === true;
+export function walletOverrideAllowed(
+  env: Readonly<Record<string, string | boolean | undefined>> | undefined = buildTimeEnv()
+): boolean {
+  return kernelWalletOverrideAllowed(env);
 }
 
 // 构建期注入的静态值集合：每个键都经 import.meta.env.X 静态成员访问
@@ -91,22 +48,6 @@ function buildTimeEnv(): Readonly<Record<string, string | boolean | undefined>> 
     MODE: import.meta.env?.MODE,
     DEV: import.meta.env?.DEV
   };
-}
-
-function envString(
-  env: Readonly<Record<string, string | boolean | undefined>> | undefined,
-  key: string
-): string | undefined {
-  const value = env?.[key];
-  return typeof value === "string" ? value : undefined;
-}
-
-function cleanWalletAddress(value: string | null | undefined): string | undefined {
-  const trimmed = value?.trim();
-  if (!trimmed) {
-    return undefined;
-  }
-  return /^0x[0-9a-fA-F]{40}$/u.test(trimmed) ? trimmed : undefined;
 }
 
 function readBrowserLocationSearch(): string | undefined {

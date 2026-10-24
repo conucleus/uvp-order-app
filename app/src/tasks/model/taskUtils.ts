@@ -21,8 +21,6 @@ export function looksLikeHash(value: string): boolean {
   return /^0x[0-9a-fA-F]{64}$/u.test(value.trim());
 }
 
-const HAS_ZONE_DESIGNATOR = /[Zz]$|[+-]\d{2}:?\d{2}$/;
-
 /**
  * 内容寻址引用的客户端判定（URI 组件预检/资源展示共用）。ipfs/ar 是服务端
  * 生产口径的规范前缀；cid:/bafy 是裸 CID 形态。urn: 前缀本身不代表内容
@@ -36,42 +34,9 @@ export function isContentAddressedReference(value: string): boolean {
     trimmed.startsWith("bafy");
 }
 
-/**
- * 任务 deadline 是 UTC 时刻；服务端下发的朴素字符串（无时区符）按浏览器
- * 本地时区解析会让逾期分桶/排序随时区漂移（与 doctor 的 UTC 口径矛盾）。
- * 无时区符一律补 Z 按 UTC 解析；解析不了返回 undefined，由调用方决定兜底。
- */
-export function parseDeadlineUtcMs(value: string): number | undefined {
-  const normalized = value.trim().replace(" ", "T");
-  if (!normalized) {
-    return undefined;
-  }
-  const withZone = HAS_ZONE_DESIGNATOR.test(normalized) ? normalized : `${normalized}Z`;
-  const parsed = Date.parse(withZone);
-  return Number.isFinite(parsed) ? parsed : undefined;
-}
-
-/**
- * 排序用 deadline 毫秒（UTC 解析，同 parseDeadlineUtcMs 口径）：解析不了
- * 排最后。任务排序统一走本函数，deadline 的 localeCompare 字符串序在
- * 混合格式/时区符下会漂移（api 载入、收件箱分组、订单室三处共用）。
- */
-export function deadlineSortMs(deadline: string): number {
-  return parseDeadlineUtcMs(deadline) ?? Number.MAX_SAFE_INTEGER;
-}
-
-/**
- * deadline 展示：解析按 UTC（同 parseDeadlineUtcMs），展示必须带时区标
- * 注——服务端下发的朴素串直显会让 UTC+8 用户把截止时间读晚 8 小时。
- * 解析不了的串原样返回（不臆造时刻）。
- */
-export function formatDeadlineUtc(deadline: string): string {
-  const ms = parseDeadlineUtcMs(deadline);
-  if (ms === undefined) {
-    return deadline;
-  }
-  return `${new Date(ms).toISOString().slice(0, 16).replace("T", " ")} UTC`;
-}
+// deadline 的 UTC 解析/排序/展示已迁入 @uvp-eth/order-kernel；此处保留原
+// 导入路径，避免任务/通知/订单室各自改调用点。
+export { deadlineSortMs, formatDeadlineUtc, parseDeadlineUtcMs } from "@uvp-eth/order-kernel/tasks/deadline";
 
 /**
  * 签名域交叉核对的预期值独立来源：构建期部署配置注入（Vite 内联的静态
