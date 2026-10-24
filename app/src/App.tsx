@@ -8,7 +8,8 @@ import {
   Fingerprint,
   FolderKanban,
   RefreshCw,
-  ShieldCheck
+  ShieldCheck,
+  Wallet
 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { ReactElement } from "react";
@@ -34,6 +35,7 @@ import { useOrderAppDecorations } from "./decoration/useZhixuDecorations";
 import { DecorationPage } from "./reader/DecorationPage";
 import { RegistrationPage } from "./registration";
 import { RequirementsPage } from "./requirements";
+import { EscrowPage } from "./escrow";
 import {
   clearDecorationSearchParam,
   clearInviteSearchParams,
@@ -414,6 +416,39 @@ function AppShell({ api }: { readonly api: ProductApiClient }) {
             onSubmitted={() => handleRefresh({ silent: true })}
           />
         )
+      ) : route.section === "escrow" ? (
+        // 通用阶段托管：读 tranche 投影 + 按钱包角色调用 StageEscrow。
+        // 未登录时落到与 requirements 相同的钱包登录入口（托管读也要求会话）。
+        loadState.status === "unauthenticated" ? (
+          <WalletLoginPanel
+            hasWallet={actions.hasInjectedWallet()}
+            onLogin={handleWalletLogin}
+            onOpenRegistration={() => navigate({ section: "registration" })}
+          />
+        ) : (
+          <EscrowPage
+            api={api}
+            orders={data?.orders ?? []}
+            orderId={route.escrowOrderId}
+            stageId={route.escrowStageId}
+            walletAddress={data?.participant.walletAddress ?? session.walletAddress}
+            onBack={() =>
+              navigate({
+                section: "tasks",
+                taskId: selectedTask?.taskId,
+                orderId: selectedOrder?.orderId
+              })
+            }
+            onSelect={(selection) =>
+              navigate({
+                section: "escrow",
+                escrowOrderId: selection.orderId,
+                escrowStageId: selection.stageId
+              })
+            }
+            onSessionExpired={handleSessionExpired}
+          />
+        )
       ) : route.section === "create" && loadState.status !== "unauthenticated" ? (
         // 开单：已发布秩序目录 + 装修 + 触发内容 + 参与方邀请 + 本人确认创建。
         // 无会话时落到下方登录入口：草稿/邀请/准备都要求会话锚定身份，
@@ -518,6 +553,18 @@ function AppShell({ api }: { readonly api: ProductApiClient }) {
                   draftId: route.draftId,
                   taskId: selectedTask?.taskId,
                   orderId: selectedOrder?.orderId
+                })
+              }
+            />
+            <SectionButton
+              // 托管是整页路由（与 requirements 同层），进入后不渲染本导航条。
+              active={false}
+              label="托管"
+              icon={<Wallet />}
+              onClick={() =>
+                navigate({
+                  section: "escrow",
+                  escrowOrderId: selectedOrder?.orderId
                 })
               }
             />

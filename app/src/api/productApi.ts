@@ -27,6 +27,8 @@ import type {
 } from "../decoration/types";
 import { participantPath } from "./participantPath";
 import { deadlineSortMs } from "../tasks/model/taskUtils";
+import { EscrowReadError, parseOrderEscrowList, parseOrderEscrowTranche } from "../escrow/read";
+import type { OrderEscrowReadResult } from "../escrow/types";
 
 // 写侧契约单源：提交意图、prepare/submit 请求体、
 // 提交回执与证据证明以 @uvp-eth/product-dto 为唯一出处（形状按
@@ -248,6 +250,16 @@ export interface TriggerOrderResultDTO {
 export interface ProductApiClient {
   loadParticipantHome(input?: ParticipantQueryInput): Promise<ProductHomeData>;
   getOrder(orderId: string): Promise<ProductOrderDTO>;
+  /**
+   * 通用阶段托管读面：GET /product/orders/:orderId/escrow[/:stageId]。
+   * 与其它参与者读一致：local 运行时经 walletAddress 自报身份，会话运行时由
+   * x-uvp-store-session 锚定（自报值必须与会话地址一致）。
+   */
+  getOrderEscrow(
+    orderId: string,
+    stageId?: string,
+    input?: ParticipantQueryInput
+  ): Promise<OrderEscrowReadResult>;
   getTask(taskId: string, input?: ParticipantQueryInput): Promise<ProductTaskDTO>;
   /** 秩序详情（reader 装修页/阶段数据源；Product API 公共读，不需要钱包会话）。 */
   getZhixu(zhixuId: string): Promise<ZhixuDetailDTO>;
@@ -723,6 +735,30 @@ class BrowserProductApiClient implements ProductApiClient {
       `/product/orders/${encodeURIComponent(orderId)}`
     );
     return response.order;
+  }
+
+  async getOrderEscrow(
+    orderId: string,
+    stageId?: string,
+    input: ParticipantQueryInput = {}
+  ): Promise<OrderEscrowReadResult> {
+    const pathname = participantPath(
+      `/product/orders/${encodeURIComponent(orderId)}/escrow${
+        stageId === undefined ? "" : `/${encodeURIComponent(stageId)}`
+      }`,
+      input.walletAddress
+    );
+    const response = await this.getJson<unknown>(pathname);
+    try {
+      return stageId === undefined
+        ? parseOrderEscrowList(orderId, response)
+        : parseOrderEscrowTranche(orderId, response);
+    } catch (error) {
+      if (error instanceof EscrowReadError) {
+        throw new ProductApiError(0, pathname, error.message);
+      }
+      throw error;
+    }
   }
 
   async getTask(taskId: string, input: ParticipantQueryInput = {}): Promise<ProductTaskDTO> {

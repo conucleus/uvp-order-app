@@ -1,0 +1,598 @@
+/* 阶段托管面板样式：沿用订单 app 的蓝白控制台 tokens（tokens.css），
+ * 列表 + 详情两栏在窄屏折叠为单栏，金额/地址用等宽字体。 */
+
+.escrow-page {
+  display: grid;
+  gap: 14px;
+  margin-top: 14px;
+  min-width: 0;
+}
+
+.escrow-topbar {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.escrow-topbar .escrow-title {
+  flex: 1 1 280px;
+  min-width: 0;
+}
+
+.escrow-topbar h2 {
+  margin: 4px 0 0;
+  font-size: 24px;
+}
+
+.escrow-topbar p {
+  margin: 6px 0 0;
+  color: var(--app-muted);
+  font-size: 13px;
+}
+
+.escrow-banner {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 12px 14px;
+  border: 1px solid var(--app-line);
+  border-radius: var(--app-radius);
+  background: var(--app-surface);
+}
+
+.escrow-banner svg {
+  flex: 0 0 auto;
+  width: 18px;
+  height: 18px;
+  margin-top: 2px;
+}
+
+.escrow-banner div {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.escrow-banner span {
+  color: var(--app-muted);
+  font-size: 12px;
+}
+
+.escrow-banner-warn {
+  border-color: #fcd9a5;
+  background: var(--app-amber-soft);
+}
+
+.escrow-banner-warn svg {
+  color: var(--app-amber);
+}
+
+.escrow-order-strip {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+  padding: 12px 14px;
+  border: 1px solid var(--app-line);
+  border-radius: var(--app-radius);
+  background: var(--app-surface);
+  box-shadow: var(--app-shadow);
+}
+
+.escrow-order-strip > div {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.escrow-order-strip strong,
+.escrow-order-strip small {
+  overflow-wrap: anywhere;
+}
+
+.escrow-order-strip small {
+  color: var(--app-muted);
+  font-size: 12px;
+}
+
+.escrow-layout {
+  display: grid;
+  grid-template-columns: minmax(270px, 0.82fr) minmax(0, 1.18fr);
+  gap: 16px;
+  align-items: start;
+}
+
+.escrow-list,
+.escrow-detail {
+  min-width: 0;
+  padding: 14px;
+  border: 1px solid var(--app-line);
+  border-radius: var(--app-radius);
+  background: var(--app-surface);
+  box-shadow: var(--app-shadow);
+}
+
+.escrow-list {
+  display: grid;
+  gap: 8px;
+  align-content: start;
+}
+
+.escrow-list > h3 {
+  margin: 0 0 2px;
+  font-size: 15px;
+}
+
+.escrow-tranche {
+  display: grid;
+  gap: 6px;
+  width: 100%;
+  padding: 11px 12px;
+  border: 1px solid var(--app-line);
+  border-radius: var(--app-radius);
+  background: var(--app-surface-soft);
+  color: var(--app-ink);
+  text-align: left;
+}
+
+.escrow-tranche:hover:not(:disabled) {
+  border-color: var(--app-blue);
+}
+
+.escrow-tranche.is-active {
+  border-color: var(--app-blue);
+  background: var(--app-blue-soft);
+}
+
+.escrow-tranche:disabled {
+  cursor: wait;
+  opacity: 0.7;
+}
+
+.escrow-tranche-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.escrow-tranche-amount {
+  font-family: var(--font-mono);
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.escrow-tranche-meta {
+  color: var(--app-muted);
+  font-size: 12px;
+}
+
+.escrow-chip {
+  display: inline-flex;
+  align-items: center;
+  min-height: 24px;
+  padding: 0 8px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.escrow-chip-neutral {
+  background: var(--app-surface-muted);
+  color: var(--app-muted);
+}
+
+.escrow-chip-ok {
+  background: var(--app-green-soft);
+  color: var(--app-green);
+}
+
+.escrow-chip-warn {
+  background: var(--app-amber-soft);
+  color: #b45309;
+}
+
+.escrow-chip-danger {
+  background: var(--app-red-soft);
+  color: var(--app-red);
+}
+
+.escrow-role-chip {
+  display: inline-flex;
+  align-items: center;
+  min-height: 24px;
+  padding: 0 8px;
+  border: 1px solid var(--app-line-strong);
+  border-radius: 999px;
+  color: var(--app-muted);
+  font-size: 12px;
+}
+
+.escrow-detail {
+  display: grid;
+  gap: 14px;
+  align-content: start;
+}
+
+.escrow-detail-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.escrow-detail-head h3 {
+  margin: 4px 0;
+  font-size: 20px;
+}
+
+.escrow-detail-head .escrow-mono {
+  color: var(--app-muted);
+}
+
+.escrow-detail-badges {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.escrow-deadline {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 10px 12px;
+  border: 1px solid #fcd9a5;
+  border-radius: var(--app-radius);
+  background: var(--app-amber-soft);
+}
+
+.escrow-deadline svg {
+  flex: 0 0 auto;
+  width: 18px;
+  height: 18px;
+  margin-top: 2px;
+  color: var(--app-amber);
+}
+
+.escrow-deadline div {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.escrow-deadline span {
+  color: var(--app-muted);
+  font-size: 12px;
+}
+
+.escrow-facts,
+.escrow-settlement-facts {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.escrow-fact {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+  padding: 9px 10px;
+  border: 1px solid var(--app-line);
+  border-radius: var(--app-radius);
+  background: var(--app-surface-soft);
+}
+
+.escrow-fact span {
+  color: var(--app-muted);
+  font-size: 12px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.escrow-fact strong {
+  font-size: 13px;
+  overflow-wrap: anywhere;
+}
+
+.escrow-fact.is-strong strong {
+  font-family: var(--font-mono);
+  font-size: 16px;
+}
+
+.escrow-times {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px 12px;
+  padding: 10px 12px;
+  border: 1px dashed var(--app-line-strong);
+  border-radius: var(--app-radius);
+}
+
+.escrow-time {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.escrow-time span {
+  color: var(--app-muted);
+  font-size: 12px;
+}
+
+.escrow-time strong {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-weight: 500;
+  overflow-wrap: anywhere;
+}
+
+.escrow-actions {
+  display: grid;
+  gap: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--app-line);
+}
+
+.escrow-actions h4 {
+  margin: 0;
+  font-size: 15px;
+}
+
+.escrow-action-group {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  padding: 10px 12px;
+  border: 1px solid var(--app-line);
+  border-radius: var(--app-radius);
+  background: var(--app-surface-soft);
+}
+
+.escrow-action-label {
+  flex: 0 0 auto;
+  color: var(--app-muted);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.escrow-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 36px;
+  padding: 0 12px;
+  border: 1px solid var(--app-line-strong);
+  border-radius: var(--app-radius);
+  background: var(--app-surface);
+  color: var(--app-ink);
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.escrow-button svg {
+  width: 16px;
+  height: 16px;
+}
+
+.escrow-button:disabled {
+  cursor: wait;
+  opacity: 0.6;
+}
+
+.escrow-button-primary {
+  border-color: var(--app-blue);
+  background: var(--app-blue);
+  color: #ffffff;
+}
+
+.escrow-button-danger {
+  border-color: var(--app-red);
+  background: var(--app-red-soft);
+  color: var(--app-red);
+}
+
+.escrow-button-warn {
+  border-color: #fcd9a5;
+  background: var(--app-amber-soft);
+  color: #b45309;
+}
+
+.escrow-settle {
+  display: grid;
+  gap: 10px;
+  align-items: stretch;
+}
+
+.escrow-settle-inputs {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.escrow-settle-inputs label {
+  display: grid;
+  gap: 5px;
+  min-width: 0;
+  color: var(--app-muted);
+  font-size: 12px;
+}
+
+.escrow-settle-inputs input {
+  min-height: 38px;
+  min-width: 0;
+  padding: 0 10px;
+  border: 1px solid var(--app-line-strong);
+  border-radius: var(--app-radius);
+  background: var(--app-surface);
+  color: var(--app-ink);
+}
+
+.escrow-allocation {
+  display: grid;
+  gap: 4px;
+  padding: 10px 12px;
+  border: 1px solid var(--app-line);
+  border-radius: var(--app-radius);
+  background: var(--app-surface);
+  font-size: 12px;
+}
+
+.escrow-allocation strong {
+  font-size: 13px;
+}
+
+.escrow-allocation span {
+  color: var(--app-muted);
+  overflow-wrap: anywhere;
+}
+
+.escrow-allocation-warn {
+  border-color: #fcd9a5;
+  background: var(--app-amber-soft);
+}
+
+.escrow-allocation-warn strong {
+  color: #b45309;
+}
+
+.escrow-notice {
+  display: grid;
+  gap: 4px;
+  padding: 10px 12px;
+  border: 1px solid var(--app-line);
+  border-radius: var(--app-radius);
+  font-size: 13px;
+}
+
+.escrow-notice span {
+  color: var(--app-muted);
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
+.escrow-notice code {
+  overflow-wrap: anywhere;
+}
+
+.escrow-notice-ok {
+  border-color: #b7e4c7;
+  background: var(--app-green-soft);
+}
+
+.escrow-notice-ok strong {
+  color: var(--app-green);
+}
+
+.escrow-notice-error {
+  border-color: #fecaca;
+  background: var(--app-red-soft);
+}
+
+.escrow-notice-error strong {
+  color: var(--app-red);
+}
+
+.escrow-empty {
+  display: grid;
+  justify-items: center;
+  gap: 8px;
+  padding: 40px 20px;
+  border: 1px solid var(--app-line);
+  border-radius: var(--app-radius);
+  background: var(--app-surface);
+  text-align: center;
+}
+
+.escrow-empty-compact {
+  padding: 28px 16px;
+}
+
+.escrow-empty svg {
+  width: 26px;
+  height: 26px;
+  color: var(--app-blue);
+}
+
+.escrow-empty h3 {
+  margin: 0;
+  font-size: 18px;
+}
+
+.escrow-empty p {
+  margin: 0;
+  max-width: 540px;
+  color: var(--app-muted);
+  font-size: 13px;
+}
+
+.escrow-order-picker {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  justify-content: center;
+  margin-top: 6px;
+}
+
+.escrow-order-button {
+  display: grid;
+  gap: 3px;
+  padding: 10px 12px;
+  border: 1px solid var(--app-line);
+  border-radius: var(--app-radius);
+  background: var(--app-surface-soft);
+  color: var(--app-ink);
+  text-align: left;
+}
+
+.escrow-order-button:hover {
+  border-color: var(--app-blue);
+}
+
+.escrow-order-button .escrow-mono {
+  color: var(--app-muted);
+}
+
+.escrow-muted {
+  margin: 0;
+  color: var(--app-muted);
+  font-size: 12px;
+}
+
+.escrow-mono {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  overflow-wrap: anywhere;
+  word-break: break-all;
+}
+
+@media (max-width: 900px) {
+  .escrow-order-strip,
+  .escrow-layout {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .escrow-facts,
+  .escrow-settlement-facts,
+  .escrow-settle-inputs {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .escrow-times {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 520px) {
+  .escrow-topbar .escrow-title {
+    flex-basis: 100%;
+    order: 3;
+  }
+
+  .escrow-times {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
