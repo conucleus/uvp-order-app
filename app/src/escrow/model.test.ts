@@ -1,13 +1,14 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { parseOrderEscrowList } from "./read.js";
+import { escrowAvailableActions, isEscrowActionAvailable } from "./actions.js";
 import {
   escrowDeadlineView,
   escrowStateLabel,
   formatBaseUnits,
   formatFeeBps
 } from "./format.js";
-import type { EscrowTrancheDTO } from "./types.js";
+import { escrowActorRoles, type EscrowTrancheDTO } from "./types.js";
 
 const orderId = `0x${"11".repeat(32)}`;
 const trancheId = `0x${"22".repeat(32)}`;
@@ -103,5 +104,36 @@ describe("escrow read model", () => {
       () => parseOrderEscrowList(orderId, { orderId, tranches: [tranche({ state: "locked" as EscrowTrancheDTO["state"] })] }),
       (error: unknown) => error instanceof Error && /state 不在托管状态词表内：locked/u.test(error.message)
     );
+  });
+
+  it("parses started and gates each action by both role and state", () => {
+    const started = tranche({ state: "started" });
+    assert.deepEqual(
+      parseOrderEscrowList(orderId, { orderId, tranches: [started] }).tranches[0]?.state,
+      "started"
+    );
+    assert.equal(escrowStateLabel("started"), "已开始履约");
+
+    const frozen = tranche();
+    const approved = tranche({ state: "approved" });
+    const rejected = tranche({ state: "rejected" });
+    const suspended = tranche({ state: "suspended" });
+    const payerRoles = escrowActorRoles(frozen, wallet);
+    const payeeRoles = escrowActorRoles(frozen, payee);
+    const verifierRoles = escrowActorRoles(frozen, verifier);
+
+    assert.deepEqual([...escrowAvailableActions(frozen, payeeRoles)].sort(), ["markStarted", "refundByPayee", "suspend"]);
+    assert.deepEqual([...escrowAvailableActions(started, payeeRoles)].sort(), ["refundByPayee", "suspend"]);
+    assert.deepEqual([...escrowAvailableActions(frozen, verifierRoles)], []);
+    assert.deepEqual([...escrowAvailableActions(started, verifierRoles)].sort(), ["approve", "reject"]);
+    assert.equal(isEscrowActionAvailable("approve", frozen, verifierRoles), false);
+    assert.deepEqual([...escrowAvailableActions(frozen, payerRoles)].sort(), ["refundByPayer", "suspend"]);
+    assert.deepEqual([...escrowAvailableActions(started, payerRoles)].sort(), ["payNow", "suspend"]);
+    assert.deepEqual([...escrowAvailableActions(approved, payerRoles)].sort(), ["payNow", "suspend"]);
+    assert.equal(isEscrowActionAvailable("refundByPayer", approved, payerRoles), false);
+    assert.equal(isEscrowActionAvailable("refundByPayee", approved, payeeRoles), false);
+    assert.deepEqual([...escrowAvailableActions(rejected, payeeRoles)].sort(), ["refundByPayee", "suspend"]);
+    assert.deepEqual([...escrowAvailableActions(rejected, payerRoles)].sort(), ["suspend"]);
+    assert.deepEqual([...escrowAvailableActions(suspended, payerRoles)].sort(), ["consentSettlement"]);
   });
 });

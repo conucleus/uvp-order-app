@@ -11,6 +11,7 @@ const DAY_MS = 24 * 60 * 60 * 1000;
 
 const STATE_LABELS: Readonly<Record<EscrowTrancheState, string>> = {
   frozen: "已冻款",
+  started: "已开始履约",
   approved: "观察期",
   rejected: "已拒绝",
   suspended: "已挂起",
@@ -27,6 +28,7 @@ export function escrowStateTone(state: EscrowTrancheState): "neutral" | "ok" | "
   switch (state) {
     case "frozen":
       return "neutral";
+    case "started":
     case "approved":
       return "ok";
     case "rejected":

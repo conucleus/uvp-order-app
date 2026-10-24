@@ -5,7 +5,12 @@ export { EscrowPage, type EscrowPageProps } from "./EscrowPage";
 export {
   buildStageEscrowCall,
   encodeStageEscrowCall,
+  escrowAvailableActions,
+  isEscrowActionAvailable,
   submitStageEscrowAction,
+  ESCROW_ACTION_NAMES,
+  ESCROW_ACTION_ROLES,
+  ESCROW_ACTION_STATES,
   type EscrowActionInput,
   type EscrowActionName,
   type StageEscrowCall

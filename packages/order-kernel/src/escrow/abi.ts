@@ -1,10 +1,11 @@
-// StageEscrow 动作与读视图 ABI：函数/自定义错误逐条镜像
+// StageEscrow 动作与读视图 ABI：函数/事件/自定义错误逐条镜像
 // uvp-periphery/smart_contracts/escrow/src/StageEscrow.sol（合约是唯一
-// 语义源）；本文件只供前端编码调用与解码 revert，不新增合约语义。
+// 语义源）；本文件只供前端编码调用、解码事件与 revert，不新增合约语义。
 
 import { parseAbi } from "viem";
 
 export const STAGE_ESCROW_ABI = parseAbi([
+  "function markStarted(bytes32 trancheId)",
   "function approve(bytes32 trancheId)",
   "function reject(bytes32 trancheId)",
   "function payNow(bytes32 trancheId)",
@@ -13,6 +14,7 @@ export const STAGE_ESCROW_ABI = parseAbi([
   "function suspend(bytes32 trancheId)",
   "function consentSettlement(bytes32 trancheId, uint256 payerAmount, uint256 payeeAmount)",
   "function getTranche(bytes32 trancheId) view returns ((address payer, address payee, address verifier, address feeRecipient, uint256 amount, uint32 observationDays, uint16 feeBps, uint64 approvedAt, uint64 rejectedAt, uint8 state, (uint256 payerAmount, uint256 payeeAmount, bool submitted) payerAllocation, (uint256 payerAmount, uint256 payeeAmount, bool submitted) payeeAllocation))",
+  "event TrancheStarted(bytes32 indexed trancheId, address indexed payee)",
   "error TrancheNotFound(bytes32 trancheId)",
   "error TrancheAlreadyExists(bytes32 trancheId)",
   "error InvalidTrancheState(bytes32 trancheId, uint8 actual)",

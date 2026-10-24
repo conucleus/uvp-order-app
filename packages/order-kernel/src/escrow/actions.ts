@@ -1,13 +1,17 @@
 // 托管动作构造与提交：动作参数（trancheId / settle 分配额）先本地编码，
-// 再经钱包边界发送到 StageEscrow。动作允许集合镜像 V2 设计（verifier:
-// approve/reject；payer/payee: refundByPayer/refundByPayee、suspend、双方分配）；是否
-// 允许由合约 revert 裁决，本模块只做金额格式与编号形状的入口边界。
+// 再经钱包边界发送到 StageEscrow。动作允许集合镜像合约：payee 先
+// markStarted（Frozen→Started），之后 verifier 才能 approve/reject；payNow
+// 仅 Started/Approved，refundByPayer 仅 Frozen，refundByPayee 为
+// Frozen/Started/Rejected，suspend 覆盖四个活状态，合意结算仅 Suspended。
+// 这里只给出展示用的可用动作矩阵（角色 + 状态），是否最终允许仍由合约
+// revert 裁决，本模块只做金额格式与编号形状的入口边界。
 
 import { encodeFunctionData, parseUnits, type Hex } from "viem";
 import type { Eip1193Provider } from "../wallet/provider";
 import { STAGE_ESCROW_ABI } from "./abi";
 import type { EscrowContractConfig } from "./config";
 import { ESCROW_TOKEN_DECIMALS } from "./format";
+import type { EscrowActorRole, EscrowTrancheDTO, EscrowTrancheState } from "./types";
 import {
   EscrowActionError,
   escrowActionFailureCopy,
@@ -17,17 +21,43 @@ import {
   sendEscrowTransaction
 } from "./wallet";
 
-export type EscrowActionName =
-  | "approve"
-  | "reject"
-  | "payNow"
-  | "refundByPayer"
-  | "refundByPayee"
-  | "suspend"
-  | "consentSettlement";
+export const ESCROW_ACTION_NAMES = [
+  "markStarted",
+  "approve",
+  "reject",
+  "payNow",
+  "refundByPayer",
+  "refundByPayee",
+  "suspend",
+  "consentSettlement"
+] as const;
+
+export type EscrowActionName = (typeof ESCROW_ACTION_NAMES)[number];
+
+export const ESCROW_ACTION_STATES: Readonly<Record<EscrowActionName, readonly EscrowTrancheState[]>> = {
+  markStarted: ["frozen"],
+  approve: ["started"],
+  reject: ["started"],
+  payNow: ["started", "approved"],
+  refundByPayer: ["frozen"],
+  refundByPayee: ["frozen", "started", "rejected"],
+  suspend: ["frozen", "started", "approved", "rejected"],
+  consentSettlement: ["suspended"]
+};
+
+export const ESCROW_ACTION_ROLES: Readonly<Record<EscrowActionName, readonly EscrowActorRole[]>> = {
+  markStarted: ["payee"],
+  approve: ["verifier"],
+  reject: ["verifier"],
+  payNow: ["payer"],
+  refundByPayer: ["payer"],
+  refundByPayee: ["payee"],
+  suspend: ["payer", "payee"],
+  consentSettlement: ["payer", "payee"]
+};
 
 export type StageEscrowCall =
-  | { readonly functionName: "approve" | "reject" | "payNow" | "refundByPayer" | "refundByPayee" | "suspend"; readonly args: readonly [Hex] }
+  | { readonly functionName: "markStarted" | "approve" | "reject" | "payNow" | "refundByPayer" | "refundByPayee" | "suspend"; readonly args: readonly [Hex] }
   | { readonly functionName: "consentSettlement"; readonly args: readonly [Hex, bigint, bigint] };
 
 export interface EscrowActionInput {
@@ -37,6 +67,28 @@ export interface EscrowActionInput {
 
 const TRANCHE_ID_PATTERN = /^0x[0-9a-fA-F]{64}$/u;
 const DECIMAL_AMOUNT_PATTERN = /^\d+(?:\.\d{1,6})?$/u;
+
+export function isEscrowActionAvailable(
+  action: EscrowActionName,
+  tranche: Pick<EscrowTrancheDTO, "state">,
+  roles: ReadonlySet<EscrowActorRole>
+): boolean {
+  const roleAllowed = ESCROW_ACTION_ROLES[action].some((role) => roles.has(role));
+  return roleAllowed && ESCROW_ACTION_STATES[action].includes(tranche.state);
+}
+
+export function escrowAvailableActions(
+  tranche: Pick<EscrowTrancheDTO, "state">,
+  roles: ReadonlySet<EscrowActorRole>
+): ReadonlySet<EscrowActionName> {
+  const available = new Set<EscrowActionName>();
+  for (const action of ESCROW_ACTION_NAMES) {
+    if (isEscrowActionAvailable(action, tranche, roles)) {
+      available.add(action);
+    }
+  }
+  return available;
+}
 
 export function buildStageEscrowCall(
   action: EscrowActionName,
@@ -62,6 +114,7 @@ export function buildStageEscrowCall(
 
 export function encodeStageEscrowCall(call: StageEscrowCall): Hex {
   switch (call.functionName) {
+    case "markStarted":
     case "approve":
     case "reject":
     case "payNow":

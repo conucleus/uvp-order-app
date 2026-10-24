@@ -1,14 +1,17 @@
 /* 通用阶段托管面板：读取 GET /product/orders/:orderId/escrow[/:stageId] 的
- * tranche 投影，按当前钱包角色给出 StageEscrow 动作（verifier approve/reject；
- * payer payNow/refundByPayer/suspend；payee refundByPayee/suspend；双方
- * consentSettlement），错误按合约 revert/自定义错误显示。托管地址/链来自
- * config.ts，合约是唯一裁决方；本页不做平台裁决、不自动退款、不展示密钥。
+ * tranche 投影，按当前钱包角色与链上状态给出 StageEscrow 动作（payee 先
+ * 开始履约；verifier 仅在已开始履约后 approve/reject；payer
+ * payNow/refundByPayer/suspend；payee refundByPayee/suspend；双方
+ * consentSettlement 仅挂起后），错误按合约 revert/自定义错误显示。托管地址/
+ * 链来自 config.ts，合约是唯一裁决方；本页不做平台裁决、不自动退款、不展示
+ * 密钥。
  */
 import {
   AlertTriangle,
   ArrowLeft,
   CheckCircle2,
   HandCoins,
+  PlayCircle,
   RefreshCw,
   ShieldCheck,
   Wallet,
@@ -18,7 +21,12 @@ import { useEffect, useMemo, useState } from "react";
 import type { ProductOrderDTO } from "@uvp-eth/product-dto";
 import { ProductApiError, type ProductApiClient } from "../api/productApi";
 import { readEscrowAllocations, type EscrowAllocationsView } from "./allocations";
-import { escrowActionFailureCopy, submitStageEscrowAction, type EscrowActionName } from "./actions";
+import {
+  escrowActionFailureCopy,
+  isEscrowActionAvailable,
+  submitStageEscrowAction,
+  type EscrowActionName
+} from "./actions";
 import { readRuntimeEscrowConfig } from "./config";
 import {
   escrowDeadlineView,
@@ -482,6 +490,17 @@ function TrancheDetail({
   const isPayee = roles.has("payee");
   const isVerifier = roles.has("verifier");
   const isParty = isPayer || isPayee;
+  const canMarkStarted = isEscrowActionAvailable("markStarted", tranche, roles);
+  const canApprove = isEscrowActionAvailable("approve", tranche, roles);
+  const canReject = isEscrowActionAvailable("reject", tranche, roles);
+  const canPayNow = isEscrowActionAvailable("payNow", tranche, roles);
+  const canRefundByPayer = isEscrowActionAvailable("refundByPayer", tranche, roles);
+  const canRefundByPayee = isEscrowActionAvailable("refundByPayee", tranche, roles);
+  const canSuspend = isEscrowActionAvailable("suspend", tranche, roles);
+  const canSettle = isEscrowActionAvailable("consentSettlement", tranche, roles);
+  const payerHasAction = canPayNow || canRefundByPayer || canSuspend;
+  const payeeHasAction = canMarkStarted || canRefundByPayee || canSuspend;
+  const verifierHasAction = canApprove || canReject;
   return (
     <>
       <header className="escrow-detail-head">
@@ -551,91 +570,130 @@ function TrancheDetail({
         {isVerifier ? (
           <div className="escrow-action-group">
             <span className="escrow-action-label">验收者</span>
-            <button
-              type="button"
-              className="escrow-button escrow-button-primary"
-              disabled={busy}
-              onClick={() => onAction("approve")}
-              data-testid="escrow-action-approve"
-            >
-              <CheckCircle2 aria-hidden="true" />
-              验收通过（进入观察期）
-            </button>
-            <button
-              type="button"
-              className="escrow-button escrow-button-danger"
-              disabled={busy}
-              onClick={() => onAction("reject")}
-              data-testid="escrow-action-reject"
-            >
-              <XCircle aria-hidden="true" />
-              验收不通过（进入退款窗口）
-            </button>
+            {canApprove ? (
+              <button
+                type="button"
+                className="escrow-button escrow-button-primary"
+                disabled={busy}
+                onClick={() => onAction("approve")}
+                data-testid="escrow-action-approve"
+              >
+                <CheckCircle2 aria-hidden="true" />
+                验收通过（进入观察期）
+              </button>
+            ) : null}
+            {canReject ? (
+              <button
+                type="button"
+                className="escrow-button escrow-button-danger"
+                disabled={busy}
+                onClick={() => onAction("reject")}
+                data-testid="escrow-action-reject"
+              >
+                <XCircle aria-hidden="true" />
+                验收不通过（进入退款窗口）
+              </button>
+            ) : null}
+            {verifierHasAction ? null : (
+              <p className="escrow-muted">
+                {tranche.state === "frozen"
+                  ? "履约方开始履约后，验收者才可验收通过或不通过。"
+                  : `当前状态（${escrowStateLabel(tranche.state)}）不可验收。`}
+              </p>
+            )}
           </div>
         ) : null}
 
         {isPayer ? (
           <div className="escrow-action-group">
             <span className="escrow-action-label">付款方</span>
-            <button
-              type="button"
-              className="escrow-button escrow-button-primary"
-              disabled={busy}
-              onClick={() => onAction("payNow")}
-              data-testid="escrow-action-payNow"
-            >
-              <HandCoins aria-hidden="true" />
-              提前确认付款（不可撤销）
-            </button>
-            <button
-              type="button"
-              className="escrow-button"
-              disabled={busy}
-              onClick={() => onAction("refundByPayer")}
-              data-testid="escrow-action-refundByPayer"
-            >
-              取消冻款并全额退款
-            </button>
-            <button
-              type="button"
-              className="escrow-button escrow-button-warn"
-              disabled={busy}
-              onClick={() => onAction("suspend")}
-              data-testid="escrow-action-suspend"
-            >
-              挂起（争议）
-            </button>
+            {canPayNow ? (
+              <button
+                type="button"
+                className="escrow-button escrow-button-primary"
+                disabled={busy}
+                onClick={() => onAction("payNow")}
+                data-testid="escrow-action-payNow"
+              >
+                <HandCoins aria-hidden="true" />
+                提前确认付款（不可撤销）
+              </button>
+            ) : null}
+            {canRefundByPayer ? (
+              <button
+                type="button"
+                className="escrow-button"
+                disabled={busy}
+                onClick={() => onAction("refundByPayer")}
+                data-testid="escrow-action-refundByPayer"
+              >
+                取消冻款并全额退款
+              </button>
+            ) : null}
+            {canSuspend ? (
+              <button
+                type="button"
+                className="escrow-button escrow-button-warn"
+                disabled={busy}
+                onClick={() => onAction("suspend")}
+                data-testid="escrow-action-suspend"
+              >
+                挂起（争议）
+              </button>
+            ) : null}
+            {payerHasAction || canSettle ? null : (
+              <p className="escrow-muted">当前状态没有付款方可执行的动作。</p>
+            )}
           </div>
         ) : null}
 
         {isPayee ? (
           <div className="escrow-action-group">
             <span className="escrow-action-label">履约方</span>
-            <button
-              type="button"
-              className="escrow-button"
-              disabled={busy}
-              onClick={() => onAction("refundByPayee")}
-              data-testid="escrow-action-refundByPayee"
-            >
-              全额退款给买方（放弃主张）
-            </button>
-            <button
-              type="button"
-              className="escrow-button escrow-button-warn"
-              disabled={busy}
-              onClick={() => onAction("suspend")}
-              data-testid="escrow-action-suspend"
-            >
-              挂起（争议）
-            </button>
+            {canMarkStarted ? (
+              <button
+                type="button"
+                className="escrow-button escrow-button-primary"
+                disabled={busy}
+                onClick={() => onAction("markStarted")}
+                data-testid="escrow-action-markStarted"
+              >
+                <PlayCircle aria-hidden="true" />
+                开始履约
+              </button>
+            ) : null}
+            {canRefundByPayee ? (
+              <button
+                type="button"
+                className="escrow-button"
+                disabled={busy}
+                onClick={() => onAction("refundByPayee")}
+                data-testid="escrow-action-refundByPayee"
+              >
+                全额退款给买方（放弃主张）
+              </button>
+            ) : null}
+            {canSuspend ? (
+              <button
+                type="button"
+                className="escrow-button escrow-button-warn"
+                disabled={busy}
+                onClick={() => onAction("suspend")}
+                data-testid="escrow-action-suspend"
+              >
+                挂起（争议）
+              </button>
+            ) : null}
+            {payeeHasAction || canSettle ? null : (
+              <p className="escrow-muted">当前状态没有履约方可执行的动作。</p>
+            )}
           </div>
         ) : null}
 
         {isParty ? (
           <div className="escrow-action-group escrow-settle">
             <span className="escrow-action-label">双方合意结算</span>
-            {tranche.state === "suspended" ? (
+            {canSettle ? (
               <>
                 <p className="escrow-muted">
                   挂起后双方分别提交同一分配；两笔一致后由合约执行。合约校验分配之和等于冻款金额，本页不做平台裁决。

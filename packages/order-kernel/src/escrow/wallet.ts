@@ -335,6 +335,6 @@ function unixTime(value: unknown): string {
 
 function chainStateLabel(value: unknown): string {
   const index = typeof value === "number" ? value : typeof value === "bigint" ? Number(value) : Number.NaN;
-  const labels = ["未创建", "已冻款", "观察期", "已拒绝", "已挂起", "已付款", "已退款", "已结算"];
+  const labels = ["未创建", "已冻款", "已开始履约", "观察期", "已拒绝", "已挂起", "已付款", "已退款", "已结算"];
   return labels[index] ?? `未知状态 ${String(value)}`;
 }

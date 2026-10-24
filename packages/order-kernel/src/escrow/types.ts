@@ -2,9 +2,14 @@
 // service/src/escrow/types.ts 的 EscrowTrancheDTO（只读链上投影；其中
 // releaseAt/refundAt 是实际放款/退款时刻），金额保持 base units 字符串；
 // 状态词表与角色判定都在本模块，避免各面板自造第二套词表。
+//
+// started 与合约 TrancheStarted 事件对应：只有 started 之后验收者才能
+// approve/reject。旧投影行（frozen/approved/...）仍是合法词表成员，无需
+// 迁移；读到词表外状态时由 read.ts 显式报错，不降级成空/frozen。
 
 export const ESCROW_TRANCHE_STATES = [
   "frozen",
+  "started",
   "approved",
   "rejected",
   "suspended",
