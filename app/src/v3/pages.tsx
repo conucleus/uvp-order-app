@@ -54,7 +54,7 @@ function isoInDays(days: number): string {
 }
 
 function stageRoleLabel(stage: FlatStageV3, slotKey: string): string {
-  const slot = [...stage.performerSlots, ...stage.verifierSlots].find((candidate) => candidate.slotKey === slotKey);
+  const slot = stage.slots.find((candidate) => candidate.slotKey === slotKey);
   return slot?.label ?? slotKey;
 }
 
@@ -116,16 +116,15 @@ export function CreateOrderV3Page(props: {
       stageKey: stage.stageKey,
       amountBaseUnits: "",
       inviteDeadline: isoInDays(7),
-      workDeadline: isoInDays(30),
-      ...(stage.defaultAcceptance !== undefined ? { acceptance: stage.defaultAcceptance } : {})
+      workDeadline: isoInDays(30)
     };
   }
 
   function inviteRows(): readonly { readonly stage: FlatStageV3; readonly slotKey: string; readonly role: string }[] {
     const rows: { stage: FlatStageV3; slotKey: string; role: string }[] = [];
     for (const stage of selectedStages) {
-      for (const slot of [...stage.performerSlots, ...stage.verifierSlots]) {
-        rows.push({ stage, slotKey: slot.slotKey, role: slot.role });
+      for (const slot of stage.slots) {
+        rows.push({ stage, slotKey: slot.slotKey, role: slot.label ?? slot.slotKey });
       }
     }
     return rows;
@@ -266,11 +265,6 @@ export function CreateOrderV3Page(props: {
                   {checked ? (
                     <div>
                       <label>金额（base units）<input value={term.amountBaseUnits} onChange={(event) => setTerms((current) => ({ ...current, [stage.stageKey]: { ...term, amountBaseUnits: event.target.value } }))} /></label>
-                      <label>验收方式
-                        <select value={term.acceptance ?? stage.defaultAcceptance} onChange={(event) => setTerms((current) => ({ ...current, [stage.stageKey]: { ...term, acceptance: event.target.value as StageSelectionV3["acceptance"] } }))}>
-                          {stage.acceptanceModes.map((mode) => <option key={mode} value={mode}>{mode}</option>)}
-                        </select>
-                      </label>
                       <label>邀请截止<input value={term.inviteDeadline} onChange={(event) => setTerms((current) => ({ ...current, [stage.stageKey]: { ...term, inviteDeadline: event.target.value } }))} /></label>
                       <label>履约截止<input value={term.workDeadline} onChange={(event) => setTerms((current) => ({ ...current, [stage.stageKey]: { ...term, workDeadline: event.target.value } }))} /></label>
                       <p className="fineprint">
@@ -565,7 +559,7 @@ export function OrderRoomV3Page(props: {
               <h3>阶段 {stage.stage.stageKey}</h3>
               <p className="fineprint">
                 status {stage.stage.status}；金额 {stage.stage.amount ?? "按 scope 不可见"}；
-                验收 {stage.stage.acceptanceMode ?? "—"}；标准 {stage.stage.standard?.name ?? "未返回"}
+                标准 {stage.stage.standard?.name ?? "未返回"}
               </p>
               <p className="fineprint">dataState：{stage.dataState}</p>
             </section>

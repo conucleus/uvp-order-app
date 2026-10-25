@@ -76,10 +76,8 @@ planId/planHash 非 canonical）。
 
 服务端只返回 `ConfigVersionV3.bundle`；kernel 按服务端 `canonical.ts` 同口径派生：
 
-- `acceptanceModes`：服务端 `parseTerm` 接受的四种方式（`self/third_party/mutual/none`）；
-  `defaultAcceptance` 是 stage 配置 → defaults → `self` 的解析值。
-- `performerSlots`/`verifierSlots`：按 `requiredSlotKeys` 规则（senders 去掉 payer、
-  funded 的 payee slot、third_party/mutual 的 verifier slot）派生，含 role/required。
+- `slots`/`requiredSlotKeys`：从配置 `stage.slots`（slotKey → 展示标签）派生；
+  订单按该集合邀请，没有 payer/payee/verifier 默认或特例。
 - `standards`：stage `fileResources` 句柄 + `bundle.fileResources`/`bundle.hashes` 解析，
   `resolvable` 只认 `0x<32B>` 或 `sha256:<64hex>`（服务端 `normalizeFinalStandardHash` 同口径）。
 - `tokenDecimals`：按 `currency` 查内置表（USDT/USDC=6、DAI/WETH/ETH=18）或显式覆写；
@@ -90,22 +88,19 @@ planId/planHash 非 canonical）。
 
 ### 开单草稿映射（`buildCreateOrderDraftInput`）
 
-宿主形状 `StageSelectionV3 {stageKey, amountBaseUnits, acceptance, performerSlotId?,
-verifierSlotId?, inviteDeadline, workDeadline, standardRef?}` 映射到服务端
-`StageTermsInputV3`：
+宿主形状 `StageSelectionV3 {stageKey, amountBaseUnits, inviteDeadline, workDeadline,
+standardRef?, slots?}` 映射到服务端 `StageTermsInputV3`：
 
 | 宿主字段 | 服务端字段 | 说明 |
 | --- | --- | --- |
 | `amountBaseUnits` | `amount` | 服务端 `normalizeAmount` 同口径：`0` 或非零开头十进制，≤78 位 |
-| `acceptance` | `acceptanceMode` | 服务端接受四种；其余值直接拒绝 |
 | `inviteDeadline` / `workDeadline` | 同名 | 服务端必填；kernel 不替买家默认；`work > invite` |
 | `standardRef` | `standard` | 缺省用配置可解析默认标准；配置无 hash 时要求显式提供 |
-| `feeBps` / `feeRecipient` / `verifierWallet` | 同名 | 可选透传 |
-| `performerSlotId` / `verifierSlotId` | **无** | 服务端从配置派生 slot；与配置不一致即报错（不静默丢弃） |
+| `slots` | `slots` | 可选透传本段 slot 值 |
 | `stageSubset` | `stageSubset` | 缺省按 stages 顺序派生；显式给出必须一一对应 |
 
 失败返回 `{ok:false, problem:{code,message,detail?}}`（`missing_invite_deadline`、
-`performer_slot_not_configurable`、`standard_hash_missing`、`stage_subset_mismatch`…），
+`standard_hash_missing`、`stage_subset_mismatch`…），
 不做「尽力而为」的强制转换。
 
 **窗口不是订单权利**：`StageSelectionV3` 没有窗口字段；订单只提交金额/验收方式/期限/标准。
@@ -121,7 +116,7 @@ verifierSlotId?, inviteDeadline, workDeadline, standardRef?}` 映射到服务端
   「message 里的条款与已知值一致」；错误码 `domain_chain_id /
   domain_verifying_contract / fact_mismatch / invalid_typed_data`。
 - `summarizeInviteAcceptTypedData(typedData, {tokenDecimals?})` —— 供宿主渲染：
-  金额（给 decimals 才格式化）、feeBps/feePercent、payee/verifier（含零地址标记）、
+  金额（给 decimals 才格式化）、
   `termsHash`/`finalStandardHash`、期限 ISO、`signerField:"invitee"`。
 - `buildInviteAcceptTypedDataFromPreview(preview, invitee)` —— 从服务端预览重建并核对
   自洽（服务端 `preview.typedData` 仍是权威来源）。

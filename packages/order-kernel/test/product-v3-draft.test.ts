@@ -19,8 +19,6 @@ function selection(overrides: Partial<StageSelectionV3> = {}): StageSelectionV3 
   return {
     stageKey: "stage-b",
     amountBaseUnits: "1200000000",
-    acceptance: "self",
-    performerSlotId: "role-b",
     inviteDeadline: INVITE_DEADLINE,
     workDeadline: WORK_DEADLINE,
     ...overrides
@@ -45,10 +43,8 @@ describe("mapStageSelection", () => {
       stageKey: "stage-b",
       amount: "1200000000",
       inviteDeadline: INVITE_DEADLINE,
-      workDeadline: WORK_DEADLINE,
-      acceptanceMode: "self"
+      workDeadline: WORK_DEADLINE
     });
-    assert.equal("performerSlotId" in result.value, false);
     assert.equal("stageId" in result.value, false);
   });
 
@@ -75,29 +71,6 @@ describe("mapStageSelection", () => {
     assert.equal(missingHash.ok, false);
     if (!missingHash.ok) {
       assert.equal(missingHash.problem.code, "standard_hash_missing");
-    }
-  });
-
-  it("refuses a performer slot the config does not declare", () => {
-    const result = mapStageSelection(selection({ performerSlotId: "someone_else" }), stageB());
-    assert.equal(result.ok, false);
-    if (!result.ok) {
-      assert.equal(result.problem.code, "performer_slot_not_configurable");
-      assert.deepEqual(result.problem.detail, { requested: "someone_else", derived: ["role-b"] });
-    }
-  });
-
-  it("refuses a verifier slot that differs from the configured one", () => {
-    const flat = flattenConfigVersion(configVersionFixture());
-    const stageC = flatStageByKey(flat, "stage-c");
-    assert.ok(stageC);
-    const result = mapStageSelection(
-      selection({ stageKey: "stage-c", verifierSlotId: "someone_else" }),
-      stageC
-    );
-    assert.equal(result.ok, false);
-    if (!result.ok) {
-      assert.equal(result.problem.code, "verifier_slot_not_configurable");
     }
   });
 
@@ -128,7 +101,7 @@ describe("mapStageSelection", () => {
     const requirements = flatStageByKey(flat, "stage-a");
     assert.ok(requirements);
     const result = mapStageSelection(
-      selection({ stageKey: "stage-a", performerSlotId: undefined, acceptance: "none" }),
+      selection({ stageKey: "stage-a" }),
       requirements
     );
     assert.equal(result.ok, false);
@@ -144,7 +117,7 @@ describe("buildCreateOrderDraftInput", () => {
     const result = buildCreateOrderDraftInput({
       config: flat,
       title: "  示例订单  ",
-      stages: [selection(), selection({ stageKey: "stage-c", acceptance: "third_party", verifierSlotId: "role-c" })]
+      stages: [selection(), selection({ stageKey: "stage-c" })]
     });
     assert.equal(result.ok, true);
     if (!result.ok) {

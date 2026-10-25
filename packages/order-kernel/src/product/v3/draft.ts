@@ -1,26 +1,22 @@
 // V3 开单草稿映射：宿主友好的 stage 选择（每段金额/验收方式/期限/标准）→
-// 服务端 CreateOrderDraftV3Input。服务端没有 performerSlotId/verifierSlotId
+// 服务端 CreateOrderDraftV3Input。服务端 slot 集合来自配置，不接受客户端自造角色
 // 入参（slot 由配置派生），映射不上的字段显式报错而不是静默丢弃；期限由
 // 宿主给出，kernel 不替买家默认。
 
 import type {
-  ConfigAcceptanceModeV3,
   CreateOrderDraftV3Input,
   StageStandardRefV3,
   StageTermsInputV3
 } from "@uvp-eth/product-dto";
-import { CONFIG_ACCEPTANCE_MODES, flatStageByKey } from "./config";
+import { flatStageByKey } from "./config";
 import type { FlatConfigV3, FlatStageV3 } from "./config";
 
 export interface StageSelectionV3 {
   readonly stageKey: string;
   /** 本段冻款金额（base units 十进制字符串，服务端 normalizeAmount 同口径）。 */
   readonly amountBaseUnits: string;
-  readonly acceptance?: ConfigAcceptanceModeV3 | undefined;
-  /** 仅用于核对配置派生值：与配置不一致即报错（服务端无此入参）。 */
-  readonly performerSlotId?: string | undefined;
-  /** 同上：只核对，不提交。 */
-  readonly verifierSlotId?: string | undefined;
+  /** 本段参与的 slot（slotKey → 值）；缺省不提交。 */
+  readonly slots?: Readonly<Record<string, string>> | undefined;
   readonly workDeadline?: string | undefined;
   readonly inviteDeadline?: string | undefined;
   /** 本段最终标准；缺省时取配置可解析的默认标准，配置无 hash 则报错。 */
@@ -35,9 +31,6 @@ export type DraftMappingProblemCode =
   | "unknown_stage"
   | "stage_subset_mismatch"
   | "invalid_amount"
-  | "unsupported_acceptance"
-  | "performer_slot_not_configurable"
-  | "verifier_slot_not_configurable"
   | "missing_invite_deadline"
   | "missing_work_deadline"
   | "invalid_deadline"
@@ -69,29 +62,6 @@ export function mapStageSelection(
   }
   if (selection.amountBaseUnits.length > 78) {
     return fail("invalid_amount", `stage ${selection.stageKey} 的金额超出 uint256 范围`);
-  }
-  if (selection.acceptance !== undefined && !CONFIG_ACCEPTANCE_MODES.includes(selection.acceptance)) {
-    return fail("unsupported_acceptance", `stage ${selection.stageKey} 的验收方式不在服务端允许集内`, {
-      acceptance: selection.acceptance,
-      allowed: CONFIG_ACCEPTANCE_MODES
-    });
-  }
-  if (selection.performerSlotId !== undefined) {
-    const declared = stage.performerSlots.map((slot) => slot.slotKey);
-    if (!declared.includes(selection.performerSlotId)) {
-      return fail(
-        "performer_slot_not_configurable",
-        `stage ${selection.stageKey} 的履约 slot 由配置派生（${declared.join(", ") || "未声明"}），服务端不接受客户端指定 performerSlotId`,
-        { requested: selection.performerSlotId, derived: declared }
-      );
-    }
-  }
-  if (selection.verifierSlotId !== undefined && selection.verifierSlotId !== stage.verifierSlot) {
-    return fail(
-      "verifier_slot_not_configurable",
-      `stage ${selection.stageKey} 的验收 slot 由配置派生（${stage.verifierSlot ?? "未声明"}），服务端不接受客户端指定 verifierSlotId`,
-      { requested: selection.verifierSlotId, derived: stage.verifierSlot ?? null }
-    );
   }
   const inviteDeadline = selection.inviteDeadline;
   if (inviteDeadline === undefined || inviteDeadline.trim().length === 0) {
@@ -138,8 +108,8 @@ export function mapStageSelection(
       amount: selection.amountBaseUnits,
       inviteDeadline,
       workDeadline,
-      ...(selection.acceptance !== undefined ? { acceptanceMode: selection.acceptance } : {}),
-      ...(standard !== undefined ? { standard } : {})
+      ...(standard !== undefined ? { standard } : {}),
+      ...(selection.slots !== undefined ? { slots: selection.slots } : {})
     }
   };
 }

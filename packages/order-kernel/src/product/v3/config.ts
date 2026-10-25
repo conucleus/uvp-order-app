@@ -4,21 +4,12 @@
 // （草稿/订单），本模块绝不自算 keccak。
 
 import type {
-  ConfigAcceptanceModeV3,
   ConfigBundleV3,
   ConfigSlotV3,
   ConfigStageV3,
   ConfigVersionV3,
   StageStandardRefV3
 } from "@uvp-eth/product-dto";
-
-/** 服务端 parseTerm 接受的验收方式全集（订单可覆写；不在配置里预筛）。 */
-export const CONFIG_ACCEPTANCE_MODES: readonly ConfigAcceptanceModeV3[] = [
-  "self",
-  "third_party",
-  "mutual",
-  "none"
-];
 
 const STANDARD_HASH_PATTERN = /^(0x[0-9a-fA-F]{64}|sha256:[0-9a-fA-F]{64})$/u;
 
@@ -48,8 +39,6 @@ export interface FlatStandardV3 {
 export interface FlatStageSlotV3 {
   readonly slotKey: string;
   readonly label?: string;
-  readonly role: "performer" | "verifier" | "participant";
-  readonly required: boolean;
 }
 
 export interface FlatStageTimeV3 {
@@ -65,13 +54,8 @@ export interface FlatStageV3 {
   readonly index?: number;
   readonly optional: boolean;
   readonly funded: boolean;
-  /** 服务端接受的验收方式（订单可覆写，服务端按配置与覆写解析最终值）。 */
-  readonly acceptanceModes: readonly ConfigAcceptanceModeV3[];
-  readonly defaultAcceptance: ConfigAcceptanceModeV3;
-  readonly verifierSlot?: string;
-  readonly verifierSlotDeclared: boolean;
-  readonly performerSlots: readonly FlatStageSlotV3[];
-  readonly verifierSlots: readonly FlatStageSlotV3[];
+  /** 配置声明的 slot（slotKey → 展示标签）；订单按该集合邀请。 */
+  readonly slots: readonly FlatStageSlotV3[];
   readonly requiredSlotKeys: readonly string[];
   readonly timeExpression?: string;
   readonly timeExpressions: readonly FlatStageTimeV3[];
@@ -185,42 +169,13 @@ function flattenStage(input: {
   readonly stageId?: string;
 }): FlatStageV3 {
   const { stage, bundle } = input;
-  const payerSlot = stage.slots?.payer ?? "buyer";
-  const payeeSlot = stage.slots?.payee;
-  const acceptance = resolveAcceptance(bundle, stage);
-  const verifierSlot = acceptance.verifierSlot;
-  const senderSlots = (stage.senders ?? []).map((sender) =>
-    typeof sender === "string" ? sender : sender.slot
-  );
-  const requiredKeys = new Set<string>();
-  for (const slotKey of senderSlots) {
-    if (slotKey !== payerSlot) {
-      requiredKeys.add(slotKey);
-    }
-  }
-  if (stage.funded === true && payeeSlot !== undefined && payeeSlot !== payerSlot) {
-    requiredKeys.add(payeeSlot);
-  }
-  if ((acceptance.mode === "third_party" || acceptance.mode === "mutual") && verifierSlot !== undefined) {
-    if (verifierSlot !== payerSlot) {
-      requiredKeys.add(verifierSlot);
-    }
-  }
-  requiredKeys.delete(payerSlot);
-  const slotEntry = (slotKey: string, role: FlatStageSlotV3["role"]): FlatStageSlotV3 => {
-    const label = input.slotLabels.get(slotKey);
-    return {
+  const slots = Object.entries(stage.slots ?? {})
+    .map(([slotKey, label]) => ({
       slotKey,
-      ...(label !== undefined ? { label } : {}),
-      role,
-      required: true
-    };
-  };
-  const performerSlots = [...requiredKeys]
-    .sort()
-    .filter((slotKey) => slotKey !== verifierSlot)
-    .map((slotKey) => slotEntry(slotKey, slotKey === payeeSlot ? "performer" : "participant"));
-  const verifierSlots = verifierSlot !== undefined ? [slotEntry(verifierSlot, "verifier")] : [];
+      ...(label.trim().length > 0 ? { label } : {})
+    }))
+    .sort((left, right) => left.slotKey.localeCompare(right.slotKey));
+  const requiredSlotKeys = slots.map((slot) => slot.slotKey);
   const standards = resolveStandards(bundle, stage);
   const timeExpressions = (stage.time ?? []).map((time) => ({
     name: time.name,
@@ -234,30 +189,12 @@ function flattenStage(input: {
     ...(stage.index !== undefined ? { index: stage.index } : {}),
     optional: stage.optional === true,
     funded: stage.funded === true,
-    acceptanceModes: CONFIG_ACCEPTANCE_MODES,
-    defaultAcceptance: acceptance.mode,
-    ...(verifierSlot !== undefined ? { verifierSlot } : {}),
-    verifierSlotDeclared: acceptance.verifierSlotDeclared,
-    performerSlots,
-    verifierSlots,
-    requiredSlotKeys: [...requiredKeys].sort(),
+    slots,
+    requiredSlotKeys,
     ...(timeExpressions[0]?.expr !== undefined ? { timeExpression: timeExpressions[0].expr } : {}),
     timeExpressions,
     standards,
     ...(defaultStandard !== undefined ? { defaultStandard } : {})
-  };
-}
-
-function resolveAcceptance(
-  bundle: ConfigBundleV3,
-  stage: ConfigStageV3
-): { readonly mode: ConfigAcceptanceModeV3; readonly verifierSlot?: string; readonly verifierSlotDeclared: boolean } {
-  const mode = stage.acceptance?.mode ?? bundle.defaults?.acceptance?.mode ?? "self";
-  const declared = stage.slots?.verifier;
-  return {
-    mode,
-    ...(declared !== undefined ? { verifierSlot: declared } : {}),
-    verifierSlotDeclared: declared !== undefined
   };
 }
 

@@ -32,33 +32,26 @@ describe("flattenConfigVersion", () => {
     assert.deepEqual(flat.profiles.default, ["stage-a", "stage-b", "stage-c"]);
       });
 
-  it("derives acceptance modes and invite slots like the server", () => {
+  it("derives slots and requiredSlotKeys from the stage slot map", () => {
     const flat = flattenConfigVersion(configVersionFixture());
-    const requirements = flatStageByKey(flat, "stage-a");
-    assert.ok(requirements);
-    assert.equal(requirements.funded, false);
-    assert.equal(requirements.defaultAcceptance, "none");
-    assert.deepEqual(requirements.requiredSlotKeys, []);
-    assert.deepEqual(requirements.performerSlots, []);
-    assert.deepEqual(requirements.verifierSlots, []);
+    const stageA = flatStageByKey(flat, "stage-a");
+    assert.ok(stageA);
+    assert.equal(stageA.funded, false);
+    assert.deepEqual(stageA.requiredSlotKeys, ["slot-a"]);
+    assert.deepEqual(stageA.slots, [{ slotKey: "slot-a", label: "阶段 A" }]);
 
     const stageB = flatStageByKey(flat, "stage-b");
     assert.ok(stageB);
     assert.equal(stageB.funded, true);
-    assert.equal(stageB.defaultAcceptance, "self");
-    assert.deepEqual(stageB.requiredSlotKeys, ["role-b"]);
-    assert.deepEqual(stageB.performerSlots.map((slot) => [slot.slotKey, slot.role]), [["role-b", "performer"]]);
+    assert.deepEqual(stageB.requiredSlotKeys, ["slot-b"]);
+    assert.deepEqual(stageB.slots, [{ slotKey: "slot-b", label: "阶段 B" }]);
     assert.equal(stageB.timeExpression, "approved +14d");
-    assert.equal(stageB.verifierSlotDeclared, false);
 
     const stageC = flatStageByKey(flat, "stage-c");
     assert.ok(stageC);
-    assert.equal(stageC.defaultAcceptance, "third_party");
-    assert.equal(stageC.verifierSlot, "role-c");
-    assert.equal(stageC.verifierSlotDeclared, true);
-    assert.deepEqual(stageC.requiredSlotKeys, ["role-b", "role-c"]);
-    assert.deepEqual(stageC.verifierSlots.map((slot) => slot.slotKey), ["role-c"]);
-    assert.equal(slotLabel(flat, "role-b"), "角色 B");
+    assert.deepEqual(stageC.requiredSlotKeys, ["slot-c"]);
+    assert.deepEqual(stageC.slots, [{ slotKey: "slot-c", label: "阶段 C" }]);
+    assert.equal(slotLabel(flat, "slot-b"), "slot B");
   });
 
   it("resolves standard handles and their hashes from the bundle", () => {

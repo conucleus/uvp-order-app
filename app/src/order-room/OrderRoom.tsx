@@ -80,7 +80,6 @@ export function OrderRoom({ order, task, tasks = [] }: OrderRoomProps) {
   const roomOrder = order as OrderRoomOrder;
   const orderTasks = mergeOrderTasks(roomOrder, tasks, task);
   const currentTasks = orderTasks.length > 0 ? orderTasks : task ? [task] : [];
-  const settlementPreview = currentTasks.find((item) => item.settlementPreview)?.settlementPreview;
   const slaRows = buildSlaRows(currentTasks);
   const timeline = orderTimeline(roomOrder);
 
@@ -112,14 +111,6 @@ export function OrderRoom({ order, task, tasks = [] }: OrderRoomProps) {
           <strong>{roomOrder.paymentConditionSummary ?? order.fundingStatus}</strong>
         </div>
       </div>
-
-      {settlementPreview ? (
-        <section className="settlement-placeholder order-settlement" aria-label="付款条件占位">
-          <span className="overline">{settlementPreview.label}</span>
-          <strong>{settlementPreview.statusLabel}</strong>
-          <p>{settlementPreview.disclaimer}</p>
-        </section>
-      ) : null}
 
       {task ? (
         <div className="current-task-strip">

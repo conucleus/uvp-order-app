@@ -4,7 +4,6 @@
 import type {
   AcceptStageInviteV3Input,
   AcceptStageInviteV3Result,
-  ConfigAcceptanceModeV3,
   ConfigBundleV3,
   ConfigFileResourceRefV3,
   ConfigSlotKindV3,
@@ -41,7 +40,6 @@ import type {
 export type {
   AcceptStageInviteV3Input,
   AcceptStageInviteV3Result,
-  ConfigAcceptanceModeV3,
   ConfigBundleV3,
   ConfigFileResourceRefV3,
   ConfigSlotKindV3,
@@ -146,8 +144,6 @@ export interface OrderStageViewV3 {
   readonly status: string;
   readonly amount?: string;
   readonly feeBps?: number;
-  readonly acceptanceMode?: string;
-  readonly verifierMode?: string;
   readonly finalStandardHash?: string;
   readonly inviteDeadline?: string;
   readonly workDeadline?: string;
