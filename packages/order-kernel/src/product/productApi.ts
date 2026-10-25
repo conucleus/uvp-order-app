@@ -407,10 +407,6 @@ export interface ProductInvitePreviewDTO {
     readonly roleSlotId: string;
     readonly label: string;
     readonly duty: string;
-    readonly evidenceSpec?: readonly {
-      readonly key: string;
-      readonly label: string;
-    }[];
   };
   readonly walletBinding?: {
     readonly walletAddress: string;
@@ -1325,18 +1321,12 @@ function decorationDeclarationFrom(value: unknown): DecorationTaskDeclarationVie
   }
   const stageId = cleanDecorationText(value.stageId);
   const taskId = cleanDecorationText(value.taskId);
-  const evidenceSpec = Array.isArray(value.evidenceSpec)
-    ? value.evidenceSpec
-        .map(decorationEvidenceSlotFrom)
-        .filter((slot): slot is DecorationEvidenceSlotView => slot !== undefined)
-    : [];
   if (!stageId && !taskId) {
     return undefined;
   }
   return {
     ...(stageId ? { stageId } : {}),
     ...(taskId ? { taskId } : {}),
-    ...(evidenceSpec.length > 0 ? { evidenceSpec } : {})
   };
 }
 

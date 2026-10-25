@@ -1,0 +1,225 @@
+// V3 订单域传输类型：DTO 单源是 @uvp-eth/product-dto（服务端同一份），这里只
+// 定义内核客户端的选项/请求附加参数，并原样再导出宿主需要的 DTO 名称。
+
+import type {
+  AcceptStageInviteV3Input,
+  AcceptStageInviteV3Result,
+  ConfigAcceptanceModeV3,
+  ConfigBundleV3,
+  ConfigFileResourceRefV3,
+  ConfigSlotKindV3,
+  ConfigSlotV3,
+  ConfigSlotVisibilityV3,
+  ConfigStageV3,
+  ConfigVersionV3,
+  CreateOrderDraftV3Input,
+  CreateStageInviteV3Input,
+  FinalizeOrderDraftV3Input,
+  FinalizeOrderDraftV3Preparation,
+  FinalizeOrderDraftV3Result,
+  InviteV3,
+  OrderBirthStatusV3,
+  OrderDraftDetailV3,
+  OrderDraftStatusV3,
+  OrderDraftV3,
+  OrderStageV3,
+  OrderV3,
+  OrderV3StageDetail,
+  RejectStageInviteV3Input,
+  StageInviteCreatedV3,
+  StageInvitePreviewV3,
+  StageInviteStatusV3,
+  StageSlotStatusV3,
+  StageSlotV3,
+  StageStandardRefV3,
+  StageTermsInputV3,
+  StageTermsV3,
+  StageWindowValuesV3,
+  UpdateOrderDraftV3Input
+} from "@uvp-eth/product-dto";
+
+export type {
+  AcceptStageInviteV3Input,
+  AcceptStageInviteV3Result,
+  ConfigAcceptanceModeV3,
+  ConfigBundleV3,
+  ConfigFileResourceRefV3,
+  ConfigSlotKindV3,
+  ConfigSlotV3,
+  ConfigSlotVisibilityV3,
+  ConfigStageV3,
+  ConfigVersionV3,
+  CreateOrderDraftV3Input,
+  CreateStageInviteV3Input,
+  FinalizeOrderDraftV3Input,
+  FinalizeOrderDraftV3Preparation,
+  FinalizeOrderDraftV3Result,
+  InviteV3,
+  OrderBirthStatusV3,
+  OrderDraftDetailV3,
+  OrderDraftStatusV3,
+  OrderDraftV3,
+  OrderStageV3,
+  OrderV3,
+  OrderV3StageDetail,
+  RejectStageInviteV3Input,
+  StageInviteCreatedV3,
+  StageInvitePreviewV3,
+  StageInviteStatusV3,
+  StageSlotStatusV3,
+  StageSlotV3,
+  StageStandardRefV3,
+  StageTermsInputV3,
+  StageTermsV3,
+  StageWindowValuesV3,
+  UpdateOrderDraftV3Input
+};
+
+/** 写请求的幂等键：服务端按 (wallet, operation, idempotencyKey, payload) 去重。 */
+export interface ProductV3RequestOptions {
+  readonly idempotencyKey?: string | undefined;
+}
+
+/**
+ * 配置发布入参：服务端接受 `{config, status?, configHash?}`（也接受裸 bundle，
+ * 内核只暴露带 `config` 的显式形态，避免与状态字段混淆）。
+ */
+export interface PublishConfigV3Input {
+  readonly config: ConfigBundleV3;
+  readonly status?: "draft" | "published" | undefined;
+  /** 可选：客户端已有权威 hash 时回呈，服务端不一致会 422 config_hash_mismatch。 */
+  readonly configHash?: string | undefined;
+  /** 发布时登记已编译/注册的 UVP plan；与 planHash 必须成对出现，订单复用它。 */
+  readonly planId?: string | undefined;
+  readonly planHash?: string | undefined;
+}
+
+/** 钱包会话 token 提供者：宿主通常直接接已有 ProductApiClient.currentSessionToken。 */
+export type ProductV3SessionTokenProvider = () => string | undefined;
+
+export interface ProductV3ClientOptions {
+  /** 参与者服务基地址；缺省直接抛错，不回退任何样例数据。 */
+  readonly baseUrl?: string | undefined;
+  readonly fetcher?: ProductV3Fetcher | undefined;
+  /** 单个请求的超时毫秒数；默认对齐现有 product client 的 6s 口径。 */
+  readonly timeoutMs?: number | undefined;
+  /** 固定会话 token（与 getSessionToken 二选一，getSessionToken 优先）。 */
+  readonly sessionToken?: string | undefined;
+  /** 每次请求前读取会话 token（接已有客户端的 proveWalletControl 结果）。 */
+  readonly getSessionToken?: ProductV3SessionTokenProvider | undefined;
+}
+
+export type ProductV3Fetcher = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
+
+// ---------------------------------------------------------------------------
+// V3 读投影（服务端按可见性 scope 裁剪后的形状）：字段由服务端裁剪，
+// 客户端只做结构校验与展示，不自行放行/补字段。
+// ---------------------------------------------------------------------------
+
+export type DataStateV3 = "ok" | "none" | "pending" | "unknown";
+
+export interface StandardViewV3 {
+  readonly name: string;
+  readonly version?: string;
+  readonly hash?: string;
+}
+
+export interface SlotViewV3 {
+  readonly slotKey: string;
+  readonly required: boolean;
+  readonly subjectLabel?: string;
+  readonly status: string;
+  readonly wallet?: string;
+  readonly contactRef?: string;
+}
+
+export interface HandleViewV3 {
+  readonly handleKey: string;
+  readonly version?: string;
+  readonly hash?: string;
+}
+
+export interface EscrowViewV3 {
+  readonly dataState: DataStateV3;
+  readonly stageKey: string;
+  readonly trancheId?: string;
+  readonly state?: string;
+  readonly amount?: string;
+  readonly feeBps?: number;
+  readonly payer?: string;
+  readonly payee?: string;
+  readonly verifier?: string;
+  readonly feeRecipient?: string;
+  readonly observationDays?: number;
+  readonly updatedAt?: string;
+  readonly funded?: boolean;
+  readonly reason?: string;
+}
+
+export interface OrderStageViewV3 {
+  readonly stageKey: string;
+  readonly stageId: string;
+  readonly index: number;
+  readonly status: string;
+  readonly amount?: string;
+  readonly feeBps?: number;
+  readonly acceptanceMode?: string;
+  readonly verifierMode?: string;
+  readonly finalStandardHash?: string;
+  readonly inviteDeadline?: string;
+  readonly workDeadline?: string;
+  readonly standard?: StandardViewV3;
+  readonly slots?: readonly SlotViewV3[];
+  readonly fileResources?: readonly HandleViewV3[];
+  readonly escrow?: EscrowViewV3;
+}
+
+export interface OrderViewV3 {
+  readonly orderId: string;
+  readonly planId?: string;
+  readonly chainId?: number;
+  readonly stateMachine?: string;
+  readonly status?: string;
+  readonly title?: string;
+  readonly currency?: string;
+  readonly buyerWallet?: string;
+  readonly termsHash?: string;
+  readonly txHash?: string;
+  readonly draftId?: string;
+  readonly dataState: DataStateV3;
+  readonly stages: readonly OrderStageViewV3[];
+}
+
+export interface StageViewResponseV3 {
+  readonly order: OrderViewV3;
+  readonly stage: OrderStageViewV3;
+  readonly dataState: DataStateV3;
+}
+
+export interface ResourceListViewV3 {
+  readonly dataState: DataStateV3;
+  readonly stageKey: string;
+  readonly items: readonly HandleViewV3[];
+  readonly reason?: string;
+}
+
+export interface TaskViewV3 {
+  readonly taskId: string;
+  readonly orderId: string;
+  readonly stageKey: string;
+  readonly slotKey: string;
+  readonly wallet: string;
+  readonly kind: "accept_invite" | "fund_stage" | "perform_stage" | "verify_stage" | "settle_stage";
+  readonly status: "open" | "blocked" | "done";
+  readonly nextAction: string;
+  readonly dueAt?: string;
+  readonly actionRef?: string;
+  readonly blockedBy?: readonly string[];
+}
+
+export interface TaskListViewV3 {
+  readonly dataState: DataStateV3;
+  readonly orderId?: string;
+  readonly stageKey?: string;
+  readonly items: readonly TaskViewV3[];
+}

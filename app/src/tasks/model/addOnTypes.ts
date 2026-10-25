@@ -109,7 +109,6 @@ export type ProductTaskWithAddOns = Omit<
   | "executorPatchModes"
   | "executorOverlay"
   | "resourceOverlays"
-  | "capabilityPlugin"
   | "addOnManifest"
 > & {
   readonly addOnKind?: ParticipantAddOnKind | undefined;
@@ -117,9 +116,6 @@ export type ProductTaskWithAddOns = Omit<
   readonly executorPatchModes?: readonly ExecutorPatchModeOptionDTO[] | undefined;
   readonly executorOverlay?: ExecutorOverlayProjectionDTO | undefined;
   readonly resourceOverlays?: readonly ResourceOverlayProjectionDTO[] | undefined;
-  readonly capabilityPlugin?: (ProductTaskDTO["capabilityPlugin"] & {
-    readonly addOnKind?: ParticipantAddOnKind | undefined;
-  }) | undefined;
   readonly addOnManifest?: ProductTaskDTO["addOnManifest"] | undefined;
 };
 

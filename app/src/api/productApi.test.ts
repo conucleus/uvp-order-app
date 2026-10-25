@@ -176,7 +176,7 @@ describe("order app Product API boundary", () => {
             roleSlotId: "delivery",
             label: "物流/报关",
             duty: "提交物流凭证",
-            evidenceSpec: [{ key: "customs_declaration", label: "报关单" }]
+            
           },
           acceptance: {
             canAccept: true,

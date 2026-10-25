@@ -2,7 +2,11 @@
   "extends": "../../../tsconfig.base.json",
   "compilerOptions": {
     "noEmit": true,
-    "tsBuildInfoFile": "./node_modules/.tmp/tsconfig.kernel.tsbuildinfo"
+    "tsBuildInfoFile": "./node_modules/.tmp/tsconfig.kernel.tsbuildinfo",
+    "rootDir": "."
   },
-  "include": ["src"]
+  "include": [
+    "src/**/*.ts",
+    "test/**/*.ts"
+  ]
 }

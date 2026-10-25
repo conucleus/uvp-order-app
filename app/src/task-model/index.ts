@@ -15,10 +15,9 @@ export {
 export {
   taskAddOnKind,
   taskAddOnLabel,
-  taskCapabilityPluginKind,
   taskExecutorDisplay,
   taskPrimaryActionLabel,
-  taskRequiredInputsFromCapability,
+  taskRequiredInputs,
   taskResourceRequirementInputs,
   taskSubmitIntent,
   type TaskExecutorDisplay,

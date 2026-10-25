@@ -1,6 +1,6 @@
 import type { ChainProofRowDTO, ProductTaskDTO } from "@uvp-eth/product-dto";
 import { executorOverlayForTask, resourceRequirementDisplays } from "./addOnTypes";
-import { taskRequiredInputsFromCapability } from "./taskPresentation";
+import { taskRequiredInputs } from "./taskPresentation";
 import { cleanString } from "./taskUtils";
 
 export interface TaskSignalContainerSummary {
@@ -96,7 +96,7 @@ function requiredInputsForTask(task: ProductTaskDTO): readonly string[] {
   const resources = resourceRequirementDisplays(task)
     .filter((resource) => resource.required)
     .map((resource) => resource.label);
-  const policyInputs = (taskRequiredInputsFromCapability(task) ?? [])
+  const policyInputs = (taskRequiredInputs(task) ?? [])
     .filter((input) => input.required && !input.completed)
     .map((input) => input.label);
   return uniqueLabels([
@@ -109,7 +109,7 @@ function evidenceRequirementsForTask(task: ProductTaskDTO): readonly string[] {
   const resources = resourceRequirementDisplays(task)
     .filter((resource) => resource.required)
     .map((resource) => resource.label);
-  const evidenceInputs = (taskRequiredInputsFromCapability(task) ?? [])
+  const evidenceInputs = (taskRequiredInputs(task) ?? [])
     .filter((input) => input.required && !input.completed && input.inputType === "evidence")
     .map((input) => input.label);
   return uniqueLabels([

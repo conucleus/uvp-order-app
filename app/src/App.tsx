@@ -13,7 +13,7 @@ import {
 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { ReactElement } from "react";
-import type { ProductOrderDTO, ProductTaskDTO, ZhixuDetailDTO } from "@uvp-eth/product-dto";
+
 import {
   createProductApiClient,
   isWalletIdentityRequired,
@@ -26,12 +26,11 @@ import { createOrderAppActions } from "./actions/orderAppActions";
 import { participantQueryFromSession, readParticipantSession, shortWallet } from "./auth/participant";
 import { NotificationCenter, useOrderAppNotifications } from "./notifications/NotificationCenter";
 import type { OrderAppNotificationDTO } from "./notifications/types";
-import { InviteOnboarding } from "./onboarding/InviteOnboarding";
+import { CreateOrderV3Page, InviteV3Page, OrderRoomV3Page } from "./v3/pages";
+import { createV3Ports } from "./v3/ports";
+import { createV3Client } from "./v3/client";
 import { WalletLoginPanel } from "./onboarding/WalletLoginPanel";
-import { CreateOrderPage } from "./orders/CreateOrderPage";
-import type { CreateOrderCreatedResult } from "./orders/useCreateOrderFlow";
-import { decorateTaskEvidenceSpec } from "./decoration/decorationSupport";
-import { useOrderAppDecorations } from "./decoration/useZhixuDecorations";
+
 import { DecorationPage } from "./reader/DecorationPage";
 import { RegistrationPage } from "./registration";
 import { RequirementsPage } from "./requirements";
@@ -49,8 +48,7 @@ import {
   type OrderAppSection
 } from "./routes/appRoutes";
 import { personalSignWithInjectedWallet } from "./wallet/injectedWallet";
-import type { TaskSubmissionProof } from "./task-model";
-import { TaskWorkspace } from "./workspace/TaskWorkspace";
+import type { CreateOrderV3Result } from "./v3/types";
 import "./app/collaboration-notifications.css";
 
 type LoadState =
@@ -111,6 +109,11 @@ function UnconfiguredShell({ message }: { readonly message: string }) {
 
 function AppShell({ api }: { readonly api: ProductApiClient }) {
   const actions = useMemo(() => createOrderAppActions(api), [api]);
+  // V3 端口复用同一钱包会话（proveWalletControl 之后持有的 token）。
+  const v3 = useMemo(() => {
+    const client = createV3Client(() => api.currentSessionToken());
+    return { client, ports: createV3Ports(client) };
+  }, [api]);
   const [session] = useState(() => readParticipantSession());
   const [loadState, setLoadState] = useState<LoadState>({ status: "loading" });
   // 会话恢复：proveWalletControl 留存的 token 会话级持久化，刷新页面时
@@ -127,7 +130,7 @@ function AppShell({ api }: { readonly api: ProductApiClient }) {
   // 路由只认 hash，search 残留不会在 hash 导航后还原邀请面板；渲染条件是
   // route.inviteId || inviteEntry，离开流程时两者同步清掉，工作区恢复可达。
   const [inviteEntry, setInviteEntry] = useState<InviteEntry | undefined>(() => readInviteEntryFromSearch());
-  const [submissionProofs, setSubmissionProofs] = useState<Readonly<Record<string, TaskSubmissionProof>>>({});
+
   const [notificationsOpen, setNotificationsOpen] = useState(false);
   // 开单成功提示：跳转订单页后仍保留，明确"已创建、正在同步"；同步完成前
   // 新订单可能还不在投影里，不能因为列表暂时为空就呈现成创建失败。
@@ -194,54 +197,8 @@ function AppShell({ api }: { readonly api: ProductApiClient }) {
   }
 
   const data = loadState.status === "ready" ? loadState.data : undefined;
-  // 装修数据（Store 读侧）：按当前订单/任务涉及的 zhixu 拉取；reader 页自己加载。
-  const zhixuIds = useMemo(() => {
-    const ids = new Set<string>();
-    for (const task of data?.tasks ?? []) {
-      ids.add(task.zhixuId);
-    }
-    for (const order of data?.orders ?? []) {
-      ids.add(order.zhixuId);
-    }
-    return [...ids].filter((id) => id.trim().length > 0).sort();
-  }, [data]);
-  const decorations = useOrderAppDecorations(api, zhixuIds, decorationEntry === undefined);
-  // 任务证据要求：任务自带 spec 优先；缺失时按 taskId→stageId 用装修声明补位，
-  // 补位来源单独标记，界面如实注明"来自装修"。
-  const decoratedTasks = useMemo(() => {
-    const fromDecoration = new Set<string>();
-    const decorated = (data?.tasks ?? []).map((task) => {
-      const snapshot = decorations.byZhixuId[task.zhixuId];
-      const result = decorateTaskEvidenceSpec(task, snapshot?.decoration);
-      if (result.source === "decoration") {
-        fromDecoration.add(result.task.taskId);
-      }
-      return result.task;
-    });
-    return { tasks: decorated, fromDecoration };
-  }, [data, decorations.byZhixuId]);
-  const zhixuById = useMemo(() => {
-    const byId: Record<string, ZhixuDetailDTO> = {};
-    for (const [zhixuId, snapshot] of Object.entries(decorations.byZhixuId)) {
-      if (snapshot.zhixu) {
-        byId[zhixuId] = snapshot.zhixu;
-      }
-    }
-    return byId;
-  }, [decorations.byZhixuId]);
-  const workspaceData = useMemo<ProductHomeData | undefined>(
-    () => (data ? { ...data, tasks: decoratedTasks.tasks } : undefined),
-    [data, decoratedTasks.tasks]
-  );
-  const selectedTask = useMemo(
-    () => selectTask(decoratedTasks.tasks, route.taskId),
-    [decoratedTasks.tasks, route.taskId]
-  );
-  const selectedOrder = useMemo(
-    () => selectOrder(data?.orders ?? [], route.orderId, selectedTask),
-    [data?.orders, route.orderId, selectedTask]
-  );
-  const selectedSubmissionProof = selectedTask ? submissionProofs[selectedTask.taskId] : undefined;
+  const selectedOrderId = route.orderId;
+
   // 通知中心与主客户端共用同一钱包会话（会话锚定身份单一来源）；
   // 取值器按 api 记忆，避免每次渲染都触发通知 effect 重跑。
   const notificationSessionToken = useMemo(() => () => api.currentSessionToken(), [api]);
@@ -273,7 +230,7 @@ function AppShell({ api }: { readonly api: ProductApiClient }) {
   function handleOpenNotification(notification: OrderAppNotificationDTO) {
     void notificationState.markRead(notification);
     navigate({
-      section: notification.taskId ? "tasks" : "orders",
+      section: "tasks",
       orderId: notification.orderId,
       taskId: notification.taskId
     });
@@ -290,11 +247,8 @@ function AppShell({ api }: { readonly api: ProductApiClient }) {
    * 开单成功：订单已提交创建，立即刷新投影并跳到订单页。投影同步有延迟，
    * 主壳横幅明确"已创建、正在同步"，避免把尚未索引误读成创建失败。
    */
-  function handleOrderCreated(result: CreateOrderCreatedResult) {
-    setCreatedOrderNotice({
-      title: result.title,
-      ...(result.orderId ? { orderId: result.orderId } : {})
-    });
+  function handleOrderCreated(result: CreateOrderV3Result) {
+    setCreatedOrderNotice({ title: `草稿 ${result.draftId} 已创建`, orderId: undefined });
     if (createdOrderNoticeTimerRef.current !== undefined) {
       window.clearTimeout(createdOrderNoticeTimerRef.current);
     }
@@ -302,11 +256,6 @@ function AppShell({ api }: { readonly api: ProductApiClient }) {
       setCreatedOrderNotice(undefined);
       createdOrderNoticeTimerRef.current = undefined;
     }, 20_000);
-    navigate({
-      section: "orders",
-      ...(result.orderId ? { orderId: result.orderId } : {})
-    });
-    handleRefresh({ silent: true });
   }
 
   function dismissInviteEntry() {
@@ -358,11 +307,10 @@ function AppShell({ api }: { readonly api: ProductApiClient }) {
           }}
         />
       ) : route.inviteId || inviteEntry ? (
-        <InviteOnboarding
+        <InviteV3Page
+          ports={v3.ports}
           inviteId={route.inviteId ?? inviteEntry?.inviteId ?? ""}
           inviteToken={inviteEntry?.inviteToken}
-          actions={actions}
-          session={session}
           onAccepted={handleInviteAccepted}
           onRejected={clearInviteSearchParams}
           onDismiss={dismissInviteEntry}
@@ -375,13 +323,7 @@ function AppShell({ api }: { readonly api: ProductApiClient }) {
           session={{ currentSessionToken: () => api.currentSessionToken() }}
           wallet={actions}
           initialAddress={data?.participant.walletAddress ?? session.walletAddress}
-          onBack={() =>
-            navigate({
-              section: "tasks",
-              taskId: selectedTask?.taskId,
-              orderId: selectedOrder?.orderId
-            })
-          }
+          onBack={() => navigate({ section: "tasks", orderId: selectedOrderId })}
         />
       ) : route.section === "requirements" ? (
         loadState.status === "unauthenticated" ? (
@@ -397,19 +339,13 @@ function AppShell({ api }: { readonly api: ProductApiClient }) {
             draftId={route.draftId}
             taskId={route.taskId}
             walletAddress={data?.participant.walletAddress ?? session.walletAddress}
-            onBack={() =>
-              navigate({
-                section: "tasks",
-                taskId: selectedTask?.taskId,
-                orderId: selectedOrder?.orderId
-              })
-            }
+            onBack={() => navigate({ section: "tasks", orderId: selectedOrderId })}
             onOpenDraft={(draftId) =>
               navigate({
                 section: "requirements",
                 draftId,
                 taskId: route.taskId,
-                orderId: selectedOrder?.orderId
+                orderId: selectedOrderId
               })
             }
             onSessionExpired={handleSessionExpired}
@@ -432,13 +368,7 @@ function AppShell({ api }: { readonly api: ProductApiClient }) {
             orderId={route.escrowOrderId}
             stageId={route.escrowStageId}
             walletAddress={data?.participant.walletAddress ?? session.walletAddress}
-            onBack={() =>
-              navigate({
-                section: "tasks",
-                taskId: selectedTask?.taskId,
-                orderId: selectedOrder?.orderId
-              })
-            }
+            onBack={() => navigate({ section: "tasks", orderId: selectedOrderId })}
             onSelect={(selection) =>
               navigate({
                 section: "escrow",
@@ -450,21 +380,11 @@ function AppShell({ api }: { readonly api: ProductApiClient }) {
           />
         )
       ) : route.section === "create" && loadState.status !== "unauthenticated" ? (
-        // 开单：已发布秩序目录 + 装修 + 触发内容 + 参与方邀请 + 本人确认创建。
-        // 无会话时落到下方登录入口：草稿/邀请/准备都要求会话锚定身份，
-        // 渲染一个点不动的表单只会把可登录状态伪装成不可用。
-        <CreateOrderPage
-          api={api}
-          walletAddress={data?.participant.walletAddress ?? session.walletAddress}
-          onBack={() =>
-            navigate({
-              section: "tasks",
-              taskId: selectedTask?.taskId,
-              orderId: selectedOrder?.orderId
-            })
-          }
+        // V3 开单：配置版本 → 阶段子集/条款 → 草稿 → 邀请 → buyer EIP-712 finalize。
+        <CreateOrderV3Page
+          ports={v3.ports}
           onCreated={handleOrderCreated}
-          onSessionExpired={handleSessionExpired}
+          onBack={() => navigate({ section: "tasks", orderId: selectedOrderId })}
         />
       ) : loadState.status === "unauthenticated" ? (
         // 非 local 部署的无会话态：登录是唯一可用入口，不渲染待办工作区
@@ -496,7 +416,7 @@ function AppShell({ api }: { readonly api: ProductApiClient }) {
             <button
               className="quiet-button"
               type="button"
-              onClick={() => navigate({ section: "registration", taskId: selectedTask?.taskId, orderId: selectedOrder?.orderId })}
+              onClick={() => navigate({ section: "registration", orderId: selectedOrderId })}
               data-testid="open-registration-button"
             >
               <Fingerprint aria-hidden="true" />
@@ -535,13 +455,13 @@ function AppShell({ api }: { readonly api: ProductApiClient }) {
               active={route.section === "tasks"}
               label="我的待办"
               icon={<ClipboardList />}
-              onClick={() => navigate({ section: "tasks", taskId: selectedTask?.taskId, orderId: selectedOrder?.orderId })}
+              onClick={() => navigate({ section: "tasks", orderId: selectedOrderId })}
             />
             <SectionButton
               active={route.section === "orders"}
               label="订单"
               icon={<FolderKanban />}
-              onClick={() => navigate({ section: "orders", taskId: selectedTask?.taskId, orderId: selectedOrder?.orderId })}
+              onClick={() => navigate({ section: "orders", orderId: selectedOrderId })}
             />
             <SectionButton
               active={requirementsSection}
@@ -551,8 +471,7 @@ function AppShell({ api }: { readonly api: ProductApiClient }) {
                 navigate({
                   section: "requirements",
                   draftId: route.draftId,
-                  taskId: selectedTask?.taskId,
-                  orderId: selectedOrder?.orderId
+                  orderId: selectedOrderId
                 })
               }
             />
@@ -564,7 +483,7 @@ function AppShell({ api }: { readonly api: ProductApiClient }) {
               onClick={() =>
                 navigate({
                   section: "escrow",
-                  escrowOrderId: selectedOrder?.orderId
+                  escrowOrderId: selectedOrderId
                 })
               }
             />
@@ -578,7 +497,7 @@ function AppShell({ api }: { readonly api: ProductApiClient }) {
               active={route.section === "proof"}
               label="证明"
               icon={<ShieldCheck />}
-              onClick={() => navigate({ section: "proof", taskId: selectedTask?.taskId, orderId: selectedOrder?.orderId })}
+              onClick={() => navigate({ section: "proof", orderId: selectedOrderId })}
             />
           </nav>
 
@@ -586,29 +505,10 @@ function AppShell({ api }: { readonly api: ProductApiClient }) {
             {loadState.status === "loading" ? (
               <LoadingState />
             ) : (
-              <TaskWorkspace
-                actions={actions}
-                data={workspaceData}
-                decorationEvidenceTaskIds={decoratedTasks.fromDecoration}
-                zhixuById={zhixuById}
-                route={route}
-                selectedOrder={selectedOrder}
-                selectedTask={selectedTask}
-                participantWallet={data?.participant.walletAddress ?? session.walletAddress}
-                source={data?.source}
-                submissionProof={selectedSubmissionProof}
-                onSelectTask={(taskId) => {
-                  const task = data?.tasks.find((item) => item.taskId === taskId);
-                  navigate({ section: "tasks", taskId, orderId: task?.orderId ?? selectedOrder?.orderId });
-                }}
-                onPrepareTaskSubmit={(taskId, input) => actions.prepareTaskSubmit(taskId, input)}
-                onSubmitTask={(taskId, input) => actions.submitTask(taskId, input)}
-                onProofReady={(proof) => setSubmissionProofs((current) => ({
-                  ...current,
-                  [proof.taskId]: proof
-                }))}
-                onSessionExpired={handleSessionExpired}
-                onSubmitted={() => handleRefresh({ silent: true })}
+              <OrderRoomV3Page
+                ports={v3.ports}
+                orderId={selectedOrderId}
+                onBack={() => navigate({ section: "tasks", orderId: selectedOrderId })}
               />
             )}
           </section>
@@ -676,17 +576,3 @@ function LoadingState() {
   );
 }
 
-function selectTask(tasks: readonly ProductTaskDTO[], taskId: string | undefined): ProductTaskDTO | undefined {
-  return tasks.find((task) => task.taskId === taskId) ?? tasks.find((task) => task.status === "open") ?? tasks[0];
-}
-
-function selectOrder(
-  orders: readonly ProductOrderDTO[],
-  orderId: string | undefined,
-  task: ProductTaskDTO | undefined
-): ProductOrderDTO | undefined {
-  return orders.find((order) => order.orderId === orderId) ??
-    orders.find((order) => order.orderId === task?.orderId) ??
-    orders.find((order) => order.status === "registered") ??
-    orders[0];
-}

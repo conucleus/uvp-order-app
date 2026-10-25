@@ -8,7 +8,10 @@
   "exports": {
     ".": "./src/index.ts",
     "./product": "./src/product/index.ts",
+    "./product/v3": "./src/product/v3/index.ts",
+    "./product/v3/*": "./src/product/v3/*.ts",
     "./escrow": "./src/escrow/index.ts",
+    "./escrow/v3": "./src/escrow/v3/index.ts",
     "./*": "./src/*.ts"
   },
   "types": "./src/index.ts",
@@ -17,14 +20,18 @@
     "README.md"
   ],
   "scripts": {
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "test": "tsx --test test/*.test.ts"
   },
   "dependencies": {
     "@uvp-eth/executor-kit": "workspace:*",
     "@uvp-eth/product-dto": "workspace:*",
-    "viem": "^2.21.58"
+    "viem": "^2.21.58",
+    "@uvp-eth/protocol-bindings": "workspace:*"
   },
   "devDependencies": {
-    "typescript": "^5.7.3"
+    "typescript": "^5.7.3",
+    "@types/node": "^22.15.3",
+    "tsx": "^4.20.6"
   }
 }

@@ -303,10 +303,9 @@ export const bareNoteResourceRequirement: ProductResourceRequirementDTO = {
   source: "participant_input"
 };
 
-// BFF 任务契约随任务下发 capabilityPlugin.pluginKind（缺失时前端按通用提交
 // 插件中性降级，不中断渲染）。
 // 与 product-dto fixtures/customs.ts 的插件形态保持一致。
-const customsDeliveryPlugin = {
+const __DEL_customsDeliveryPlugin = {
   pluginKind: "delivery_update",
   source: "explicit",
   roleSlotId: "delivery",
@@ -315,7 +314,7 @@ const customsDeliveryPlugin = {
   primaryActionLabel: "确认报关完成"
 } as const;
 
-const stageSelectorPlugin = {
+const __DEL_stageSelectorPlugin = {
   pluginKind: "evidence_submission",
   source: "explicit",
   roleSlotId: "buyer-selector",
@@ -324,7 +323,7 @@ const stageSelectorPlugin = {
   primaryActionLabel: "选择履约者"
 } as const;
 
-const resourceControllerPlugin = {
+const __DEL_resourceControllerPlugin = {
   pluginKind: "evidence_submission",
   source: "explicit",
   roleSlotId: "buyer-resource-controller",
@@ -333,7 +332,7 @@ const resourceControllerPlugin = {
   primaryActionLabel: "补充凭证要求"
 } as const;
 
-const inspectionValidationPlugin = {
+const __DEL_inspectionValidationPlugin = {
   pluginKind: "validation_confirm",
   source: "explicit",
   roleSlotId: "validation",
@@ -357,7 +356,6 @@ const customsBaseTask: ProductTaskWithAddOns = {
   status: "open",
   addOnKind: "submit_signal",
   addOnManifest: deliveryAddOnManifest,
-  capabilityPlugin: customsDeliveryPlugin,
   primaryActionLabel: "确认报关完成",
   participantRoleLabel: "报关行",
   responsibilityStatements: [],
@@ -374,27 +372,6 @@ export function readinessTask(overrides: Partial<ProductTaskWithAddOns> = {}): P
   } as ProductTaskDTO;
 }
 
-/**
- * 无 addOnManifest 的提交任务：EvidencePanel 直渲染路径（evidenceSpec 单轨口径），
- * 用于必填凭证校验、钱包授权预检与签名提交链路的负向用例。
- */
-export function customsEvidenceTask(overrides: Partial<ProductTaskWithAddOns> = {}): ProductTaskDTO {
-  return readinessTask({
-    taskId: "task-customs-evidence-001",
-    addOnManifest: undefined,
-    evidenceSpec: [
-      {
-        key: "customs_declaration_pdf",
-        label: "报关单 PDF",
-        required: true,
-        inputKind: "file",
-        accept: ["application/pdf", ".pdf"]
-      }
-    ],
-    ...overrides
-  });
-}
-
 const manifestTasks: Readonly<Record<string, ProductTaskDTO>> = {
   "task-customs-submit-001": readinessTask(),
   "task-selector-customs-001": readinessTask({
@@ -405,7 +382,6 @@ const manifestTasks: Readonly<Record<string, ProductTaskDTO>> = {
     stageName: "订单确认",
     addOnKind: "stage_executor_patch",
     addOnManifest: selectorAddOnManifest,
-    capabilityPlugin: stageSelectorPlugin,
     selectableTargets: [
       {
         targetStageId: "customs-complete",
@@ -423,7 +399,6 @@ const manifestTasks: Readonly<Record<string, ProductTaskDTO>> = {
     stageName: "订单确认",
     addOnKind: "stage_resource_patch",
     addOnManifest: resourcePatchAddOnManifest,
-    capabilityPlugin: resourceControllerPlugin,
     selectableTargets: [
       {
         targetStageId: "customs-complete",
@@ -454,7 +429,6 @@ export function executorManifestTask(overrides: Partial<ProductTaskWithAddOns> =
     stageName: "检验验收",
     addOnKind: "submit_signal",
     addOnManifest: validationAddOnManifest,
-    capabilityPlugin: inspectionValidationPlugin,
     primaryActionLabel: "确认验收结果",
     participantRoleLabel: "验收方",
     ...overrides
@@ -476,7 +450,6 @@ export function selectorTask(overrides: Partial<ProductTaskWithAddOns> = {}): Pr
     // 补丁动作走 ExecutorPatchPanel 直渲染：不带 addOnManifest（否则 manifest 流量门控
     // 会改为渲染 ManifestAddOnPanel，覆盖不到履约者选择表单）。
     addOnManifest: undefined,
-    capabilityPlugin: stageSelectorPlugin,
     selectableTargets: [
       {
         targetStageId: "inspection",
@@ -582,7 +555,6 @@ export function resourcePatchTask(overrides: Partial<ProductTaskWithAddOns> = {}
     addOnKind: "stage_resource_patch",
     // 资源补充走 ResourcePatchPanel 直渲染：不带 addOnManifest。
     addOnManifest: undefined,
-    capabilityPlugin: resourceControllerPlugin,
     selectableTargets: [
       {
         targetStageId: "inspection",
@@ -602,127 +574,6 @@ export function resourcePatchTask(overrides: Partial<ProductTaskWithAddOns> = {}
   });
 }
 
-
-/** 装修数据桩：与 used-car 装修同形（theme + 按 stage 绑定的 evidenceSpec）。 */
-const usedCarPlanId = "0xusedcar0000000000000000000000000000000000000000000000000000001";
-const emptyDecorationPlanId = "0xempty0000000000000000000000000000000000000000000000000000000001";
-const usedCarDecorationZhixuId = "zhixu-used-car-export-v0";
-
-const usedCarDecoration = {
-  planId: usedCarPlanId,
-  current: {
-    version: 1,
-    data: {
-      schemaVersion: "store-zhixu-decoration.v1",
-      theme: {
-        displayName: "中国—中亚二手车出口 · 九步逐段确认",
-        description: "九个阶段逐段确认：每阶段先交材料，再由约定的验收方确认放行。",
-        tags: ["二手车出口", "中亚", "独立检测"],
-        highlights: ["每阶段先交材料，再由约定的验收方确认", "检测、物流执行方由当事人在订单内选定"]
-      },
-      taskDeclarations: [
-        {
-          stageId: "customs-complete",
-          evidenceSpec: [
-            {
-              key: "decoration_customs_declaration",
-              label: "装修材料：出口报关单",
-              inputKind: "file",
-              accept: ["application/pdf", ".pdf"],
-              required: true,
-              description: "装修数据提供的材料要求。"
-            }
-          ]
-        },
-        {
-          stageId: "demand",
-          evidenceSpec: [
-            { key: "demand_vehicle", label: "意向车型与年份", inputKind: "text", required: true }
-          ]
-        }
-      ]
-    },
-    createdAt: "2026-10-23T00:00:00.000Z"
-  },
-  versions: []
-} as const;
-
-function usedCarZhixuDetail(zhixuId: string, planId: string): ZhixuDetailDTO {
-  return {
-    zhixuId,
-    title: "二手车出口秩序",
-    subtitle: "九个阶段逐段确认",
-    reviewStatus: "approved",
-    reviewLabel: "已审核",
-    riskLevel: "中",
-    applicableBusiness: ["二手车出口"],
-    excludedBusiness: [],
-    stageCount: 2,
-    roleSlotCount: 2,
-    supportedPaymentMethods: [],
-    maintainer: "运营方",
-    updatedAt: "2026-10-23T00:00:00.000Z",
-    planPublication: {
-      status: "published",
-      label: "已发布",
-      stateMachineLabel: "UVPStateMachine",
-      planId,
-      planHash: "0xhash-used-car"
-    },
-    roleSlots: [
-      { slotId: "buyer", title: "买方", label: "采购方", duty: "确认需求与验收", evidence: ["验收确认"], status: "required", tone: "info", required: true },
-      { slotId: "seller", title: "卖方", label: "出口商", duty: "交付车辆与单证", evidence: ["报关单"], status: "required", tone: "ok", required: true }
-    ],
-    dockableModules: [],
-    stages: [
-      {
-        stageId: "demand",
-        index: 0,
-        name: "需求确认",
-        evidence: ["意向车型"],
-        ownerRole: "买方",
-        status: "active",
-        selectedStageTargets: ["inspection"]
-      },
-      {
-        stageId: "inspection",
-        index: 1,
-        name: "独立检测",
-        evidence: ["检测报告"],
-        ownerRole: "检测方",
-        status: "pending"
-      },
-      {
-        stageId: "customs-complete",
-        index: 2,
-        name: "出口报关",
-        evidence: ["报关单"],
-        ownerRole: "卖方",
-        status: "pending"
-      }
-    ],
-    orderPermissionTable: [],
-    proofRows: [],
-    createOrderHint: "开单后按阶段提交材料。"
-  };
-}
-
-/** 缺失证据配置、且没有 add-on manifest 的任务：装修 evidenceSpec 单轨补位的展示面。 */
-export function decorationEvidenceTask(overrides: Partial<ProductTaskWithAddOns> = {}): ProductTaskDTO {
-  return readinessTask({
-    taskId: "task-decoration-evidence-001",
-    zhixuId: usedCarDecorationZhixuId,
-    stageId: "demand",
-    stageName: "需求确认",
-    title: "确认需求并提交材料",
-    subtitle: "本待办的材料要求由秩序装修数据提供。",
-    addOnKind: undefined,
-    addOnManifest: undefined,
-    selectableTargets: undefined,
-    evidenceSpec: undefined,
-    ...overrides
-  } as unknown as Partial<ProductTaskWithAddOns>);
-}
 
 export async function installProductApiStub(page: Page, options: StubOptions = {}): Promise<void> {
   if (process.env.UVP_ORDER_APP_E2E_PROFILE === "full") {
@@ -806,12 +657,6 @@ export async function installProductApiStub(page: Page, options: StubOptions = {
 
     // 装修接线：秩序详情（公共读）+ Store 装修数据。默认秩序返回空装修，
     // 只有 used-car 秩序的桩带 theme/taskDeclarations，避免污染其他用例。
-    if (request.method() === "GET" && pathname.startsWith("/product/zhixus/")) {
-      const zhixuId = decodeURIComponent(pathname.slice("/product/zhixus/".length));
-      const planId = zhixuId === usedCarDecorationZhixuId ? usedCarPlanId : emptyDecorationPlanId;
-      await fulfillJson(route, { zhixu: usedCarZhixuDetail(zhixuId, planId) });
-      return;
-    }
 
     // 注册页实体登记：与 chain-services /product/registration 同形。只存
     // 链下档案，status 恒为 self_declared，verified/chainWritten 恒为 false。
@@ -861,11 +706,6 @@ export async function installProductApiStub(page: Page, options: StubOptions = {
       return;
     }
 
-    if (request.method() === "GET" && pathname.startsWith("/store/decoration/")) {
-      const planId = decodeURIComponent(pathname.slice("/store/decoration/".length));
-      await fulfillJson(route, planId === usedCarPlanId ? usedCarDecoration : { planId, versions: [] });
-      return;
-    }
 
     if (request.method() === "POST" && pathname === "/product/evidence") {
       await fulfillJson(route, {
@@ -1192,7 +1032,7 @@ export async function uploadCustomsPdf(page: Page): Promise<void> {
   await page.getByLabel("选择报关单 PDF").setInputFiles({
     name: "customs.pdf",
     mimeType: "application/pdf",
-    // %PDF- 首字节魔数：evidenceSpec accept=pdf 时前端做快检，伪造 MIME/扩展名在上传前拦截。
+    // %PDF- 首字节魔数：文件类型做快检，伪造 MIME/扩展名在上传前拦截。
     buffer: Buffer.from("%PDF-1.4\norder app readiness customs pdf")
   });
 }

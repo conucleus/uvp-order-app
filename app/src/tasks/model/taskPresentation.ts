@@ -27,14 +27,11 @@ export function taskAddOnKind(task: ProductTaskDTO): ParticipantAddOnKind {
   if (isParticipantAddOnKind(extendedTask.addOnKind)) {
     return extendedTask.addOnKind;
   }
-  if (isParticipantAddOnKind(extendedTask.capabilityPlugin?.addOnKind)) {
-    return extendedTask.capabilityPlugin.addOnKind;
-  }
   const manifest = addOnManifestForTask(task);
   if (isParticipantAddOnKind(manifest?.addOnKind)) {
     return manifest.addOnKind;
   }
-  // 无显式加成声明（含能力插件类型缺失的投影）统一按提交执行信号渲染，
+  // 无显式加成声明统一按提交执行信号渲染，
   // 收件箱/详情对缺字段数据中性降级，不 throw 白屏。
   return "submit_signal";
 }
@@ -50,19 +47,9 @@ export function taskAddOnLabel(kind: ParticipantAddOnKind): string {
   }
 }
 
-/**
- * 能力插件类型（可选读取）：投影缺失该字段时返回 undefined，调用方按
- * 中性兜底降级（zhixu-store workbenchSupport 同口径），渲染路径不因
- * 缺字段 throw 白屏。
- */
-export function taskCapabilityPluginKind(task: ProductTaskDTO): FulfillmentPluginKind | undefined {
-  return task.capabilityPlugin?.pluginKind;
-}
-
 export function taskPrimaryActionLabel(task: ProductTaskDTO, fallback?: string): string {
   const manifestPrimaryActionLabel = addOnManifestForTask(task)?.actions.find((action) => action.primary)?.label;
   return manifestPrimaryActionLabel ??
-    task.capabilityPlugin?.primaryActionLabel ??
     task.primaryActionLabel ??
     fallback ??
     taskAddOnLabel(taskAddOnKind(task));
@@ -75,12 +62,10 @@ export function taskPrimaryActionLabel(task: ProductTaskDTO, fallback?: string):
 export { taskSubmitIntent, taskSubmitIntentForAction } from "@uvp-eth/product-dto";
 export type { TaskSubmitIntent } from "@uvp-eth/product-dto";
 
-export function taskRequiredInputsFromCapability(
+export function taskRequiredInputs(
   task: ProductTaskDTO
 ): readonly FulfillmentRequiredInputDTO[] | undefined {
-  return task.capabilityPlugin?.inputPolicy && task.capabilityPlugin.inputPolicy.length > 0
-    ? task.capabilityPlugin.inputPolicy
-    : task.requiredInputs;
+  return task.requiredInputs;
 }
 
 export function taskResourceRequirementInputs(task: ProductTaskDTO): readonly FulfillmentRequiredInputDTO[] {
@@ -95,7 +80,7 @@ export function taskResourceRequirementInputs(task: ProductTaskDTO): readonly Fu
 
 export function taskExecutorDisplay(task: ProductTaskDTO): TaskExecutorDisplay {
   const roleLabel = cleanLabel(task.participantRoleLabel) ?? cleanLabel(task.assigneeRole) ?? "参与方";
-  const slotId = cleanLabel(task.performanceSlotId) ?? cleanLabel(task.capabilityPlugin?.roleSlotId);
+  const slotId = cleanLabel(task.performanceSlotId);
   const slotLabel = cleanLabel(task.performanceSlotLabel) ?? roleLabel;
   const personaLabels = uniqueLabels(task.businessPersonaLabels ?? []);
   const overlay = executorOverlayForTask(task);

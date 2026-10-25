@@ -1,11 +1,7 @@
 import { ClipboardList, FileCheck2, RefreshCw, ShieldCheck, UsersRound } from "lucide-react";
-import type { TaskEvidenceInputKind, ZhixuDetailDTO, ZhixuStageDTO } from "@uvp-eth/product-dto";
+import type { ZhixuDetailDTO, ZhixuStageDTO } from "@uvp-eth/product-dto";
 import type { ProductApiClient } from "../api/productApi";
-import {
-  decorationSlotsForStage,
-  decorationTheme,
-  stageExecutorSelectionNote
-} from "../decoration/decorationSupport";
+import { decorationTheme, stageExecutorSelectionNote } from "../decoration/decorationSupport";
 import { useOrderAppDecorations } from "../decoration/useZhixuDecorations";
 import "./reader.css";
 
@@ -155,7 +151,7 @@ function StageBlock({
   decoration
 }: {
   readonly zhixu: ZhixuDetailDTO;
-  readonly decoration: Parameters<typeof decorationSlotsForStage>[0];
+  readonly decoration: Parameters<typeof decorationTheme>[0];
 }) {
   const orderedStages = [...zhixu.stages].sort((left, right) => left.index - right.index);
   return (
@@ -183,11 +179,10 @@ function ReaderStage({
   stage,
   zhixu
 }: {
-  readonly decoration: Parameters<typeof decorationSlotsForStage>[0];
+  readonly decoration: Parameters<typeof decorationTheme>[0];
   readonly stage: ZhixuStageDTO;
   readonly zhixu: ZhixuDetailDTO;
 }) {
-  const slots = decorationSlotsForStage(decoration, stage.stageId);
   const executorNote = stageExecutorSelectionNote(zhixu, stage);
   return (
     <li className="reader-stage" data-testid="decoration-stage">
@@ -201,20 +196,7 @@ function ReaderStage({
           <span className="reader-stage-executor" data-testid="decoration-executor-note">{executorNote}</span>
         ) : null}
       </div>
-      {slots.length > 0 ? (
-        <ul className="reader-evidence-list" data-testid="decoration-stage-evidence">
-          {slots.map((slot) => (
-            <li key={slot.key}>
-              <span className={"reader-input-kind reader-input-" + (slot.inputKind ?? "file")}>
-                {inputKindLabel(slot.inputKind)}
-              </span>
-              <strong>{slot.label}</strong>
-              {slot.required === false ? <small>选填</small> : <small>必填</small>}
-              {slot.description ? <p>{slot.description}</p> : null}
-            </li>
-          ))}
-        </ul>
-      ) : stage.evidence.length > 0 ? (
+      {stage.evidence.length > 0 ? (
         <p className="muted-copy">材料：{stage.evidence.join("、")}（明细由发布方线下约定）</p>
       ) : (
         <p className="muted-copy">本阶段按双方约定提交阶段确认。</p>
@@ -223,13 +205,3 @@ function ReaderStage({
   );
 }
 
-function inputKindLabel(kind: TaskEvidenceInputKind | undefined): string {
-  switch (kind) {
-    case "text":
-      return "填写";
-    case "date":
-      return "日期";
-    default:
-      return "文件";
-  }
-}

@@ -2,7 +2,7 @@
  * 要求包句柄后显式选一个 signalName，再走现有 prepare-submit/submit 与钱包
  * 签名闸门；迁移契约的 intent 仍按 confirm_stage 传输（V1 不用它裁决成败，
  * 裁决只在 signalName），evidenceIds 传空数组由服务端按必填槽位裁决。本模块
- * 不读 capabilityPlugin/permissionTable/createOrderTrigger/evidenceSpec，
+ * 只读 V1 要求包/句柄与验收信号，不读 v0 产品 schema 字段，
  * 也不猜 accepted/rejected。
  */
 import { FileSearch, RefreshCw, Send, ShieldCheck } from "lucide-react";

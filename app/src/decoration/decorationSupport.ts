@@ -1,8 +1,6 @@
 import {
-  validateTaskEvidenceSpec,
   type ProductSelectableTargetDTO,
   type ProductTaskDTO,
-  type TaskEvidenceSpecDTO,
   type ZhixuDetailDTO,
   type ZhixuStageDTO
 } from "@uvp-eth/product-dto";
@@ -19,17 +17,10 @@ import type {
  * 边界：
  * - 装修数据是 Store 数据域的可删除投影，不是链上事实；本模块只做结构读取，
  *   不做业务判断、不写回、不内置任何行业字段。
- * - 任务自己的 evidenceSpec（发布者随秩序 schema 携带）优先；装修
- *   taskDeclarations 只在任务没有 evidenceSpec 时补位，来源显式标记。
+ * - V3 证据要求来自配置 fileResources 句柄与显式验收信号；装修只提供 theme。
  * - 非法 / 空声明一律不合成槽位（validateTaskEvidenceSpec 同源结构校验）。
  */
 
-export type TaskEvidenceSource = "task" | "decoration" | "none";
-
-export interface DecoratedTaskEvidence {
-  readonly task: ProductTaskDTO;
-  readonly source: TaskEvidenceSource;
-}
 
 /** 当前版本 theme（无装修数据或旧版本缺字段时返回 undefined，由调用方决定展示）。 */
 export function decorationTheme(decoration: ZhixuDecorationView | undefined): DecorationThemeView | undefined {
@@ -50,67 +41,6 @@ export function decorationTheme(decoration: ZhixuDecorationView | undefined): De
     ...(tags.length > 0 ? { tags } : {}),
     ...(highlights.length > 0 ? { highlights } : {})
   };
-}
-
-/** 阶段证据槽位（reader 页展示用）：同一阶段可有多条声明，按 key 去重合并。 */
-export function decorationSlotsForStage(
-  decoration: ZhixuDecorationView | undefined,
-  stageId: string
-): readonly DecorationEvidenceSlotView[] {
-  const declarations = declarationsForStage(decoration, stageId);
-  const byKey = new Map<string, DecorationEvidenceSlotView>();
-  for (const declaration of declarations) {
-    for (const slot of declaration.evidenceSpec ?? []) {
-      const key = slot.key?.trim();
-      const label = slot.label?.trim();
-      if (!key || !label || byKey.has(key)) {
-        continue;
-      }
-      byKey.set(key, { ...slot, key, label });
-    }
-  }
-  return [...byKey.values()];
-}
-
-/**
- * 任务证据要求补位：任务自带 evidenceSpec（含非法 spec）时一律不覆盖——
- * 服务端下发的发布者声明优先；只有缺失时才按 taskId（精确）→ stageId 匹配
- * 装修声明，并通过与发布端同源的 validateTaskEvidenceSpec 校验。
- */
-export function decorationEvidenceSpecForTask(
-  decoration: ZhixuDecorationView | undefined,
-  task: Pick<ProductTaskDTO, "taskId" | "stageId">
-): readonly TaskEvidenceSpecDTO[] | undefined {
-  const taskId = task.taskId?.trim();
-  const declarations = (decoration?.current?.data.taskDeclarations ?? []).filter(
-    (declaration) => (declaration.evidenceSpec?.length ?? 0) > 0
-  );
-  const exact = taskId
-    ? declarations.find((declaration) => declaration.taskId?.trim() === taskId)
-    : undefined;
-  const candidates = exact ? [exact] : declarationsForStage(decoration, task.stageId);
-  for (const declaration of candidates) {
-    const spec = evidenceSpecFromDeclaration(declaration);
-    if (spec) {
-      return spec;
-    }
-  }
-  return undefined;
-}
-
-/** 给任务挂上装修补位的 evidenceSpec；来源用于界面如实标注。 */
-export function decorateTaskEvidenceSpec(
-  task: ProductTaskDTO,
-  decoration: ZhixuDecorationView | undefined
-): DecoratedTaskEvidence {
-  if (task.evidenceSpec !== undefined) {
-    return { task, source: "task" };
-  }
-  const spec = decorationEvidenceSpecForTask(decoration, task);
-  if (!spec) {
-    return { task, source: "none" };
-  }
-  return { task: { ...task, evidenceSpec: spec }, source: "decoration" };
 }
 
 /** 任务所属秩序计划的装修键（ZhixuDetailDTO.planPublication.planId）。 */
@@ -179,28 +109,6 @@ function declarationsForStage(
   return (decoration?.current?.data.taskDeclarations ?? []).filter(
     (declaration) => declaration.stageId?.trim().toLowerCase() === normalized
   );
-}
-
-function evidenceSpecFromDeclaration(
-  declaration: DecorationTaskDeclarationView
-): readonly TaskEvidenceSpecDTO[] | undefined {
-  const spec = (declaration.evidenceSpec ?? [])
-    .filter((slot) => typeof slot?.key === "string" && slot.key.trim().length > 0)
-    .filter((slot) => typeof slot?.label === "string" && slot.label.trim().length > 0)
-    .map((slot): TaskEvidenceSpecDTO => ({
-      key: slot.key.trim(),
-      label: slot.label.trim(),
-      ...(slot.inputKind !== undefined ? { inputKind: slot.inputKind } : {}),
-      ...(slot.accept !== undefined ? { accept: slot.accept } : {}),
-      ...(slot.required !== undefined ? { required: slot.required } : {}),
-      ...(slot.description !== undefined ? { description: slot.description } : {})
-    }));
-  if (spec.length === 0) {
-    return undefined;
-  }
-  // 与服务端 validateTaskEvidenceSpec 同一结构校验：非法声明整体丢弃，
-  // 不渲染半份槽位（重复 key / accept 用在文本槽位等都会在这里被拒）。
-  return validateTaskEvidenceSpec(spec).length === 0 ? spec : undefined;
 }
 
 function stageForTask(
