@@ -1,7 +1,7 @@
 {
   "name": "@uvp-eth/order-kernel",
   "version": "0.1.0",
-  "description": "Headless order kernel: Product API transport, stage escrow, participant session and wallet interfaces.",
+  "description": "Headless order kernel: Product API transport, participant session and wallet interfaces.",
   "license": "Apache-2.0",
   "type": "module",
   "sideEffects": false,
@@ -10,7 +10,6 @@
     "./product": "./src/product/index.ts",
     "./product/v3": "./src/product/v3/index.ts",
     "./product/v3/*": "./src/product/v3/*.ts",
-    "./escrow": "./src/escrow/index.ts",
     "./*": "./src/*.ts"
   },
   "types": "./src/index.ts",
@@ -25,7 +24,6 @@
   "dependencies": {
     "@uvp-eth/executor-kit": "workspace:*",
     "@uvp-eth/product-dto": "workspace:*",
-    "viem": "^2.21.58",
     "@uvp-eth/protocol-bindings": "workspace:*"
   },
   "devDependencies": {

@@ -1,4 +1,4 @@
-export type OrderAppSection = "tasks" | "orders" | "create" | "proof" | "registration" | "requirements" | "escrow";
+export type OrderAppSection = "tasks" | "orders" | "create" | "proof" | "registration" | "requirements";
 
 export interface OrderAppRoute {
   readonly section: OrderAppSection;
@@ -7,12 +7,6 @@ export interface OrderAppRoute {
   readonly inviteId?: string | undefined;
   /** V1 订单要求包入口：草稿编号（要求包以草稿为锚，链上只放 hash）。 */
   readonly draftId?: string | undefined;
-  /**
-   * 阶段托管入口：?section=escrow&orderId=<id>[&stageId=<id>]。
-   * 与既有 order= 选中参数分开，避免托管深链接覆盖工作区的订单选中态。
-   */
-  readonly escrowOrderId?: string | undefined;
-  readonly escrowStageId?: string | undefined;
 }
 
 /** 邀请入口：?invite=<inviteId>&inviteToken=<一次性令牌> 只在进入应用时读取一次。 */
@@ -30,7 +24,7 @@ export interface DecorationEntry {
   readonly zhixuId: string;
 }
 
-const sections = new Set<OrderAppSection>(["tasks", "orders", "create", "proof", "registration", "requirements", "escrow"]);
+const sections = new Set<OrderAppSection>(["tasks", "orders", "create", "proof", "registration", "requirements" ]);
 const inviteSearchKeys = ["invite", "inviteToken"] as const;
 
 /**
@@ -51,8 +45,6 @@ export function readOrderAppRoute(hash = window.location.hash): OrderAppRoute {
     orderId: params.get("order") ?? undefined,
     inviteId: params.get("invite") ?? undefined,
     draftId: params.get("draftId") ?? undefined,
-    escrowOrderId: params.get("orderId") ?? undefined,
-    escrowStageId: params.get("stageId") ?? undefined
   };
 }
 
@@ -69,12 +61,6 @@ export function routeHash(route: OrderAppRoute): string {
   }
   if (route.draftId) {
     params.set("draftId", route.draftId);
-  }
-  if (route.escrowOrderId) {
-    params.set("orderId", route.escrowOrderId);
-  }
-  if (route.escrowStageId) {
-    params.set("stageId", route.escrowStageId);
   }
   return `#${params.toString()}`;
 }

@@ -4,7 +4,6 @@
 
 export * from "./product";
 export * from "./product/v3";
-export * from "./escrow";
 export * from "./decoration/types";
 export * from "./tasks/deadline";
 export * from "./session/participant";

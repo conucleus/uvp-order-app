@@ -34,7 +34,6 @@ import { WalletLoginPanel } from "./onboarding/WalletLoginPanel";
 import { DecorationPage } from "./reader/DecorationPage";
 import { RegistrationPage } from "./registration";
 import { RequirementsPage } from "./requirements";
-import { EscrowPage } from "./escrow";
 import {
   clearDecorationSearchParam,
   clearInviteSearchParams,
@@ -352,33 +351,6 @@ function AppShell({ api }: { readonly api: ProductApiClient }) {
             onSubmitted={() => handleRefresh({ silent: true })}
           />
         )
-      ) : route.section === "escrow" ? (
-        // 通用阶段托管：读 tranche 投影 + 按钱包角色调用 StageEscrow。
-        // 未登录时落到与 requirements 相同的钱包登录入口（托管读也要求会话）。
-        loadState.status === "unauthenticated" ? (
-          <WalletLoginPanel
-            hasWallet={actions.hasInjectedWallet()}
-            onLogin={handleWalletLogin}
-            onOpenRegistration={() => navigate({ section: "registration" })}
-          />
-        ) : (
-          <EscrowPage
-            api={api}
-            orders={data?.orders ?? []}
-            orderId={route.escrowOrderId}
-            stageId={route.escrowStageId}
-            walletAddress={data?.participant.walletAddress ?? session.walletAddress}
-            onBack={() => navigate({ section: "tasks", orderId: selectedOrderId })}
-            onSelect={(selection) =>
-              navigate({
-                section: "escrow",
-                escrowOrderId: selection.orderId,
-                escrowStageId: selection.stageId
-              })
-            }
-            onSessionExpired={handleSessionExpired}
-          />
-        )
       ) : route.section === "create" && loadState.status !== "unauthenticated" ? (
         // V3 开单：配置版本 → 阶段子集/条款 → 草稿 → 邀请 → buyer EIP-712 finalize。
         <CreateOrderV3Page
@@ -472,18 +444,6 @@ function AppShell({ api }: { readonly api: ProductApiClient }) {
                   section: "requirements",
                   draftId: route.draftId,
                   orderId: selectedOrderId
-                })
-              }
-            />
-            <SectionButton
-              // 托管是整页路由（与 requirements 同层），进入后不渲染本导航条。
-              active={false}
-              label="托管"
-              icon={<Wallet />}
-              onClick={() =>
-                navigate({
-                  section: "escrow",
-                  escrowOrderId: selectedOrderId
                 })
               }
             />

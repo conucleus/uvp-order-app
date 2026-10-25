@@ -25,7 +25,7 @@ import {
   type UVPStageInviteAcceptTypedData
 } from "@uvp-eth/protocol-bindings";
 import type { StageInvitePreviewV3 } from "@uvp-eth/product-dto";
-import { formatBaseUnits } from "../../escrow/format";
+import { formatBaseUnits } from "./format";
 
 export {
   ORDER_BOOK_ZERO_ADDRESS,
