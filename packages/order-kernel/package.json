@@ -11,7 +11,6 @@
     "./product/v3": "./src/product/v3/index.ts",
     "./product/v3/*": "./src/product/v3/*.ts",
     "./escrow": "./src/escrow/index.ts",
-    "./escrow/v3": "./src/escrow/v3/index.ts",
     "./*": "./src/*.ts"
   },
   "types": "./src/index.ts",
