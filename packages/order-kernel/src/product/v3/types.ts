@@ -139,23 +139,6 @@ export interface HandleViewV3 {
   readonly hash?: string;
 }
 
-export interface EscrowViewV3 {
-  readonly dataState: DataStateV3;
-  readonly stageKey: string;
-  readonly trancheId?: string;
-  readonly state?: string;
-  readonly amount?: string;
-  readonly feeBps?: number;
-  readonly payer?: string;
-  readonly payee?: string;
-  readonly verifier?: string;
-  readonly feeRecipient?: string;
-  readonly observationDays?: number;
-  readonly updatedAt?: string;
-  readonly funded?: boolean;
-  readonly reason?: string;
-}
-
 export interface OrderStageViewV3 {
   readonly stageKey: string;
   readonly stageId: string;
@@ -171,7 +154,6 @@ export interface OrderStageViewV3 {
   readonly standard?: StandardViewV3;
   readonly slots?: readonly SlotViewV3[];
   readonly fileResources?: readonly HandleViewV3[];
-  readonly escrow?: EscrowViewV3;
 }
 
 export interface OrderViewV3 {

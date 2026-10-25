@@ -68,10 +68,7 @@ export interface InviteAcceptFacts {
   readonly stageId?: string | undefined;
   readonly slotKey?: string | undefined;
   readonly invitee?: string | undefined;
-  readonly payee?: string | undefined;
-  readonly verifier?: string | undefined;
   readonly amount?: string | undefined;
-  readonly feeBps?: string | undefined;
   readonly finalStandardHash?: string | undefined;
   readonly termsHash?: string | undefined;
   readonly nonce?: string | undefined;
@@ -155,18 +152,11 @@ export interface InviteAcceptSummary {
   readonly stageId: string;
   readonly slotKey: string;
   readonly invitee: string;
-  readonly payee: string;
-  readonly verifier: string;
-  readonly payeeIsZero: boolean;
-  readonly verifierIsZero: boolean;
   /** 签名者字段名：宿主用它与当前连接钱包比对。 */
   readonly signerField: typeof INVITE_ACCEPT_SIGNER_FIELD;
   readonly amountBaseUnits: string;
   /** 只有调用方给出 tokenDecimals 时才格式化；否则不猜位数。 */
   readonly amountDisplay?: string;
-  readonly feeBps: string;
-  readonly feeBpsNumber?: number;
-  readonly feePercent?: number;
   readonly finalStandardHash: string;
   readonly termsHash: string;
   readonly nonce: string;
@@ -182,7 +172,6 @@ export function summarizeInviteAcceptTypedData(
 ): InviteAcceptSummary {
   const typedData = validateUVPStageInviteAcceptTypedData(value);
   const { message, domain } = typedData;
-  const feeBpsNumber = toSafeNumber(message.feeBps);
   const tokenDecimals = options.tokenDecimals;
   const workDeadlineIso = isoFromUnix(message.workDeadline);
   const deadlineIso = isoFromUnix(message.deadline);
@@ -198,15 +187,9 @@ export function summarizeInviteAcceptTypedData(
     stageId: message.stageId,
     slotKey: message.slotKey,
     invitee: message.invitee,
-    payee: message.payee,
-    verifier: message.verifier,
-    payeeIsZero: message.payee.toLowerCase() === ORDER_BOOK_ZERO_ADDRESS.toLowerCase(),
-    verifierIsZero: message.verifier.toLowerCase() === ORDER_BOOK_ZERO_ADDRESS.toLowerCase(),
     signerField: INVITE_ACCEPT_SIGNER_FIELD,
     amountBaseUnits: message.amount,
     ...(tokenDecimals !== undefined ? { amountDisplay: formatBaseUnits(message.amount, tokenDecimals) } : {}),
-    feeBps: message.feeBps,
-    ...(feeBpsNumber !== undefined ? { feeBpsNumber, feePercent: feeBpsNumber / 100 } : {}),
     finalStandardHash: message.finalStandardHash,
     termsHash: message.termsHash,
     nonce: message.nonce,
@@ -236,10 +219,7 @@ export function buildInviteAcceptTypedDataFromPreview(
     stageId: preview.stageId,
     slotKey: preview.invite.slotKey,
     invitee,
-    payee: terms.payee ?? ORDER_BOOK_ZERO_ADDRESS,
-    verifier: terms.verifier ?? ORDER_BOOK_ZERO_ADDRESS,
     amount: terms.amount,
-    feeBps: terms.feeBps,
     finalStandardHash: terms.finalStandardHash,
     workDeadline: isoToUnixSeconds(terms.workDeadline, "workDeadline"),
     termsHash: preview.termsHash,
@@ -257,10 +237,7 @@ function assertFacts(typedData: UVPStageInviteAcceptTypedData, facts: InviteAcce
     ["stageId", facts.stageId, message.stageId, true],
     ["slotKey", facts.slotKey, message.slotKey, false],
     ["invitee", facts.invitee, message.invitee, true],
-    ["payee", facts.payee, message.payee, true],
-    ["verifier", facts.verifier, message.verifier, true],
     ["amount", facts.amount, message.amount, false],
-    ["feeBps", facts.feeBps, message.feeBps, false],
     ["finalStandardHash", facts.finalStandardHash, message.finalStandardHash, true],
     ["termsHash", facts.termsHash, message.termsHash, true],
     ["nonce", facts.nonce, message.nonce, false],
@@ -440,11 +417,6 @@ function isoFromUnix(value: string): string | undefined {
     return undefined;
   }
   return new Date(seconds * 1000).toISOString();
-}
-
-function toSafeNumber(value: string): number | undefined {
-  const parsed = Number(value);
-  return Number.isSafeInteger(parsed) && parsed >= 0 ? parsed : undefined;
 }
 
 function errorMessage(error: unknown): string {

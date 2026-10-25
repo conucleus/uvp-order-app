@@ -77,7 +77,6 @@ export interface FlatStageV3 {
   readonly timeExpressions: readonly FlatStageTimeV3[];
   readonly standards: readonly FlatStandardV3[];
   readonly defaultStandard?: FlatStandardV3;
-  readonly feeBps?: number;
 }
 
 export interface FlatConfigV3 {
@@ -94,7 +93,6 @@ export interface FlatConfigV3 {
   readonly tokenDecimals?: number;
   readonly tokenDecimalsSource: "currency" | "override" | "unknown";
   readonly tokenDecimalsProblem?: string;
-  readonly feeBpsDefault?: number;
   readonly slots: readonly ConfigSlotV3[];
   readonly stages: readonly FlatStageV3[];
   readonly profiles: Readonly<Record<string, readonly string[]>>;
@@ -159,7 +157,6 @@ export function flattenConfigVersion(
       ...(stageId !== undefined ? { stageId } : {})
     });
   });
-  const feeDefault = feeBpsDefault(bundle);
   const title = version.title ?? bundle.title;
   return {
     configId: version.configId,
@@ -173,7 +170,6 @@ export function flattenConfigVersion(
     ...(tokenDecimals.ok
       ? { tokenDecimals: tokenDecimals.decimals, tokenDecimalsSource: tokenDecimals.source }
       : { tokenDecimalsSource: "unknown" as const, tokenDecimalsProblem: tokenDecimals.reason }),
-    ...(feeDefault !== undefined ? { feeBpsDefault: feeDefault } : {}),
     slots: bundle.slots,
     stages,
     profiles,
@@ -231,7 +227,6 @@ function flattenStage(input: {
     ...(time.expr !== undefined ? { expr: time.expr } : {})
   }));
   const defaultStandard = standards.find((standard) => standard.resolvable);
-  const stageFeeBps = stage.feeBps;
   return {
     stageKey: stage.key,
     ...(input.stageId !== undefined ? { stageId: input.stageId } : {}),
@@ -249,8 +244,7 @@ function flattenStage(input: {
     ...(timeExpressions[0]?.expr !== undefined ? { timeExpression: timeExpressions[0].expr } : {}),
     timeExpressions,
     standards,
-    ...(defaultStandard !== undefined ? { defaultStandard } : {}),
-    ...(stageFeeBps !== undefined ? { feeBps: stageFeeBps } : {})
+    ...(defaultStandard !== undefined ? { defaultStandard } : {})
   };
 }
 
@@ -259,10 +253,7 @@ function resolveAcceptance(
   stage: ConfigStageV3
 ): { readonly mode: ConfigAcceptanceModeV3; readonly verifierSlot?: string; readonly verifierSlotDeclared: boolean } {
   const mode = stage.acceptance?.mode ?? bundle.defaults?.acceptance?.mode ?? "self";
-  const declared =
-    stage.acceptance?.verifierSlot ??
-    stage.slots?.verifier ??
-    bundle.defaults?.acceptance?.verifierSlot;
+  const declared = stage.slots?.verifier;
   return {
     mode,
     ...(declared !== undefined ? { verifierSlot: declared } : {}),
@@ -291,14 +282,6 @@ function resolveStandards(bundle: ConfigBundleV3, stage: ConfigStageV3): readonl
       resolvable: isStandardHash(hash)
     };
   });
-}
-
-function feeBpsDefault(bundle: ConfigBundleV3): number | undefined {
-  if (typeof bundle.defaults?.feeBps === "number") {
-    return bundle.defaults.feeBps;
-  }
-  const nested = bundle.defaults?.fees?.feeBps;
-  return typeof nested === "number" ? nested : undefined;
 }
 
 /** 从已摊平配置取单段；缺失返回 undefined（由调用方显式报错，不造默认段）。 */

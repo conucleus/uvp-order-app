@@ -173,12 +173,12 @@ describe("product v3 transport", () => {
     });
     await client.createOrderDraft(
       {
-        configId: "used-car/proxy_buy",
-        configVersion: "3.0.0",
+        configId: "example/order-config",
+        configVersion: "1.0.0",
         title: "t",
         currency: "USDT",
-        stageSubset: ["sourcing"],
-        stageTerms: [{ stageKey: "sourcing", amount: "1", inviteDeadline: "2026-11-01T00:00:00Z", workDeadline: "2026-11-20T00:00:00Z" }]
+        stageSubset: ["stage-b"],
+        stageTerms: [{ stageKey: "stage-b", amount: "1", inviteDeadline: "2026-11-01T00:00:00Z", workDeadline: "2026-11-20T00:00:00Z" }]
       },
       { idempotencyKey: "idem-1" }
     );
@@ -215,10 +215,10 @@ describe("product v3 transport", () => {
         return jsonResponse({ configId: "c", version: "1", status: "published", configHash: "0x00", bundle: {} });
       }
     });
-    await client.getConfig("used-car/proxy_buy", "3.0.0", { viaVersionsAlias: true });
+    await client.getConfig("example/order-config", "1.0.0", { viaVersionsAlias: true });
     assert.equal(
       urls[0],
-      "https://product.test/product/v3/configs/used-car%2Fproxy_buy/versions/3.0.0"
+      "https://product.test/product/v3/configs/example%2Forder-config/versions/1.0.0"
     );
 
     const stageUrls: string[] = [];
@@ -226,11 +226,11 @@ describe("product v3 transport", () => {
       baseUrl: "https://product.test",
       fetcher: async (input) => {
         stageUrls.push(String(input));
-        return jsonResponse({ order: { orderId: "order-1", dataState: "ok", stages: [] }, stage: { stageKey: "sourcing" }, dataState: "ok" });
+        return jsonResponse({ order: { orderId: "order-1", dataState: "ok", stages: [] }, stage: { stageKey: "stage-b" }, dataState: "ok" });
       }
     });
-    await stageClient.getOrderStage("order-1", "sourcing");
-    assert.equal(stageUrls[0], "https://product.test/product/v3/orders/order-1/stages/sourcing");
+    await stageClient.getOrderStage("order-1", "stage-b");
+    assert.equal(stageUrls[0], "https://product.test/product/v3/orders/order-1/stages/stage-b");
   });
 
   it("drives prepare -> sign -> finalize and keeps birth status unknown as-is", async () => {
@@ -241,8 +241,8 @@ describe("product v3 transport", () => {
       planHash: `0x${"0b".repeat(32)}`,
       termsHash: `0x${"0c".repeat(32)}`,
       payloadHash: `0x${"0d".repeat(32)}`,
-      fundedStageKeys: ["sourcing"],
-      skippedStageKeys: ["inspection"],
+      fundedStageKeys: ["stage-b"],
+      skippedStageKeys: ["stage-c"],
       nonce: "42",
       deadline: "2026-11-01T00:00:00.000Z",
       typedData: {
@@ -266,8 +266,8 @@ describe("product v3 transport", () => {
           planHash: preparation.planHash,
           stateMachine: "0x4444444444444444444444444444444444444444",
           status: "unknown",
-          fundedStageKeys: ["sourcing"],
-          skippedStageKeys: ["inspection"]
+          fundedStageKeys: ["stage-b"],
+          skippedStageKeys: ["stage-c"]
         });
       }
     });
@@ -275,7 +275,7 @@ describe("product v3 transport", () => {
     assert.equal(prepared.typedData.primaryType, "UVPOrderFinalize");
     const result = await client.finalizeWithSignature("draft-1", { signature: `0x${"11".repeat(65)}` });
     assert.equal(result.status, "unknown");
-    assert.deepEqual(result.fundedStageKeys, ["sourcing"]);
+    assert.deepEqual(result.fundedStageKeys, ["stage-b"]);
     assert.equal(calls.length, 2, "unknown 结果不得自动重试");
     assert.equal(calls[0]?.url, "https://product.test/product/v3/order-drafts/draft-1/finalize/prepare");
     assert.equal(calls[1]?.url, "https://product.test/product/v3/order-drafts/draft-1/finalize");
@@ -286,12 +286,12 @@ describe("product v3 transport", () => {
     const client = failingClient({ error: "fee_override_forbidden", message: "fee is fixed by the config version" }, 422);
     const error = await expectError(() =>
       client.createOrderDraft({
-        configId: "used-car/proxy_buy",
-        configVersion: "3.0.0",
+        configId: "example/order-config",
+        configVersion: "1.0.0",
         title: "t",
         currency: "USDT",
-        stageSubset: ["sourcing"],
-        stageTerms: [{ stageKey: "sourcing", amount: "1", inviteDeadline: "2026-11-01T00:00:00Z", workDeadline: "2026-11-20T00:00:00Z" }]
+        stageSubset: ["stage-b"],
+        stageTerms: [{ stageKey: "stage-b", amount: "1", inviteDeadline: "2026-11-01T00:00:00Z", workDeadline: "2026-11-20T00:00:00Z" }]
       })
     );
     assert.equal(error.kind, "invalid_terms");

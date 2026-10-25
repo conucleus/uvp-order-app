@@ -17,32 +17,32 @@ const WORK_DEADLINE = "2026-11-20T00:00:00.000Z";
 
 function selection(overrides: Partial<StageSelectionV3> = {}): StageSelectionV3 {
   return {
-    stageKey: "sourcing",
+    stageKey: "stage-b",
     amountBaseUnits: "1200000000",
     acceptance: "self",
-    performerSlotId: "performer",
+    performerSlotId: "role-b",
     inviteDeadline: INVITE_DEADLINE,
     workDeadline: WORK_DEADLINE,
     ...overrides
   };
 }
 
-function sourcingStage() {
+function stageB() {
   const flat = flattenConfigVersion(configVersionFixture());
-  const stage = flatStageByKey(flat, "sourcing");
+  const stage = flatStageByKey(flat, "stage-b");
   assert.ok(stage);
   return stage;
 }
 
 describe("mapStageSelection", () => {
   it("maps a funded stage to the server term shape without invented fields", () => {
-    const result = mapStageSelection(selection(), sourcingStage());
+    const result = mapStageSelection(selection(), stageB());
     assert.equal(result.ok, true);
     if (!result.ok) {
       return;
     }
     assert.deepEqual(result.value, {
-      stageKey: "sourcing",
+      stageKey: "stage-b",
       amount: "1200000000",
       inviteDeadline: INVITE_DEADLINE,
       workDeadline: WORK_DEADLINE,
@@ -53,7 +53,7 @@ describe("mapStageSelection", () => {
   });
 
   it("passes an explicit standard handle through and requires its hash", () => {
-    const stage = sourcingStage();
+    const stage = stageB();
     const mapped = mapStageSelection(
       selection({ standardRef: { name: "std/custom", version: "1", hash: STANDARD_HASH, ref: "standards/custom.md" } }),
       stage
@@ -79,21 +79,21 @@ describe("mapStageSelection", () => {
   });
 
   it("refuses a performer slot the config does not declare", () => {
-    const result = mapStageSelection(selection({ performerSlotId: "someone_else" }), sourcingStage());
+    const result = mapStageSelection(selection({ performerSlotId: "someone_else" }), stageB());
     assert.equal(result.ok, false);
     if (!result.ok) {
       assert.equal(result.problem.code, "performer_slot_not_configurable");
-      assert.deepEqual(result.problem.detail, { requested: "someone_else", derived: ["performer"] });
+      assert.deepEqual(result.problem.detail, { requested: "someone_else", derived: ["role-b"] });
     }
   });
 
   it("refuses a verifier slot that differs from the configured one", () => {
     const flat = flattenConfigVersion(configVersionFixture());
-    const inspection = flatStageByKey(flat, "inspection");
-    assert.ok(inspection);
+    const stageC = flatStageByKey(flat, "stage-c");
+    assert.ok(stageC);
     const result = mapStageSelection(
-      selection({ stageKey: "inspection", verifierSlotId: "someone_else" }),
-      inspection
+      selection({ stageKey: "stage-c", verifierSlotId: "someone_else" }),
+      stageC
     );
     assert.equal(result.ok, false);
     if (!result.ok) {
@@ -102,7 +102,7 @@ describe("mapStageSelection", () => {
   });
 
   it("requires both deadlines and their order", () => {
-    const stage = sourcingStage();
+    const stage = stageB();
     const missingInvite = mapStageSelection(selection({ inviteDeadline: undefined }), stage);
     assert.equal(missingInvite.ok, false);
     if (!missingInvite.ok) {
@@ -125,10 +125,10 @@ describe("mapStageSelection", () => {
 
   it("requires a standard handle when the config has no resolvable hash", () => {
     const flat = flattenConfigVersion(configVersionFixture());
-    const requirements = flatStageByKey(flat, "requirements");
+    const requirements = flatStageByKey(flat, "stage-a");
     assert.ok(requirements);
     const result = mapStageSelection(
-      selection({ stageKey: "requirements", performerSlotId: undefined, acceptance: "none" }),
+      selection({ stageKey: "stage-a", performerSlotId: undefined, acceptance: "none" }),
       requirements
     );
     assert.equal(result.ok, false);
@@ -143,19 +143,19 @@ describe("buildCreateOrderDraftInput", () => {
     const flat = flattenConfigVersion(configVersionFixture());
     const result = buildCreateOrderDraftInput({
       config: flat,
-      title: "  代买一台车  ",
-      stages: [selection(), selection({ stageKey: "inspection", acceptance: "third_party", verifierSlotId: "verifier" })]
+      title: "  示例订单  ",
+      stages: [selection(), selection({ stageKey: "stage-c", acceptance: "third_party", verifierSlotId: "role-c" })]
     });
     assert.equal(result.ok, true);
     if (!result.ok) {
       return;
     }
-    assert.equal(result.value.title, "代买一台车");
+    assert.equal(result.value.title, "示例订单");
     assert.equal(result.value.currency, "USDT");
-    assert.equal(result.value.configId, "used-car/proxy_buy");
-    assert.equal(result.value.configVersion, "3.0.0");
-    assert.deepEqual(result.value.stageSubset, ["sourcing", "inspection"]);
-    assert.deepEqual(result.value.stageTerms.map((term) => term.stageKey), ["sourcing", "inspection"]);
+    assert.equal(result.value.configId, "example/order-config");
+    assert.equal(result.value.configVersion, "1.0.0");
+    assert.deepEqual(result.value.stageSubset, ["stage-b", "stage-c"]);
+    assert.deepEqual(result.value.stageTerms.map((term) => term.stageKey), ["stage-b", "stage-c"]);
   });
 
   it("rejects duplicate and unknown stages", () => {
@@ -187,7 +187,7 @@ describe("buildCreateOrderDraftInput", () => {
       config: flat,
       title: "t",
       stages: [selection()],
-      stageSubset: ["sourcing", "inspection"]
+      stageSubset: ["stage-b", "stage-c"]
     });
     assert.equal(result.ok, false);
     if (!result.ok) {

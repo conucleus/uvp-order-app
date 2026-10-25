@@ -12,7 +12,7 @@ const declarerWallet = "0x1111111111111111111111111111111111111111";
 const draftId = "draft-requirements-001";
 const taskId = "task-acceptance-001";
 const orderId = "order-requirements-001";
-const zhixuId = "zhixu-used-car-export-v0";
+const zhixuId = "zhixu-example-v1";
 const planId = `0x${"ee".repeat(32)}`;
 const requirementsHash = `0x${"ab".repeat(32)}`;
 const consentMessage = orderRequirementsConsentMessage(draftId, requirementsHash);
@@ -81,9 +81,9 @@ const draft = {
   draftId,
   zhixuId,
   planId,
-  planHash: "0xhash-used-car",
-  title: "中亚二手车出口订单",
-  businessType: "二手车出口",
+  planHash: "0xhash-example",
+  title: "示例出口订单",
+  businessType: "示例业务",
   totalAmount: "128000",
   currency: "USDC",
   status: "awaiting_participants",
@@ -241,14 +241,14 @@ async function installRequirementsApi(
       await fulfillJson(route, {
         zhixu: {
           zhixuId: requestedZhixuId,
-          title: "二手车出口秩序",
+          title: "示例出口秩序",
           subtitle: "九个阶段逐段确认",
           planPublication: {
             status: "published",
             label: "已发布",
             stateMachineLabel: "UVPStateMachine",
             planId,
-            planHash: "0xhash-used-car"
+            planHash: "0xhash-example"
           }
         }
       });

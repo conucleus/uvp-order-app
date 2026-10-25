@@ -2,7 +2,6 @@ import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { describe, it } from "node:test";
 import type { ProductOrderDTO, ProductTaskDTO } from "@uvp-eth/product-dto";
-import { demoOrder, demoTask } from "@uvp-eth/product-dto/fixtures";
 import {
   deriveOrderAppNotifications,
   loadOrderAppNotifications,
@@ -12,6 +11,26 @@ import {
 import type { ParticipantSession } from "../auth/participant";
 import type { ProductHomeData } from "../api/productApi";
 import type { OrderAppNotificationDTO } from "./types.js";
+
+const demoOrder = {
+  orderId: "order-example-1",
+  zhixuId: "zhixu-example-1",
+  title: "示例订单",
+  status: "registered",
+  participants: [{ participantId: "participant-example-1", contact: "example@example.com" }]
+} as unknown as ProductOrderDTO;
+
+const demoTask = {
+  taskId: "task-example-1",
+  orderId: demoOrder.orderId,
+  orderTitle: demoOrder.title,
+  title: "示例待办",
+  status: "open",
+  stageId: "stage-a",
+  stageName: "示例阶段",
+  assigneeRole: "角色 A",
+  deadline: "2026-12-31 12:00"
+} as unknown as ProductTaskDTO;
 
 const readReceiptTarget: OrderAppNotificationDTO = {
   notificationId: "notification-1",

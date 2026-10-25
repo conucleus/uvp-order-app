@@ -32,9 +32,9 @@ import {
   inviteTypedDataFixture
 } from "./fixtures";
 
-const EXPECTED_TYPE_HASH = "0x36284374663b88a83dc40b1ae4c69df3981d7b587c6be3597d5a8649e208effc";
+const EXPECTED_TYPE_HASH = "0xbe4ab67c8ccc92929271cc75bbc187c1d2776ec477d6fedd2189512662b0235e";
 const ENCODE_TYPE =
-  "UVPStageInviteAccept(string draftId,string inviteId,string stageKey,bytes32 stageId,string slotKey,address invitee,address payee,address verifier,uint256 amount,uint256 feeBps,bytes32 finalStandardHash,uint256 workDeadline,bytes32 termsHash,uint256 nonce,uint256 deadline)";
+  "UVPStageInviteAccept(string draftId,string inviteId,string stageKey,bytes32 stageId,string slotKey,address invitee,uint256 amount,bytes32 finalStandardHash,uint256 workDeadline,bytes32 termsHash,uint256 nonce,uint256 deadline)";
 
 describe("UVPStageInviteAccept type hash", () => {
   it("matches the canonical encodeType and the pinned hash", () => {
@@ -62,9 +62,8 @@ describe("invite accept typed data domain", () => {
     assert.equal(INVITE_ACCEPT_SIGNER_FIELD, "invitee");
   });
 
-  it("stores deadlines/feeBps as uint256 decimal strings", () => {
+  it("stores deadlines and amount as uint256 decimal strings", () => {
     const typedData = inviteTypedDataFixture();
-    assert.equal(typedData.message.feeBps, "100");
     assert.equal(typedData.message.amount, "1200000000");
     assert.equal(typedData.message.workDeadline, String(Date.parse("2026-11-20T00:00:00.000Z") / 1000));
     assert.equal(typedData.message.deadline, String(Date.parse("2026-11-01T00:00:00.000Z") / 1000));
@@ -123,9 +122,6 @@ describe("invite accept summary", () => {
   it("exposes display fields without assuming token decimals", () => {
     const withoutDecimals = summarizeInviteAcceptTypedData(inviteTypedDataFixture());
     assert.equal(withoutDecimals.amountDisplay, undefined);
-    assert.equal(withoutDecimals.feePercent, 1);
-    assert.equal(withoutDecimals.payeeIsZero, false);
-    assert.equal(withoutDecimals.verifierIsZero, true);
     assert.equal(withoutDecimals.workDeadlineIso, "2026-11-20T00:00:00.000Z");
     assert.equal(withoutDecimals.deadlineIso, "2026-11-01T00:00:00.000Z");
     assert.equal(withoutDecimals.signerField, "invitee");
@@ -149,8 +145,8 @@ describe("UVPOrderFinalize typed data", () => {
     verifyingContract: STATE_MACHINE,
     draftId: "draft-1",
     planId: `0x${"0a".repeat(32)}`,
-    configId: "used-car/proxy_buy",
-    configVersion: "3.0.0",
+    configId: "example/order-config",
+    configVersion: "1.0.0",
     configHash: `0x${"cc".repeat(32)}`,
     buyer: PERFORMER,
     termsHash: `0x${"0c".repeat(32)}`,

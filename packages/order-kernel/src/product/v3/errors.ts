@@ -63,7 +63,6 @@ export const PRODUCT_V3_ERROR_CODES = [
   "stage_scope_forbidden",
   "wallet_scope_forbidden",
   "visibility_denied",
-  "escrow_unavailable",
   "projection_unavailable",
   "instruction_projection_unavailable",
   "handle_not_found",

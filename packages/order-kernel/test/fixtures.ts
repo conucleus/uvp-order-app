@@ -15,87 +15,85 @@ export const VERIFIER = "0x3333333333333333333333333333333333333333";
 export const STATE_MACHINE = "0x4444444444444444444444444444444444444444";
 export const CHAIN_ID = 31337;
 export const STANDARD_HASH = `0x${"dd".repeat(32)}`;
-export const INSPECTION_HASH = `sha256:${"ee".repeat(32)}`;
+export const ALT_STANDARD_HASH = `sha256:${"ee".repeat(32)}`;
 export const CONFIG_HASH = `0x${"cc".repeat(32)}`;
 export const PLAN_ID = `0x${"0a".repeat(32)}`;
 export const PLAN_HASH = `0x${"0b".repeat(32)}`;
-export const STAGE_ID_REQUIREMENTS = `0x${"a1".repeat(32)}`;
-export const STAGE_ID_SOURCING = `0x${"b2".repeat(32)}`;
-export const STAGE_ID_INSPECTION = `0x${"c3".repeat(32)}`;
+export const STAGE_ID_STAGE_A = `0x${"a1".repeat(32)}`;
+export const STAGE_ID_STAGE_B = `0x${"b2".repeat(32)}`;
+export const STAGE_ID_STAGE_C = `0x${"c3".repeat(32)}`;
 
 export function configBundleFixture(): ConfigBundleV3 {
   return {
     schema: "uvp.order-config/v3",
-    configId: "used-car/proxy_buy",
-    version: "3.0.0",
+    configId: "example/order-config",
+    version: "1.0.0",
     status: "published",
-    title: "代买",
+    title: "示例订单",
     currency: "USDT",
-    chain: { chainId: CHAIN_ID, network: "local-anvil" },
+    chain: { chainId: CHAIN_ID, network: "example-chain" },
     slots: [
-      { key: "buyer", label: "买方", kind: "participant" },
-      { key: "performer", label: "履约方", kind: "participant" },
-      { key: "verifier", label: "验收方", kind: "participant" },
-      { key: "escrow", label: "托管合约", kind: "contract" }
+      { key: "role-a", label: "角色 A", kind: "participant" },
+      { key: "role-b", label: "角色 B", kind: "participant" },
+      { key: "role-c", label: "角色 C", kind: "participant" },
+      { key: "contract-account", label: "合约账户", kind: "contract" }
     ],
     stages: [
       {
-        key: "requirements",
-        name: "需求与标准",
+        key: "stage-a",
+        name: "示例阶段 A",
         index: 1,
         optional: false,
         funded: false,
-        slots: { performer: "buyer" },
-        senders: ["buyer"],
-        signals: [{ name: "completed", by: "buyer" }],
+        slots: { payer: "role-a" },
+        senders: ["role-a"],
+        signals: [{ name: "completed", by: "role-a" }],
         acceptance: { mode: "none" },
-        time: [{ name: "requirements_window", expr: "completed +3d" }]
+        time: [{ name: "stage_a_window", expr: "completed +3d" }]
       },
       {
-        key: "sourcing",
-        name: "采购",
+        key: "stage-b",
+        name: "示例阶段 B",
         index: 2,
         optional: true,
         funded: true,
-        slots: { payee: "performer" },
-        senders: ["buyer", "performer"],
+        slots: { payer: "role-a", payee: "role-b" },
+        senders: ["role-a", "role-b"],
         acceptance: { mode: "self" },
-        time: [{ name: "sourcing_window", expr: "approved +14d" }],
-        fileResources: ["std/sourcing"],
-        feeBps: 100
+        time: [{ name: "stage_b_window", expr: "approved +14d" }],
+        fileResources: ["std/stage-b"],
       },
       {
-        key: "inspection",
-        name: "验车",
+        key: "stage-c",
+        name: "示例阶段 C",
         index: 3,
         optional: true,
         funded: true,
-        slots: { payee: "performer", verifier: "verifier" },
-        senders: ["buyer", "performer"],
-        acceptance: { mode: "third_party", verifierSlot: "verifier" },
-        fileResources: [{ ref: "std/inspection" }],
-        feeBps: 100
+        slots: { payer: "role-a", payee: "role-b", verifier: "role-c" },
+        senders: ["role-a", "role-b"],
+        acceptance: { mode: "third_party" },
+        fileResources: [{ ref: "std/stage-c" }],
       }
     ],
-    defaults: { feeBps: 100, acceptance: { mode: "self" } },
+    defaults: { acceptance: { mode: "self" } },
     fileResources: [
-      { name: "std/sourcing", version: "3.0.0", hash: STANDARD_HASH, ref: "standards/sourcing.md" },
-      { name: "std/inspection", version: "3.0.0", hash: INSPECTION_HASH, ref: "standards/inspection.md" }
+      { name: "std/stage-b", version: "1.0.0", hash: STANDARD_HASH, ref: "standards/stage-b.md" },
+      { name: "std/stage-c", version: "1.0.0", hash: ALT_STANDARD_HASH, ref: "standards/stage-c.md" }
     ],
-    stageProfiles: { default3: ["requirements", "sourcing", "inspection"] },
-    defaultProfile: "default3"
+    stageProfiles: { default: ["stage-a", "stage-b", "stage-c"] },
+    defaultProfile: "default"
   };
 }
 
 export function configVersionFixture(): ConfigVersionV3 {
   return {
-    configId: "used-car/proxy_buy",
-    version: "3.0.0",
+    configId: "example/order-config",
+    version: "1.0.0",
     status: "published",
     configHash: CONFIG_HASH,
     planId: PLAN_ID,
     planHash: PLAN_HASH,
-    title: "代买",
+    title: "示例订单",
     currency: "USDT",
     createdBy: BUYER,
     createdAt: "2026-10-25T00:00:00.000Z",
@@ -111,15 +109,11 @@ export function stageTermsFixture(): StageTermsV3 {
     configId: bundle.configId,
     configVersion: bundle.version,
     configHash: CONFIG_HASH,
-    stageKey: "sourcing",
-    stageId: STAGE_ID_SOURCING,
-    payer: BUYER,
-    payee: PERFORMER,
-    verifier: null,
+    stageKey: "stage-b",
+    stageId: STAGE_ID_STAGE_B,
+    slots: { "role-b": PERFORMER },
     amount: "1200000000",
-    feeBps: 100,
-    feeRecipient: null,
-    standard: { name: "std/sourcing", version: "3.0.0", hash: STANDARD_HASH, ref: "standards/sourcing.md" },
+    standard: { name: "std/stage-b", version: "1.0.0", hash: STANDARD_HASH, ref: "standards/stage-b.md" },
     finalStandardHash: STANDARD_HASH,
     inviteDeadline: "2026-11-01T00:00:00.000Z",
     workDeadline: "2026-11-20T00:00:00.000Z",
@@ -133,14 +127,11 @@ export function inviteTypedDataFixture() {
     verifyingContract: STATE_MACHINE,
     draftId: "draft-1",
     inviteId: "invite-1",
-    stageKey: "sourcing",
-    stageId: STAGE_ID_SOURCING,
-    slotKey: "performer",
+    stageKey: "stage-b",
+    stageId: STAGE_ID_STAGE_B,
+    slotKey: "role-b",
     invitee: PERFORMER,
-    payee: PERFORMER,
-    verifier: "0x0000000000000000000000000000000000000000",
     amount: "1200000000",
-    feeBps: 100,
     finalStandardHash: STANDARD_HASH,
     workDeadline: Math.floor(Date.parse("2026-11-20T00:00:00.000Z") / 1000),
     termsHash: `0x${"f0".repeat(32)}`,
@@ -155,17 +146,17 @@ export function invitePreviewFixture(): StageInvitePreviewV3 {
     invite: {
       inviteId: "invite-1",
       draftId: "draft-1",
-      stageKey: "sourcing",
-      stageId: STAGE_ID_SOURCING,
-      slotKey: "performer",
+      stageKey: "stage-b",
+      stageId: STAGE_ID_STAGE_B,
+      slotKey: "role-b",
       subjectLabel: "某某车商",
       status: "active",
       expiresAt: "2026-11-01T00:00:00.000Z",
       createdAt: "2026-10-25T00:00:00.000Z"
     },
     draftId: "draft-1",
-    title: "代买一台车",
-    stageId: STAGE_ID_SOURCING,
+    title: "示例订单",
+    stageId: STAGE_ID_STAGE_B,
     terms,
     typedData: inviteTypedDataFixture(),
     chainId: CHAIN_ID,

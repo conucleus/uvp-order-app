@@ -656,7 +656,7 @@ export async function installProductApiStub(page: Page, options: StubOptions = {
     }
 
     // 装修接线：秩序详情（公共读）+ Store 装修数据。默认秩序返回空装修，
-    // 只有 used-car 秩序的桩带 theme/taskDeclarations，避免污染其他用例。
+    // 只有示例秩序的桩带 theme，避免污染其他用例。
 
     // 注册页实体登记：与 chain-services /product/registration 同形。只存
     // 链下档案，status 恒为 self_declared，verified/chainWritten 恒为 false。

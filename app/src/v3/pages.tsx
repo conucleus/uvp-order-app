@@ -60,11 +60,13 @@ function stageRoleLabel(stage: FlatStageV3, slotKey: string): string {
 
 export function CreateOrderV3Page(props: {
   readonly ports: V3Ports;
+  readonly defaultConfigId?: string | undefined;
+  readonly defaultConfigVersion?: string | undefined;
   readonly onCreated: (result: CreateOrderV3Result) => void;
   readonly onBack: () => void;
 }) {
-  const [configId, setConfigId] = useState("used-car/proxy_buy");
-  const [version, setVersion] = useState("3.0.0");
+  const [configId, setConfigId] = useState(props.defaultConfigId ?? "");
+  const [version, setVersion] = useState(props.defaultConfigVersion ?? "");
   const [config, setConfig] = useState<FlatConfigV3 | undefined>(undefined);
   const [profile, setProfile] = useState<string>("");
   const [title, setTitle] = useState("");
@@ -218,9 +220,12 @@ export function CreateOrderV3Page(props: {
 
       <fieldset>
         <legend>配置版本</legend>
-        <label>configId <input value={configId} onChange={(event) => setConfigId(event.target.value)} /></label>
-        <label>version <input value={version} onChange={(event) => setVersion(event.target.value)} /></label>
-        <button className="primary-button" type="button" disabled={busy} onClick={() => void loadConfig()}>加载配置</button>
+        {configId.trim().length === 0 || version.trim().length === 0 ? (
+          <p className="fineprint">未配置默认配置版本：请填写 configId/version（或由宿主注入 VITE_UVP_V3_CONFIG_ID/VERSION）。</p>
+        ) : null}
+        <label>configId <input value={configId} placeholder="例如 example/order-config" onChange={(event) => setConfigId(event.target.value)} /></label>
+        <label>version <input value={version} placeholder="例如 1.0.0" onChange={(event) => setVersion(event.target.value)} /></label>
+        <button className="primary-button" type="button" disabled={busy || configId.trim().length === 0 || version.trim().length === 0} onClick={() => void loadConfig()}>加载配置</button>
         <button className="quiet-button" type="button" disabled title="服务端无配置目录接口">配置目录（未就绪）</button>
       </fieldset>
 
@@ -448,13 +453,13 @@ export function InviteV3Page(props: {
       {accepted ? (
         <section className="system-banner system-banner-info" role="status">
           <strong>已接受邀请</strong>
-          <span>本段 payee/验收者绑定已落档；后续按订单阶段执行。</span>
+          <span>本段 slot 绑定已落档；后续按订单阶段执行。</span>
         </section>
       ) : null}
       {preview && summary ? (
         <>
           <p className="fineprint">
-            阶段 {preview.terms.stageKey}；金额 {preview.terms.amount}（base units）；费率 {preview.terms.feeBps} bps；
+            阶段 {preview.terms.stageKey}；金额 {preview.terms.amount}（base units）；
             履约截止 {preview.terms.workDeadline}；标准 {preview.terms.standard?.name ?? "未声明"}
           </p>
           <section className="panel">
@@ -462,7 +467,6 @@ export function InviteV3Page(props: {
             <ul>
               <li>draftId：{summary.draftId}</li>
               <li>inviteId：{summary.inviteId}；slot：{summary.slotKey}</li>
-              <li>payee：{summary.payee}；verifier：{summary.verifier}</li>
               <li>termsHash：{summary.termsHash}</li>
               <li>签名者（invitee）：{summary.invitee}</li>
               <li>期限：{summary.deadlineIso ?? summary.deadlineUnix}</li>

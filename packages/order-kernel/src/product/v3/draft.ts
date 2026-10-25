@@ -25,9 +25,6 @@ export interface StageSelectionV3 {
   readonly inviteDeadline?: string | undefined;
   /** 本段最终标准；缺省时取配置可解析的默认标准，配置无 hash 则报错。 */
   readonly standardRef?: StageStandardRefV3 | undefined;
-  readonly feeBps?: number | undefined;
-  readonly feeRecipient?: string | undefined;
-  readonly verifierWallet?: string | undefined;
 }
 
 export type DraftMappingProblemCode =
@@ -38,7 +35,6 @@ export type DraftMappingProblemCode =
   | "unknown_stage"
   | "stage_subset_mismatch"
   | "invalid_amount"
-  | "invalid_fee_bps"
   | "unsupported_acceptance"
   | "performer_slot_not_configurable"
   | "verifier_slot_not_configurable"
@@ -73,11 +69,6 @@ export function mapStageSelection(
   }
   if (selection.amountBaseUnits.length > 78) {
     return fail("invalid_amount", `stage ${selection.stageKey} 的金额超出 uint256 范围`);
-  }
-  if (selection.feeBps !== undefined && !isFeeBps(selection.feeBps)) {
-    return fail("invalid_fee_bps", `stage ${selection.stageKey} 的 feeBps 必须是 0..10000 的整数`, {
-      feeBps: selection.feeBps
-    });
   }
   if (selection.acceptance !== undefined && !CONFIG_ACCEPTANCE_MODES.includes(selection.acceptance)) {
     return fail("unsupported_acceptance", `stage ${selection.stageKey} 的验收方式不在服务端允许集内`, {
@@ -148,9 +139,6 @@ export function mapStageSelection(
       inviteDeadline,
       workDeadline,
       ...(selection.acceptance !== undefined ? { acceptanceMode: selection.acceptance } : {}),
-      ...(selection.feeBps !== undefined ? { feeBps: selection.feeBps } : {}),
-      ...(selection.feeRecipient !== undefined ? { feeRecipient: selection.feeRecipient } : {}),
-      ...(selection.verifierWallet !== undefined ? { verifierWallet: selection.verifierWallet } : {}),
       ...(standard !== undefined ? { standard } : {})
     }
   };
@@ -233,9 +221,6 @@ function standardProblem(standard: StageStandardRefV3): string | undefined {
   return undefined;
 }
 
-function isFeeBps(value: number): boolean {
-  return Number.isSafeInteger(value) && value >= 0 && value <= 10_000;
-}
 
 function fail(
   code: DraftMappingProblemCode,

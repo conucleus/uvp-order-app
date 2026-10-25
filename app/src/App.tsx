@@ -355,6 +355,8 @@ function AppShell({ api }: { readonly api: ProductApiClient }) {
         // V3 开单：配置版本 → 阶段子集/条款 → 草稿 → 邀请 → buyer EIP-712 finalize。
         <CreateOrderV3Page
           ports={v3.ports}
+          defaultConfigId={import.meta.env.VITE_UVP_V3_CONFIG_ID}
+          defaultConfigVersion={import.meta.env.VITE_UVP_V3_CONFIG_VERSION}
           onCreated={handleOrderCreated}
           onBack={() => navigate({ section: "tasks", orderId: selectedOrderId })}
         />
