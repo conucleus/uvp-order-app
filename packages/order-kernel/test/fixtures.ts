@@ -1,13 +1,13 @@
-// V3 内核测试夹具：一个三阶段配置版本 + 一份邀请预览/typed data。地址与
+// 内核测试夹具：一个三阶段配置版本 + 一份邀请预览/typed data。地址与
 // hash 都是固定的公开测试值，不含任何私钥或凭据。
 
 import type {
-  ConfigBundleV3,
-  ConfigVersionV3,
-  StageInvitePreviewV3,
-  StageTermsV3
+  ConfigBundle,
+  ConfigVersion,
+  StageInvitePreview,
+  StageTerms
 } from "@uvp-eth/product-dto";
-import { buildUVPStageInviteAcceptTypedData } from "../src/product/v3/typedData";
+import { buildUVPStageInviteAcceptTypedData } from "../src/product/kernel/typedData";
 
 export const BUYER = "0x1111111111111111111111111111111111111111";
 export const PERFORMER = "0x2222222222222222222222222222222222222222";
@@ -23,7 +23,7 @@ export const STAGE_ID_STAGE_A = `0x${"a1".repeat(32)}`;
 export const STAGE_ID_STAGE_B = `0x${"b2".repeat(32)}`;
 export const STAGE_ID_STAGE_C = `0x${"c3".repeat(32)}`;
 
-export function configBundleFixture(): ConfigBundleV3 {
+export function configBundleFixture(): ConfigBundle {
   return {
     schema: "uvp.order-config/v3",
     configId: "example/order-config",
@@ -81,7 +81,7 @@ export function configBundleFixture(): ConfigBundleV3 {
   };
 }
 
-export function configVersionFixture(): ConfigVersionV3 {
+export function configVersionFixture(): ConfigVersion {
   return {
     configId: "example/order-config",
     version: "1.0.0",
@@ -98,7 +98,7 @@ export function configVersionFixture(): ConfigVersionV3 {
   };
 }
 
-export function stageTermsFixture(): StageTermsV3 {
+export function stageTermsFixture(): StageTerms {
   const bundle = configBundleFixture();
   return {
     orderDraftId: "draft-1",
@@ -136,7 +136,7 @@ export function inviteTypedDataFixture() {
   });
 }
 
-export function invitePreviewFixture(): StageInvitePreviewV3 {
+export function invitePreviewFixture(): StageInvitePreview {
   const terms = stageTermsFixture();
   return {
     invite: {

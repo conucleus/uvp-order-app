@@ -12,11 +12,9 @@ export type {
   ZhixuDecorationView
 } from "@uvp-eth/order-kernel/decoration/types";
 
-/** 一条 zhixu 的装修快照：秩序详情来自 Product API，装修数据来自 Store API。 */
 export interface ZhixuDecorationSnapshot {
   readonly zhixuId: string;
   readonly zhixu?: ZhixuDetailDTO | undefined;
   readonly decoration?: ZhixuDecorationView | undefined;
-  /** 装修数据请求失败原因；缺省表示"已取到（可能为空版本）"。 */
   readonly decorationError?: string | undefined;
 }

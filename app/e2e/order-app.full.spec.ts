@@ -101,7 +101,7 @@ test.describe.serial("full staging participant full Order App staging participan
     expect(dtoText).toContain(summary.resourcePolicyHash);
   });
 
-  test("buyer selector session renders manifest and submits or verifies executor patch proof", async ({ page, request }) => {
+  test("selector session renders manifest and submits or verifies executor patch proof", async ({ page, request }) => {
     await installSigningWallet(page, [summary.selectorWallet]);
     const selectorTasks = await loadParticipantTasks(request, summary.selectorWallet);
     const selectorTask = findTaskByAction(selectorTasks, "stage_executor_patch", "selector wallet");
@@ -115,7 +115,7 @@ test.describe.serial("full staging participant full Order App staging participan
     await assertProofSurface(page, selectorTask, await loadOrderProof(request, summary.orderId), "StageExecutorPatchApplied");
   });
 
-  test("buyer resource patch session renders resource manifest and submits or verifies resource proof", async ({ page, request }) => {
+  test("resource patch session renders resource manifest and submits or verifies resource proof", async ({ page, request }) => {
     await installSigningWallet(page, [summary.resourcePatchWallet]);
     const resourcePatchTasks = await loadParticipantTasks(request, summary.resourcePatchWallet);
     const resourcePatchTask = findTaskByAction(resourcePatchTasks, "stage_resource_patch", "resource patch wallet");
@@ -132,7 +132,7 @@ test.describe.serial("full staging participant full Order App staging participan
     await assertProofSurface(page, resourcePatchTask, await loadOrderProof(request, summary.orderId), "StageResourcePatchApplied");
   });
 
-  test("customs executor session renders resources and submits or verifies submit signal", async ({ page, request }) => {
+  test("executor session renders resources and submits or verifies submit signal", async ({ page, request }) => {
     await installSigningWallet(page, [summary.activeExecutorWallet]);
     const executorTasks = await loadParticipantTasks(request, summary.activeExecutorWallet);
     const submitSignalTask = findTaskByAction(executorTasks, "submit_signal");
@@ -299,9 +299,6 @@ function assertSummaryGate(input: SummaryExpectations): void {
       "0x0000000000000000000000000000000000000000000000000000000000000000"
     );
   }
-  // URI 字段先按生产口径整体校验：summary 若带 urn:/https: 等非内容寻址
-  // 引用，生产表单必然阻断提交——在门前置断言里点名数据形态分叉，而不是
-  // 让用例在中途以「准备提交按钮不可点」的形态误报成产品故障。
   for (const [label, uri] of [
     ["executorMetadataURI", input.executorMetadataURI],
     ["resourceManifestURI", input.resourceManifestURI]
@@ -335,9 +332,6 @@ async function loadOrder(
   orderId: string,
   walletAddress: string = summary.selectorWallet
 ): Promise<ChainBackedProductOrderDTO> {
-  // 订单详情带参与者身份门（chain-services participant-identity）：匿名直调
-  // 401。local 运行时的自报通道按 CS 契约取 x-uvp-wallet-address 头
-  //（会话锚定部署中自报值仅作一致性核验）；读取视角用订单参与者钱包。
   const response = await request.get(`${summary.chainServicesUrl}/product/orders/${encodeURIComponent(orderId)}`, {
     headers: { "x-uvp-wallet-address": walletAddress }
   });
@@ -410,7 +404,6 @@ async function installSigningWallet(page: Page, allowedWallets: readonly string[
   await page.addInitScript(() => {
     const provider = {
       request: async ({ method, params }: { readonly method: string; readonly params?: readonly unknown[] }) => {
-        // 签名前的 eth_chainId 域核对需要钱包应答当前链（桩域 chainId=31337）。
         if (method === "eth_chainId") {
           return "0x7a69";
         }

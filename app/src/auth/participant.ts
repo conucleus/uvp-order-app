@@ -38,9 +38,6 @@ export function walletOverrideAllowed(
   return kernelWalletOverrideAllowed(env);
 }
 
-// 构建期注入的静态值集合：每个键都经 import.meta.env.X 静态成员访问
-// （Vite 构建时内联为字面量），不把整个 env 对象留在运行期——随包分发
-// 环境开关是禁止形态。测试用例经 input.env 注入自己的值。
 function buildTimeEnv(): Readonly<Record<string, string | boolean | undefined>> {
   return {
     VITE_UVP_ORDER_APP_WALLET_ADDRESS: import.meta.env?.VITE_UVP_ORDER_APP_WALLET_ADDRESS,

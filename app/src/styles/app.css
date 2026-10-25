@@ -682,7 +682,6 @@
   color: var(--app-green);
 }
 
-/* 服务端错误体原文（message 已提取为可读文案）的展开核对出口。 */
 .invite-error-body {
   text-align: left;
   max-width: 100%;
@@ -698,7 +697,6 @@
   color: var(--app-muted);
 }
 
-/* 应用级错误边界的堆栈展开（默认收起，不把原始堆栈糊一脸）。 */
 .error-boundary-stack {
   max-width: 100%;
   overflow-wrap: anywhere;
@@ -803,7 +801,6 @@
   }
 }
 
-/* Desktop workbench visual refresh based on the approved Order App board. */
 .app-shell {
   width: min(1480px, 100%);
   padding: 20px 24px 32px;

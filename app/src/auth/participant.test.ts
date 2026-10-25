@@ -8,7 +8,7 @@ import {
 } from "./participant.js";
 
 const selectorWallet = "0x1111111111111111111111111111111111111111";
-const customsWallet = "0x2222222222222222222222222222222222222222";
+const agentWallet = "0x2222222222222222222222222222222222222222";
 
 describe("participant session wallet selection", () => {
   it("lets local/dev rehearsals switch participant wallet through a guarded query override", () => {
@@ -18,25 +18,25 @@ describe("participant session wallet selection", () => {
         VITE_UVP_RUNTIME_ENV: "local",
         VITE_UVP_ORDER_APP_WALLET_ADDRESS: selectorWallet
       },
-      locationSearch: `?participantWallet=${customsWallet}`,
+      locationSearch: `?participantWallet=${agentWallet}`,
       sessionStorage: storage
     });
 
-    assert.equal(session.walletAddress, customsWallet);
+    assert.equal(session.walletAddress, agentWallet);
     assert.equal(session.walletSource, "override");
-    assert.deepEqual(participantQueryFromSession(session), { walletAddress: customsWallet });
-    assert.equal(storage.getItem(walletOverrideSessionKey), customsWallet);
+    assert.deepEqual(participantQueryFromSession(session), { walletAddress: agentWallet });
+    assert.equal(storage.getItem(walletOverrideSessionKey), agentWallet);
   });
 
   it("ignores wallet overrides on testnet and other non-local runtimes", () => {
     for (const runtime of ["test", "testnet", "base-sepolia", "base_sepolia", "production"]) {
-      const storage = memorySessionStorage([[walletOverrideSessionKey, customsWallet]]);
+      const storage = memorySessionStorage([[walletOverrideSessionKey, agentWallet]]);
       const session = readParticipantSession({
         env: {
           VITE_UVP_RUNTIME_ENV: runtime,
           VITE_UVP_ORDER_APP_WALLET_ADDRESS: selectorWallet
         },
-        locationSearch: `?participantWallet=${customsWallet}`,
+        locationSearch: `?participantWallet=${agentWallet}`,
         sessionStorage: storage
       });
 
@@ -47,13 +47,13 @@ describe("participant session wallet selection", () => {
   });
 
   it("keeps wallet overrides disabled in production profiles", () => {
-    const storage = memorySessionStorage([[walletOverrideSessionKey, customsWallet]]);
+    const storage = memorySessionStorage([[walletOverrideSessionKey, agentWallet]]);
     const session = readParticipantSession({
       env: {
         VITE_UVP_RUNTIME_ENV: "production",
         VITE_UVP_ORDER_APP_WALLET_ADDRESS: selectorWallet
       },
-      locationSearch: `?participantWallet=${customsWallet}`,
+      locationSearch: `?participantWallet=${agentWallet}`,
       sessionStorage: storage
     });
 
@@ -63,7 +63,7 @@ describe("participant session wallet selection", () => {
   });
 
   it("does not treat invalid override text as a participant wallet", () => {
-    const storage = memorySessionStorage([[walletOverrideSessionKey, customsWallet]]);
+    const storage = memorySessionStorage([[walletOverrideSessionKey, agentWallet]]);
     const session = readParticipantSession({
       env: { VITE_UVP_RUNTIME_ENV: "local" },
       locationSearch: "?participantWallet=not-a-wallet",

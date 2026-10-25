@@ -8,8 +8,8 @@
   "exports": {
     ".": "./src/index.ts",
     "./product": "./src/product/index.ts",
-    "./product/v3": "./src/product/v3/index.ts",
-    "./product/v3/*": "./src/product/v3/*.ts",
+    "./product/kernel": "./src/product/kernel/index.ts",
+    "./product/kernel/*": "./src/product/kernel/*.ts",
     "./*": "./src/*.ts"
   },
   "types": "./src/index.ts",

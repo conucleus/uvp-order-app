@@ -70,9 +70,6 @@ describe("Order App full summary content-addressed URIs", () => {
   });
 
   it("rejects urn: references like the production precheck instead of minting an urn fallback", () => {
-    // 生产预检明拒 urn:（taskUtils 有测试钉死）；full 门旧本地副本放行 urn:
-    // 并对非内容寻址值铸 urn:sha256 兜底，把真实数据形态洗成生产必拒的值，
-    // 让门把产品按规格的阻断误报成产品故障。对齐后：不兜底、直接抛错点名。
     assert.throws(
       () => summaryContentAddressedUri("executorMetadataURI", "urn:uuid:6ec0bd7f-11c0-43da-975e-2a8ad9eacsd0"),
       /executorMetadataURI.*内容寻址/u

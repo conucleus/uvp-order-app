@@ -1,14 +1,14 @@
-// V3 配置便利读面：把服务端 ConfigVersionV3（bundle）摊平成宿主可直接渲染的
+// 配置便利读面：把服务端 ConfigVersion（bundle）摊平成宿主可直接渲染的
 // stage 列表（每段验收方式/必须邀请的 slot/标准句柄/时间表达式）。派生规则
-// 与 chain-services order/v3/canonical.ts 同口径；stageId 只能来自服务端事实
+// 与 chain-services src/order/canonical.ts 同口径；stageId 只能来自服务端事实
 // （草稿/订单），本模块绝不自算 keccak。
 
 import type {
-  ConfigBundleV3,
-  ConfigSlotV3,
-  ConfigStageV3,
-  ConfigVersionV3,
-  StageStandardRefV3
+  ConfigBundle,
+  ConfigSlot,
+  ConfigStage,
+  ConfigVersion,
+  StageStandardRef
 } from "@uvp-eth/product-dto";
 
 const STANDARD_HASH_PATTERN = /^(0x[0-9a-fA-F]{64}|sha256:[0-9a-fA-F]{64})$/u;
@@ -27,7 +27,7 @@ export const KNOWN_TOKEN_DECIMALS: Readonly<Record<string, number>> = {
   ETH: 18
 };
 
-export interface FlatStandardV3 {
+export interface FlatStandard {
   readonly name: string;
   readonly version?: string;
   /** 0x 32 字节摘要；缺失即不可解析（服务端会拒绝无 hash 的条款）。 */
@@ -36,17 +36,17 @@ export interface FlatStandardV3 {
   readonly resolvable: boolean;
 }
 
-export interface FlatStageSlotV3 {
+export interface FlatStageSlot {
   readonly slotKey: string;
   readonly label?: string;
 }
 
-export interface FlatStageTimeV3 {
+export interface FlatStageTime {
   readonly name: string;
   readonly expr?: string;
 }
 
-export interface FlatStageV3 {
+export interface FlatStage {
   readonly stageKey: string;
   /** 仅当调用方从草稿/订单拿到服务端派生的 stageId 时存在。 */
   readonly stageId?: string;
@@ -55,18 +55,18 @@ export interface FlatStageV3 {
   readonly optional: boolean;
   readonly funded: boolean;
   /** 配置声明的 slot（slotKey → 展示标签）；订单按该集合邀请。 */
-  readonly slots: readonly FlatStageSlotV3[];
+  readonly slots: readonly FlatStageSlot[];
   readonly requiredSlotKeys: readonly string[];
   readonly timeExpression?: string;
-  readonly timeExpressions: readonly FlatStageTimeV3[];
-  readonly standards: readonly FlatStandardV3[];
-  readonly defaultStandard?: FlatStandardV3;
+  readonly timeExpressions: readonly FlatStageTime[];
+  readonly standards: readonly FlatStandard[];
+  readonly defaultStandard?: FlatStandard;
 }
 
-export interface FlatConfigV3 {
+export interface FlatConfig {
   readonly configId: string;
   readonly version: string;
-  readonly status: ConfigVersionV3["status"];
+  readonly status: ConfigVersion["status"];
   readonly configHash: string;
   /** 该配置版本发布时登记的 UVP plan；同一配置的所有订单复用它。 */
   readonly planId?: string;
@@ -77,8 +77,8 @@ export interface FlatConfigV3 {
   readonly tokenDecimals?: number;
   readonly tokenDecimalsSource: "currency" | "override" | "unknown";
   readonly tokenDecimalsProblem?: string;
-  readonly slots: readonly ConfigSlotV3[];
-  readonly stages: readonly FlatStageV3[];
+  readonly slots: readonly ConfigSlot[];
+  readonly stages: readonly FlatStage[];
   readonly profiles: Readonly<Record<string, readonly string[]>>;
   readonly defaultProfile?: string;
   readonly chain?: Readonly<Record<string, unknown>>;
@@ -119,9 +119,9 @@ export function resolveTokenDecimals(
 }
 
 export function flattenConfigVersion(
-  version: ConfigVersionV3,
+  version: ConfigVersion,
   options: FlattenConfigOptions = {}
-): FlatConfigV3 {
+): FlatConfig {
   const bundle = version.bundle;
   const currency = version.currency ?? bundle.currency;
   const slotLabels = new Map(bundle.slots.map((slot) => [slot.key, slot.label]));
@@ -163,11 +163,11 @@ export function flattenConfigVersion(
 }
 
 function flattenStage(input: {
-  readonly stage: ConfigStageV3;
-  readonly bundle: ConfigBundleV3;
+  readonly stage: ConfigStage;
+  readonly bundle: ConfigBundle;
   readonly slotLabels: ReadonlyMap<string, string | undefined>;
   readonly stageId?: string;
-}): FlatStageV3 {
+}): FlatStage {
   const { stage, bundle } = input;
   const slots = Object.entries(stage.slots ?? {})
     .map(([slotKey, label]) => ({
@@ -198,7 +198,7 @@ function flattenStage(input: {
   };
 }
 
-function resolveStandards(bundle: ConfigBundleV3, stage: ConfigStageV3): readonly FlatStandardV3[] {
+function resolveStandards(bundle: ConfigBundle, stage: ConfigStage): readonly FlatStandard[] {
   const hashes = bundle.hashes?.fileResources;
   const hashTable = typeof hashes === "object" && hashes !== null && !Array.isArray(hashes)
     ? hashes as Readonly<Record<string, unknown>>
@@ -222,12 +222,12 @@ function resolveStandards(bundle: ConfigBundleV3, stage: ConfigStageV3): readonl
 }
 
 /** 从已摊平配置取单段；缺失返回 undefined（由调用方显式报错，不造默认段）。 */
-export function flatStageByKey(config: FlatConfigV3, stageKey: string): FlatStageV3 | undefined {
+export function flatStageByKey(config: FlatConfig, stageKey: string): FlatStage | undefined {
   return config.stages.find((stage) => stage.stageKey === stageKey);
 }
 
 /** 把服务端已给的标准引用转成宿主形状（hash 缺失即不可解析）。 */
-export function flatStandardFromRef(ref: StageStandardRefV3): FlatStandardV3 {
+export function flatStandardFromRef(ref: StageStandardRef): FlatStandard {
   return {
     name: ref.name,
     ...(ref.version !== undefined ? { version: ref.version } : {}),
@@ -238,7 +238,7 @@ export function flatStandardFromRef(ref: StageStandardRefV3): FlatStandardV3 {
 }
 
 /** slot 的展示标签（配置声明优先）。 */
-export function slotLabel(config: FlatConfigV3, slotKey: string): string | undefined {
-  const slot: ConfigSlotV3 | undefined = config.slots.find((candidate) => candidate.key === slotKey);
+export function slotLabel(config: FlatConfig, slotKey: string): string | undefined {
+  const slot: ConfigSlot | undefined = config.slots.find((candidate) => candidate.key === slotKey);
   return slot?.label;
 }

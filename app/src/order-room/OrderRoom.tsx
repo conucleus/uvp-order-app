@@ -331,8 +331,6 @@ function buildSlaRows(tasks: readonly ProductTaskDTO[]): readonly SlaRow[] {
 }
 
 function slaStatus(task: ProductTaskDTO): SlaRow["status"] {
-  // 链侧状态与 taskDisplay 同口径：submitted 即链上已确认，没有更深的
-  // 确认信号；unknown/缺省才停留在等待索引。
   const display = taskDisplay(task);
   if (display.state === "confirmed") {
     return "confirmed";
@@ -445,10 +443,6 @@ function findParticipantTask(role: string, tasks: readonly ProductTaskDTO[]): Pr
   });
 }
 
-// 0404 UI-8：参与方↔任务角色只认 trim 后全等。双向 includes 会把
-// "买家"沾到"老买家"、"报关行"沾到"XX 报关行"，参与方卡片挂上别人的
-// 待办；DTO 里没有 slot/participant 维度的结构化关联可回退，宁可显示
-// 暂无当前待办也不冒认（纯展示层，不影响提交与链上数据）。
 function roleLabelEquals(participantRole: string, label: string): boolean {
   return label.trim() === participantRole.trim();
 }
@@ -482,14 +476,12 @@ function shortHash(value: string): string {
 }
 
 function compareTasks(left: ProductTaskDTO, right: ProductTaskDTO): number {
-  // 排序口径与服务端任务词表一致（open/blocked/submitted，无完成态）。
   const rank: Readonly<Record<ProductTaskDTO["status"], number>> = {
     open: 0,
     blocked: 1,
     submitted: 2
   };
   return rank[left.status] - rank[right.status] ||
-    // deadline 排序统一 UTC 解析口径（deadlineSortMs），不随字符串序漂移。
     deadlineSortMs(left.deadline) - deadlineSortMs(right.deadline) ||
     left.taskId.localeCompare(right.taskId);
 }

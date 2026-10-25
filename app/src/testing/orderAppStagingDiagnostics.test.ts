@@ -35,14 +35,14 @@ describe("Staging diagnostics: wallet/task mismatch", () => {
       taskFixture({ taskId: "t-2", participantWallet: WALLET_B }),
       taskFixture({ taskId: "t-3", participantWallet: WALLET_B }),
       taskFixture({ taskId: "t-4", assigneeWallet: WALLET_A }),
-      taskFixture({ taskId: "t-5" }) // no wallet — matches any
+      taskFixture({ taskId: "t-5" })
     ];
 
     const report = diagnoseStagingTaskWalletMatch(tasks, WALLET_A);
 
     assert.equal(report.walletMatch.apiTaskCount, 5);
-    assert.equal(report.walletMatch.walletMatchedCount, 3); // t-1, t-4, t-5
-    assert.equal(report.walletMatch.filteredOutCount, 2); // t-2, t-3
+    assert.equal(report.walletMatch.walletMatchedCount, 3);
+    assert.equal(report.walletMatch.filteredOutCount, 2);
     assert.equal(report.walletHasTasks, true);
     assert.ok(report.diagnosis.includes("Product API 返回了 5 个任务"));
     assert.ok(report.diagnosis.includes("匹配了 3 个"));
@@ -50,14 +50,13 @@ describe("Staging diagnostics: wallet/task mismatch", () => {
     assert.ok(report.nextAction.includes("切换至"));
   });
 
-  it("provides unmatched wallet hints for staging release owner", () => {
+  it("provides unmatched wallet hints for staging gate owner", () => {
     const tasks: readonly ProductTaskDTO[] = [
       taskFixture({ taskId: "t-1", participantWallet: WALLET_A }),
       taskFixture({ taskId: "t-2", participantWallet: WALLET_B }),
       taskFixture({ taskId: "t-3", assigneeWallet: WALLET_C })
     ];
 
-    // Wallet B has 1 matching task (t-2), 2 filtered out — goes to "has tasks" branch
     const reportB = diagnoseStagingTaskWalletMatch(tasks, WALLET_B);
 
     assert.equal(reportB.walletHasTasks, true);
@@ -65,7 +64,6 @@ describe("Staging diagnostics: wallet/task mismatch", () => {
     assert.equal(reportB.walletMatch.unmatchedWalletHints.length, 2);
     assert.equal(reportB.walletMatch.filteredOutCount, 2);
     assert.ok(reportB.nextAction.includes("切换至"));
-    // nextAction hints at the unmatched wallets
     assert.ok(reportB.nextAction.includes("0x9d8a...5a4f") || reportB.nextAction.includes("9d8a"));
     assert.ok(reportB.nextAction.includes("0x7099...79c8") || reportB.nextAction.includes("7099"));
   });
@@ -79,7 +77,7 @@ describe("Staging diagnostics: wallet/task mismatch", () => {
     const report = diagnoseStagingTaskWalletMatch(tasks, undefined);
 
     assert.equal(report.walletMatch.apiTaskCount, 2);
-    assert.equal(report.walletMatch.walletMatchedCount, 2); // no wallet = no filter
+    assert.equal(report.walletMatch.walletMatchedCount, 2);
     assert.equal(report.walletMatch.filteredOutCount, 0);
     assert.equal(report.walletHasTasks, true);
     assert.equal(report.walletMatch.connectedWalletHint, "未连接");
@@ -112,7 +110,6 @@ describe("Staging diagnostics: wallet/task mismatch", () => {
     assert.equal(report.walletHasTasks, false);
     assert.ok(report.diagnosis.includes("未匹配到任何任务"));
     assert.ok(report.nextAction.includes("请尝试以下钱包"));
-    // Should hint at WALLET_A
     assert.ok(report.walletMatch.unmatchedWallets.includes(WALLET_A.toLowerCase()));
   });
 
@@ -142,7 +139,7 @@ describe("Staging diagnostics: wallet/task mismatch", () => {
   it("deduplicates unmatched wallets from multiple tasks", () => {
     const tasks: readonly ProductTaskDTO[] = [
       taskFixture({ taskId: "t-1", participantWallet: WALLET_A }),
-      taskFixture({ taskId: "t-2", assigneeWallet: WALLET_A }), // same wallet, different field
+      taskFixture({ taskId: "t-2", assigneeWallet: WALLET_A }),
       taskFixture({ taskId: "t-3", participantWallet: WALLET_B })
     ];
 

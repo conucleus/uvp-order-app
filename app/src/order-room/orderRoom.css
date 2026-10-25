@@ -1,4 +1,4 @@
-.order-settlement {
+.order-amounts {
   margin-top: 12px;
 }
 
@@ -100,7 +100,6 @@
   margin: 0 12px 12px;
 }
 
-/* Order room refresh: stage path, participants, timeline, and receipt drawer. */
 .order-room {
   border-color: var(--app-line);
 }

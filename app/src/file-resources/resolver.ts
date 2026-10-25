@@ -1,7 +1,6 @@
-/* FileResourceResolver 的 registry 实现：按 fileType 选择适配器，先做句柄
- * 形状校验与按 visibility/policy 的 principal 授权（fail-closed），再校验
- * 摘要并按需解密；任何失败都抛 FileResourceError，绝不返回空文件。
- * 内容摘要复用 evidence/hashing 的 sha256 单源，密文解密单源在 cipher.ts。
+/* FileResourceResolver 的 registry 实现：按 fileType 选择适配器，句柄形状
+ * 校验与 principal 授权（fail-closed）后校验摘要并按需解密；任何失败都抛
+ * FileResourceError，绝不返回空文件。sha256 单源在 evidence/hashing。
  */
 import type {
   FileResourceCipherDTO,

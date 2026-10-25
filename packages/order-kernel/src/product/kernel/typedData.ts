@@ -1,4 +1,4 @@
-// V3 邀请接受 EIP-712：域与类型单源是 @uvp-eth/protocol-bindings（UVPOrderBook/1、
+// 邀请接受 EIP-712：域与类型单源是 @uvp-eth/protocol-bindings（UVPOrderBook/1、
 // UVPStageInviteAccept），本模块只做「按独立已知事实核对服务端下发的 typed data」
 // 与「给宿主可读摘要的字段」，不重复定义类型，也不在客户端重算 termsHash。
 
@@ -24,7 +24,7 @@ import {
   type UVPOrderFinalizeTypedData,
   type UVPStageInviteAcceptTypedData
 } from "@uvp-eth/protocol-bindings";
-import type { StageInvitePreviewV3 } from "@uvp-eth/product-dto";
+import type { StageInvitePreview } from "@uvp-eth/product-dto";
 import { formatBaseUnits } from "./format";
 
 export {
@@ -206,7 +206,7 @@ export function summarizeInviteAcceptTypedData(
  * 逐字段相等，宿主不应把重建值当作新事实。
  */
 export function buildInviteAcceptTypedDataFromPreview(
-  preview: StageInvitePreviewV3,
+  preview: StageInvitePreview,
   invitee: string
 ): UVPStageInviteAcceptTypedData {
   const terms = preview.terms;

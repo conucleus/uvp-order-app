@@ -1,53 +1,53 @@
-// V3 端口实现：把 kernel product/v3 的 transport 错误收敛成宿主可分支的结果；
+// 端口实现：把 order-kernel product/kernel 的 transport 错误收敛成宿主可分支的结果；
 // 服务端缺的读面返回 not_available + TODO，不用 v0 语义补位。
 
 import {
   buildCreateOrderDraftInput,
   flattenConfigVersion,
-  isProductV3Error,
-  type ProductV3Client
-} from "@uvp-eth/order-kernel/product/v3";
+  isProductError,
+  type ProductClient
+} from "@uvp-eth/order-kernel/product/kernel";
 import type {
-  FinalizeOrderDraftV3Preparation,
-  FinalizeOrderDraftV3Result,
-  OrderViewV3,
-  ResourceListViewV3,
-  StageInvitePreviewV3,
-  StageViewResponseV3,
-  TaskListViewV3
-} from "@uvp-eth/order-kernel/product/v3";
+  FinalizeOrderDraftPreparation,
+  FinalizeOrderDraftResult,
+  OrderView,
+  ResourceListView,
+  StageInvitePreview,
+  StageViewResponse,
+  TaskListView
+} from "@uvp-eth/order-kernel/product/kernel";
 import {
-  V3_TODOS,
-  type CreateOrderV3Input,
-  type CreateOrderV3Result,
-  type CreatedInviteV3,
-  type FlatConfigV3,
-  type V3Failure,
-  type V3Result
+  TODOS,
+  type CreateOrderInput,
+  type CreateOrderResult,
+  type CreatedInvite,
+  type FlatConfig,
+  type Failure,
+  type Result
 } from "./types";
 
-export interface V3Ports {
-  readonly getConfig: (configId: string, version: string) => Promise<V3Result<FlatConfigV3>>;
-  readonly listConfigs: () => Promise<V3Result<readonly never[]>>;
-  readonly createOrder: (input: CreateOrderV3Input) => Promise<V3Result<CreateOrderV3Result>>;
-  readonly prepareFinalize: (draftId: string) => Promise<V3Result<FinalizeOrderDraftV3Preparation>>;
+export interface Ports {
+  readonly getConfig: (configId: string, version: string) => Promise<Result<FlatConfig>>;
+  readonly listConfigs: () => Promise<Result<readonly never[]>>;
+  readonly createOrder: (input: CreateOrderInput) => Promise<Result<CreateOrderResult>>;
+  readonly prepareFinalize: (draftId: string) => Promise<Result<FinalizeOrderDraftPreparation>>;
   readonly finalizeWithSignature: (
     draftId: string,
     signature: string
-  ) => Promise<V3Result<FinalizeOrderDraftV3Result>>;
-  readonly previewInvite: (inviteId: string, token: string) => Promise<V3Result<StageInvitePreviewV3>>;
+  ) => Promise<Result<FinalizeOrderDraftResult>>;
+  readonly previewInvite: (inviteId: string, token: string) => Promise<Result<StageInvitePreview>>;
   readonly acceptInvite: (
     inviteId: string,
     input: { readonly token: string; readonly signature: string; readonly termsHash: string; readonly nonce: string }
-  ) => Promise<V3Result<unknown>>;
-  readonly rejectInvite: (inviteId: string, token: string) => Promise<V3Result<unknown>>;
-  readonly getOrder: (orderId: string) => Promise<V3Result<OrderViewV3>>;
-  readonly getStage: (orderId: string, stageKey: string) => Promise<V3Result<StageViewResponseV3>>;
-  readonly listTasks: (orderId: string) => Promise<V3Result<TaskListViewV3>>;
-  readonly listStageResources: (orderId: string, stageKey: string) => Promise<V3Result<ResourceListViewV3>>;
+  ) => Promise<Result<unknown>>;
+  readonly rejectInvite: (inviteId: string, token: string) => Promise<Result<unknown>>;
+  readonly getOrder: (orderId: string) => Promise<Result<OrderView>>;
+  readonly getStage: (orderId: string, stageKey: string) => Promise<Result<StageViewResponse>>;
+  readonly listTasks: (orderId: string) => Promise<Result<TaskListView>>;
+  readonly listStageResources: (orderId: string, stageKey: string) => Promise<Result<ResourceListView>>;
 }
 
-export function createV3Ports(client: ProductV3Client): V3Ports {
+export function createPorts(client: ProductClient): Ports {
   return {
     async getConfig(configId, version) {
       try {
@@ -59,7 +59,7 @@ export function createV3Ports(client: ProductV3Client): V3Ports {
     },
 
     async listConfigs() {
-      return notAvailable(V3_TODOS.configList);
+      return notAvailable(TODOS.configList);
     },
 
     async createOrder(input) {
@@ -78,7 +78,7 @@ export function createV3Ports(client: ProductV3Client): V3Ports {
       }
       try {
         const detail = await client.createOrderDraft(mapped.value, { idempotencyKey: cryptoRandomId() });
-        const invites: CreatedInviteV3[] = [];
+        const invites: CreatedInvite[] = [];
         for (const invite of input.invites) {
           const created = await client.createInvite(detail.draft.draftId, {
             stageKey: invite.stageKey,
@@ -179,9 +179,8 @@ export function createV3Ports(client: ProductV3Client): V3Ports {
   };
 }
 
-/** kernel 错误 → 宿主失败分类（kind/code/httpStatus 全部保留，不吞短码）。 */
-export function failure(error: unknown): V3Failure {
-  if (!isProductV3Error(error)) {
+export function failure(error: unknown): Failure {
+  if (!isProductError(error)) {
     return {
       kind: "unknown",
       message: error instanceof Error ? error.message : String(error)
@@ -198,10 +197,10 @@ export function failure(error: unknown): V3Failure {
   };
 }
 
-export function notAvailable(todo: string): V3Failure {
+export function notAvailable(todo: string): Failure {
   return {
     kind: "not_available",
-    message: "该 V3 读面尚未就绪；页面不会用旧 v0 语义或样例数据补位。",
+    message: "该读面尚未就绪；页面不会用旧 v0 语义或样例数据补位。",
     todo
   };
 }

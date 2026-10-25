@@ -26,9 +26,9 @@ import { createOrderAppActions } from "./actions/orderAppActions";
 import { participantQueryFromSession, readParticipantSession, shortWallet } from "./auth/participant";
 import { NotificationCenter, useOrderAppNotifications } from "./notifications/NotificationCenter";
 import type { OrderAppNotificationDTO } from "./notifications/types";
-import { CreateOrderV3Page, InviteV3Page, OrderRoomV3Page } from "./v3/pages";
-import { createV3Ports } from "./v3/ports";
-import { createV3Client } from "./v3/client";
+import { CreateOrderPage, InvitePage, OrderRoomPage } from "./kernel/pages";
+import { createPorts } from "./kernel/ports";
+import { createClient } from "./kernel/client";
 import { WalletLoginPanel } from "./onboarding/WalletLoginPanel";
 
 import { DecorationPage } from "./reader/DecorationPage";
@@ -47,14 +47,13 @@ import {
   type OrderAppSection
 } from "./routes/appRoutes";
 import { personalSignWithInjectedWallet } from "./wallet/injectedWallet";
-import type { CreateOrderV3Result } from "./v3/types";
+import type { CreateOrderResult } from "./kernel/types";
 import "./app/collaboration-notifications.css";
 
 type LoadState =
   | { readonly status: "loading" }
   | { readonly status: "ready"; readonly data: ProductHomeData }
   | { readonly status: "error"; readonly message: string }
-  /** 非 local 部署缺有效钱包会话：切换到钱包登录入口而不是报错死路。 */
   | { readonly status: "unauthenticated"; readonly message: string };
 
 export default function App() {
@@ -62,7 +61,6 @@ export default function App() {
     try {
       return {
         api: createProductApiClient({
-          // accept 邀请的钱包控制证明走服务端会话（challenge → personal_sign → verify）。
           personalSign: (address, message) => personalSignWithInjectedWallet({ address, message })
         })
       };
@@ -108,36 +106,23 @@ function UnconfiguredShell({ message }: { readonly message: string }) {
 
 function AppShell({ api }: { readonly api: ProductApiClient }) {
   const actions = useMemo(() => createOrderAppActions(api), [api]);
-  // V3 端口复用同一钱包会话（proveWalletControl 之后持有的 token）。
-  const v3 = useMemo(() => {
-    const client = createV3Client(() => api.currentSessionToken());
-    return { client, ports: createV3Ports(client) };
+  const kernel = useMemo(() => {
+    const client = createClient(() => api.currentSessionToken());
+    return { client, ports: createPorts(client) };
   }, [api]);
   const [session] = useState(() => readParticipantSession());
   const [loadState, setLoadState] = useState<LoadState>({ status: "loading" });
-  // 会话恢复：proveWalletControl 留存的 token 会话级持久化，刷新页面时
-  // 先恢复再请求——非 local 部署没有会话锚定身份的请求一律 401。
   const [sessionRestored] = useState(() => api.restoreSessionToken(readPersistedWalletSessionToken()));
   const [route, setRoute] = useState<OrderAppRoute>(() => readOrderAppRoute());
   const requirementsSection = route.section === "requirements";
-  // Reader 装修入口（?decoration=<zhixuId>）：只读展示，不要求钱包会话；
-  // 离开时清搜索参数，刷新后回到参与者主界面。
   const [decorationEntry, setDecorationEntry] = useState<DecorationEntry | undefined>(() => readDecorationEntryFromSearch());
-  // ?invite=&inviteToken= 只作为进入应用的邀请入口读取进 state；地址栏上的
-  // 一次性令牌保留到流程终态（accept/reject 成功或明确离开）才清除——
-  // 中途失败/刷新必须能重新读到令牌重试，挂载即清会把可重试失败变成死路。
-  // 路由只认 hash，search 残留不会在 hash 导航后还原邀请面板；渲染条件是
-  // route.inviteId || inviteEntry，离开流程时两者同步清掉，工作区恢复可达。
   const [inviteEntry, setInviteEntry] = useState<InviteEntry | undefined>(() => readInviteEntryFromSearch());
 
   const [notificationsOpen, setNotificationsOpen] = useState(false);
-  // 开单成功提示：跳转订单页后仍保留，明确"已创建、正在同步"；同步完成前
-  // 新订单可能还不在投影里，不能因为列表暂时为空就呈现成创建失败。
   const [createdOrderNotice, setCreatedOrderNotice] = useState<
     { readonly title: string; readonly orderId?: string | undefined } | undefined
   >(undefined);
   const createdOrderNoticeTimerRef = useRef<number | undefined>(undefined);
-  // 慢网下旧响应不得覆盖新响应：所有 loadParticipantHome 调用共用单调序号。
   const loadSequenceRef = useRef(0);
 
   useEffect(() => {
@@ -149,7 +134,6 @@ function AppShell({ api }: { readonly api: ProductApiClient }) {
   }, []);
 
   useEffect(() => {
-    // reader 装修页是公共读页面：不发参与者身份请求，避免无会话时误跳登录面。
     if (decorationEntry) {
       return;
     }
@@ -159,8 +143,6 @@ function AppShell({ api }: { readonly api: ProductApiClient }) {
   function loadParticipantHome(options: { readonly silent?: boolean } = {}) {
     const sequence = loadSequenceRef.current + 1;
     loadSequenceRef.current = sequence;
-    // 静默刷新（提交成功后的投影刷新）不退回整页 loading：工作区保持挂载，
-    // 提交确认结果不被卸载清掉；新数据到达后原地替换。
     if (!options.silent) {
       setLoadState({ status: "loading" });
     }
@@ -175,8 +157,6 @@ function AppShell({ api }: { readonly api: ProductApiClient }) {
           return;
         }
         if (isWalletIdentityRequired(error)) {
-          // 持久化的会话已失效（或从未建立）：清掉残留 token，给出登录
-          // 入口——重发同一无会话请求只会再吃一次 401。
           persistWalletSessionToken(undefined);
           api.restoreSessionToken(undefined);
           setLoadState({ status: "unauthenticated", message: error.message });
@@ -198,8 +178,6 @@ function AppShell({ api }: { readonly api: ProductApiClient }) {
   const data = loadState.status === "ready" ? loadState.data : undefined;
   const selectedOrderId = route.orderId;
 
-  // 通知中心与主客户端共用同一钱包会话（会话锚定身份单一来源）；
-  // 取值器按 api 记忆，避免每次渲染都触发通知 effect 重跑。
   const notificationSessionToken = useMemo(() => () => api.currentSessionToken(), [api]);
   const notificationState = useOrderAppNotifications(data, session, notificationSessionToken);
 
@@ -212,10 +190,6 @@ function AppShell({ api }: { readonly api: ProductApiClient }) {
     loadParticipantHome(options);
   }
 
-  /**
-   * 写路径 401（wallet_identity_required）与读路径同口径：清残留 token 切
-   * 登录面；返回是否已接管，未接管时调用方维持现有错误展示。
-   */
   function handleSessionExpired(error: unknown): boolean {
     if (!isWalletIdentityRequired(error)) {
       return false;
@@ -236,17 +210,12 @@ function AppShell({ api }: { readonly api: ProductApiClient }) {
     setNotificationsOpen(false);
   }
 
-  /** accept 终态成功：服务端已消费一次性令牌，立即从地址栏清除并刷新待办。 */
   function handleInviteAccepted() {
     clearInviteSearchParams();
     handleRefresh();
   }
 
-  /**
-   * 开单成功：订单已提交创建，立即刷新投影并跳到订单页。投影同步有延迟，
-   * 主壳横幅明确"已创建、正在同步"，避免把尚未索引误读成创建失败。
-   */
-  function handleOrderCreated(result: CreateOrderV3Result) {
+  function handleOrderCreated(result: CreateOrderResult) {
     setCreatedOrderNotice({ title: `草稿 ${result.draftId} 已创建`, orderId: undefined });
     if (createdOrderNoticeTimerRef.current !== undefined) {
       window.clearTimeout(createdOrderNoticeTimerRef.current);
@@ -258,7 +227,6 @@ function AppShell({ api }: { readonly api: ProductApiClient }) {
   }
 
   function dismissInviteEntry() {
-    // 明确离开邀请流程（放弃，或终态成功后的返回）才消费 URL 上的令牌。
     clearInviteSearchParams();
     setInviteEntry(undefined);
     navigate({ section: "tasks" });
@@ -306,8 +274,8 @@ function AppShell({ api }: { readonly api: ProductApiClient }) {
           }}
         />
       ) : route.inviteId || inviteEntry ? (
-        <InviteV3Page
-          ports={v3.ports}
+        <InvitePage
+          ports={kernel.ports}
           inviteId={route.inviteId ?? inviteEntry?.inviteId ?? ""}
           inviteToken={inviteEntry?.inviteToken}
           onAccepted={handleInviteAccepted}
@@ -315,9 +283,6 @@ function AppShell({ api }: { readonly api: ProductApiClient }) {
           onDismiss={dismissInviteEntry}
         />
       ) : route.section === "registration" ? (
-        // 注册与身份：实体注册写路径 blocker 见 registration/README.md；钱包
-        // 绑定复用现有 SIWE 会话（OrderAppActions + api 会话 token）。未登录
-        // 也可进入（公开身份事实只读），登录后地址绑定才可用。
         <RegistrationPage
           session={{ currentSessionToken: () => api.currentSessionToken() }}
           wallet={actions}
@@ -352,17 +317,14 @@ function AppShell({ api }: { readonly api: ProductApiClient }) {
           />
         )
       ) : route.section === "create" && loadState.status !== "unauthenticated" ? (
-        // V3 开单：配置版本 → 阶段子集/条款 → 草稿 → 邀请 → buyer EIP-712 finalize。
-        <CreateOrderV3Page
-          ports={v3.ports}
+        <CreateOrderPage
+          ports={kernel.ports}
           defaultConfigId={import.meta.env.VITE_UVP_V3_CONFIG_ID}
           defaultConfigVersion={import.meta.env.VITE_UVP_V3_CONFIG_VERSION}
           onCreated={handleOrderCreated}
           onBack={() => navigate({ section: "tasks", orderId: selectedOrderId })}
         />
       ) : loadState.status === "unauthenticated" ? (
-        // 非 local 部署的无会话态：登录是唯一可用入口，不渲染待办工作区
-        //（渲染了也只是一整屏 401 派生错误）。
         <WalletLoginPanel
           hasWallet={actions.hasInjectedWallet()}
           onLogin={handleWalletLogin}
@@ -467,8 +429,8 @@ function AppShell({ api }: { readonly api: ProductApiClient }) {
             {loadState.status === "loading" ? (
               <LoadingState />
             ) : (
-              <OrderRoomV3Page
-                ports={v3.ports}
+              <OrderRoomPage
+                ports={kernel.ports}
                 orderId={selectedOrderId}
                 onBack={() => navigate({ section: "tasks", orderId: selectedOrderId })}
               />

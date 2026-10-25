@@ -3,48 +3,23 @@ import { filterParticipantTasksForWallet, taskWalletHint } from "../tasks/model/
 import { orderAppFullModeRequiredEvents } from "./orderAppFullModeGate";
 
 export interface StagingTaskWalletDiagnostic {
-  /** Tasks received from Product API. */
   readonly apiTaskCount: number;
-  /** Tasks matching the connected wallet. */
   readonly walletMatchedCount: number;
-  /** Tasks filtered out because wallet didn't match. */
   readonly filteredOutCount: number;
-  /** Connected wallet (undefined if none). */
   readonly connectedWallet?: string | undefined;
-  /** Short hex hint for the connected wallet. */
   readonly connectedWalletHint: string;
-  /** Unique assignee/participant wallets found in filtered‑out tasks. */
   readonly unmatchedWallets: readonly string[];
-  /** Short hex hints for the unmatched wallets. */
   readonly unmatchedWalletHints: readonly string[];
 }
 
 export interface StagingDiagnosticReport {
-  /** Human‑readable diagnosis summary. */
   readonly diagnosis: string;
-  /** Required full‑mode events (always present for release‑owner visibility). */
   readonly requiredEvents: readonly string[];
-  /** Wallet‑task matching details. */
   readonly walletMatch: StagingTaskWalletDiagnostic;
-  /** Whether the connected wallet sees any tasks. */
   readonly walletHasTasks: boolean;
-  /** Action guidance for the release owner. */
   readonly nextAction: string;
 }
 
-/**
- * Diagnose wallet‑task mismatch from Product API task data.
- *
- * Use this helper during staging to answer:
- *  - Product API returned N tasks
- *  - current wallet matched M
- *  - filtered out K
- *  - what wallet hint should be used next
- *
- * The helper never falls back to fixture data. It requires real Product API data
- * (or full‑mode fixture tasks) and a wallet address to produce a meaningful
- * diagnosis.
- */
 export function diagnoseStagingTaskWalletMatch(
   tasks: readonly ProductTaskDTO[],
   walletAddress: string | undefined

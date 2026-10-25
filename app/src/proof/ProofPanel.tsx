@@ -25,7 +25,6 @@ type ProofMatchStatus = "matched" | "unbound" | "missing" | "mismatched";
 export function ProofPanel({ order, task, submissionProof }: ProofPanelProps) {
   const [open, setOpen] = useState(false);
   const taskIsIndexing = task?.status === "submitted" && !task.proofSummary?.txHash;
-  // 服务端任务词表没有完成态：errorCode 一律如实展示。
   const taskFailed = task
     ? (task as ProductTaskDTO & { readonly errorCode?: string }).errorCode
     : undefined;

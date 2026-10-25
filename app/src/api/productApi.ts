@@ -10,7 +10,6 @@ import {
 
 export * from "@uvp-eth/order-kernel/product";
 
-/** 钱包会话 token 的浏览器级持久化键：刷新页面与新开标签页共用同一会话（与 Store 同口径）。 */
 const WALLET_SESSION_STORAGE_KEY = "uvp-order-app:wallet-session";
 
 export function readPersistedWalletSessionToken(): string | undefined {
@@ -29,7 +28,6 @@ export function persistWalletSessionToken(token: string | undefined): void {
       globalThis.localStorage?.setItem(WALLET_SESSION_STORAGE_KEY, token);
     }
   } catch {
-    // 存储不可用（隐私模式/测试环境）只损失跨页恢复，登录流程本身不受影响。
   }
 }
 
@@ -57,9 +55,6 @@ export function createProductApiClient(options: ProductApiClientOptions = {}): P
   });
 }
 
-// API 基地址与超时来自构建期注入的静态值（import.meta.env.VITE_X 静态成员
-// 访问，Vite 构建时内联）。传入整个 env 对象会把键名查找留在运行期，
-// 形成随包分发的环境开关。
 function runtimeEnv(): string | undefined {
   return import.meta.env?.VITE_UVP_CHAIN_SERVICES_URL;
 }

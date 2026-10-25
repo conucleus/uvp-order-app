@@ -1,15 +1,15 @@
-// V3 客户端错误映射与传输口径：状态码 → kind、错误短码/详情保留、会话头、
+// 客户端错误映射与传输口径：状态码 → kind、错误短码/详情保留、会话头、
 // 超时=结果未知、拒绝跟随重定向、2xx 非 JSON 按 invalid_response。
 
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
-  ProductV3Error,
-  createProductV3Client,
-  isProductV3Error,
-  isWalletIdentityRequiredV3,
-  type ProductV3Fetcher
-} from "../src/product/v3/index";
+  ProductError,
+  createProductClient,
+  isProductError,
+  isWalletIdentityRequiredKernel,
+  type ProductFetcher
+} from "../src/product/kernel/index";
 
 function jsonResponse(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {
@@ -19,7 +19,7 @@ function jsonResponse(body: unknown, status = 200): Response {
 }
 
 function failingClient(body: unknown, status: number) {
-  return createProductV3Client({
+  return createProductClient({
     baseUrl: "https://product.test",
     fetcher: async () => jsonResponse(body, status)
   });
@@ -27,17 +27,17 @@ function failingClient(body: unknown, status: number) {
 
 async function expectError(
   run: () => Promise<unknown>
-): Promise<ProductV3Error> {
+): Promise<ProductError> {
   try {
     await run();
   } catch (error) {
-    assert.ok(isProductV3Error(error), "expected ProductV3Error");
+    assert.ok(isProductError(error), "expected ProductError");
     return error;
   }
   throw new Error("expected the call to fail");
 }
 
-describe("product v3 error mapping", () => {
+describe("product error mapping", () => {
   it("maps 409 to conflict with server code and message", async () => {
     const client = failingClient({ error: "invite_not_active", message: "invite is not active" }, 409);
     const error = await expectError(() => client.previewInvite("invite-1", "token-1"));
@@ -53,7 +53,7 @@ describe("product v3 error mapping", () => {
     const client = failingClient({ error: "wallet_identity_required", message: "session required" }, 401);
     const error = await expectError(() => client.getOrder("order-1"));
     assert.equal(error.kind, "unauthorized");
-    assert.equal(isWalletIdentityRequiredV3(error), true);
+    assert.equal(isWalletIdentityRequiredKernel(error), true);
   });
 
   it("keeps 422 details and classifies as invalid_terms", async () => {
@@ -108,7 +108,7 @@ describe("product v3 error mapping", () => {
   });
 
   it("rejects redirects instead of following them", async () => {
-    const client = createProductV3Client({
+    const client = createProductClient({
       baseUrl: "https://product.test",
       fetcher: async () => new Response(null, { status: 302 })
     });
@@ -118,7 +118,7 @@ describe("product v3 error mapping", () => {
   });
 
   it("treats a 2xx non-JSON body as invalid_response", async () => {
-    const client = createProductV3Client({
+    const client = createProductClient({
       baseUrl: "https://product.test",
       fetcher: async () => new Response("<html>ok</html>", { status: 200 })
     });
@@ -127,18 +127,18 @@ describe("product v3 error mapping", () => {
   });
 
   it("reports timeout as unknown result instead of a retryable success", async () => {
-    const hanging: ProductV3Fetcher = (_input, init) =>
+    const hanging: ProductFetcher = (_input, init) =>
       new Promise((_resolve, reject) => {
         init?.signal?.addEventListener("abort", () => reject(init.signal?.reason));
       });
-    const client = createProductV3Client({ baseUrl: "https://product.test", fetcher: hanging, timeoutMs: 20 });
+    const client = createProductClient({ baseUrl: "https://product.test", fetcher: hanging, timeoutMs: 20 });
     const error = await expectError(() => client.getOrder("order-1"));
     assert.equal(error.kind, "timeout");
     assert.match(error.message, /服务端可能已处理/u);
   });
 
   it("classifies a fetch failure as transport", async () => {
-    const client = createProductV3Client({
+    const client = createProductClient({
       baseUrl: "https://product.test",
       fetcher: async () => {
         throw new Error("boom");
@@ -150,18 +150,18 @@ describe("product v3 error mapping", () => {
   });
 
   it("requires a baseUrl instead of falling back to sample data", () => {
-    assert.throws(() => createProductV3Client({}), /V3 订单服务地址未配置/u);
+    assert.throws(() => createProductClient({}), /订单服务地址未配置/u);
   });
 });
 
-describe("product v3 transport", () => {
+describe("product transport", () => {
   it("sends the session header and idempotency key", async () => {
     const seen: {
       headers?: Record<string, string> | undefined;
       method?: string | undefined;
       url?: string | undefined;
     } = {};
-    const client = createProductV3Client({
+    const client = createProductClient({
       baseUrl: "https://product.test",
       sessionToken: "session-abc",
       fetcher: async (input, init) => {
@@ -191,7 +191,7 @@ describe("product v3 transport", () => {
   it("prefers the injected session token provider over the fixed token", async () => {
     let token = "first";
     const sessions: string[] = [];
-    const client = createProductV3Client({
+    const client = createProductClient({
       baseUrl: "https://product.test",
       sessionToken: "fixed",
       getSessionToken: () => token,
@@ -208,7 +208,7 @@ describe("product v3 transport", () => {
 
   it("aligns paths with the server routes", async () => {
     const urls: string[] = [];
-    const client = createProductV3Client({
+    const client = createProductClient({
       baseUrl: "https://product.test",
       fetcher: async (input) => {
         urls.push(String(input));
@@ -222,7 +222,7 @@ describe("product v3 transport", () => {
     );
 
     const stageUrls: string[] = [];
-    const stageClient = createProductV3Client({
+    const stageClient = createProductClient({
       baseUrl: "https://product.test",
       fetcher: async (input) => {
         stageUrls.push(String(input));
@@ -252,7 +252,7 @@ describe("product v3 transport", () => {
         message: {}
       }
     };
-    const client = createProductV3Client({
+    const client = createProductClient({
       baseUrl: "https://product.test",
       fetcher: async (input, init) => {
         calls.push({ url: String(input), ...(init?.method ? { method: init.method } : {}), ...(init?.body ? { body: JSON.parse(String(init.body)) } : {}) });

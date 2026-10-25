@@ -1,7 +1,6 @@
 /* fileResource 句柄解析层的公共契约（A 口径）：句柄形状、fileType 闭集与
  * locator 均取自 @uvp-eth/product-dto 的订单要求包 DTO，本模块不自造第二套；
- * 正文/密钥/存储凭据一律不进句柄，resolver 按 principal 裁决并把读取失败与
- * “没有文件”分开。
+ * 正文/密钥/存储凭据一律不进句柄。
  */
 import type {
   FileResourceHandleDTO,

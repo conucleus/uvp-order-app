@@ -1,4 +1,4 @@
-// V3 开单草稿映射：宿主选择 → 服务端 CreateOrderDraftV3Input。服务端没有
+// 开单草稿映射：宿主选择 → 服务端 CreateOrderDraftInput。服务端没有
 // performerSlotId/verifierSlotId 入参，映射不上的字段显式报错而不是静默丢弃。
 
 import assert from "node:assert/strict";
@@ -8,14 +8,14 @@ import {
   flattenConfigVersion,
   flatStageByKey,
   mapStageSelection,
-  type StageSelectionV3
-} from "../src/product/v3/index";
+  type StageSelection
+} from "../src/product/kernel/index";
 import { STANDARD_HASH, configVersionFixture } from "./fixtures";
 
 const INVITE_DEADLINE = "2026-11-01T00:00:00.000Z";
 const WORK_DEADLINE = "2026-11-20T00:00:00.000Z";
 
-function selection(overrides: Partial<StageSelectionV3> = {}): StageSelectionV3 {
+function selection(overrides: Partial<StageSelection> = {}): StageSelection {
   return {
     stageKey: "stage-b",
     amountBaseUnits: "1200000000",

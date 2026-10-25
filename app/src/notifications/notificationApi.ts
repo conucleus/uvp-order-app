@@ -13,7 +13,6 @@ import type {
 
 type Fetcher = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
 
-/** 与同仓 productApi 相同的超时口径：通知请求挂起不得让面板永久 loading。 */
 const NOTIFICATION_FETCH_TIMEOUT_MS = 6000;
 
 interface ApiNotificationResponse {
@@ -26,7 +25,6 @@ interface ApiNotificationReadResponse {
   readonly notification?: Partial<OrderAppNotificationDTO>;
 }
 
-/** 通知请求的可选会话锚定：与 productApi 客户端同一身份通道。 */
 export interface NotificationRequestOptions {
   readonly sessionToken?: string | undefined;
 }
@@ -62,7 +60,6 @@ export async function loadOrderAppNotifications(
     try {
       body = await response.json() as ApiNotificationResponse;
     } catch {
-      // 2xx 但不是 JSON：给出可读错误，不把裸解析异常透给通知面板。
       throw new Error("通知响应不是 JSON");
     }
     const notifications: OrderAppNotificationDTO[] = [];
@@ -81,8 +78,6 @@ export async function loadOrderAppNotifications(
     const merged = mergeLocalReadState(session, notifications);
     return {
       notifications: merged,
-      // 未读数按合并本地已读后的列表计算：回执同步失败时用户已读过的
-      // 通知不得因服务端仍未记账而重新亮起未读。
       unreadCount: merged.filter((notification) => notification.readStatus === "unread").length,
       source: "api",
       sourceOfTruth: body.sourceOfTruth ?? "product-projection-and-notification-read-state"
@@ -92,10 +87,6 @@ export async function loadOrderAppNotifications(
   }
 }
 
-/**
- * 加载路径合并本地已读缓存：回执同步失败（或尚未重放）的通知在刷新后
- * 仍按已读呈现（syncPending 标记回执待同步），不回退成未读。
- */
 function mergeLocalReadState(
   session: ParticipantSession,
   notifications: readonly OrderAppNotificationDTO[]
@@ -143,8 +134,6 @@ export async function markOrderAppNotificationRead(
     }
     if (!response.ok) {
       if (isPermanentReadReceiptFailure(response.status)) {
-        // 资源已不存在（404/410）：重试永远不会成功，本地已读保留，但
-        // 不进重试队列，也不保留既有排队项。
         clearPendingRead(session, notification.notificationId);
         return { ...notification, readStatus: "read", readAt };
       }
@@ -161,12 +150,6 @@ export async function markOrderAppNotificationRead(
   }
 }
 
-/**
- * Replays read receipts that failed to reach the server earlier. Transient
- * failures (5xx / network / recoverable 401-403) stay queued for the next
- * pass; only a 404/410 (notification gone) permanently evicts the entry. The
- * local read state is never rolled back either way.
- */
 export async function syncPendingNotificationReads(
   data: ProductHomeData,
   session: ParticipantSession,
@@ -194,22 +177,15 @@ export async function syncPendingNotificationReads(
       clearPendingRead(session, notificationId);
       synced += 1;
     } catch {
-      // keep queued for the next sync pass
     }
   }
   return { synced, remaining: pending.length - synced - evicted };
 }
 
-/** manual 重定向模式下跨源 3xx 是 status 0 的 opaqueredirect，与 3xx 一并拒绝（executor-kit 同口径）。 */
 function isRedirectStatus(status: number): boolean {
   return status === 0 || (status >= 300 && status < 400);
 }
 
-/**
- * 永久失败仅限资源已不存在（404/410）：重试不可能转为成功。401/403 是
- * 鉴权类可恢复失败（会话过期后重新登录即可补投），留在重试队列；5xx 与
- * 网络错误同样可重试。
- */
 function isPermanentReadReceiptFailure(status: number): boolean {
   return status === 404 || status === 410;
 }
@@ -251,9 +227,6 @@ export function deriveOrderAppNotifications(input: {
     const sla = slaStateForTask(task, input.now);
     const base = baseNotification(task, order);
 
-    // 服务端任务词表没有完成态：submitted 仍是等待索引的中间态，本地
-    // 投影只产生"等待索引确认"通知，不提前宣布"提交已确认"（口径与
-    // taskStatus/ProofPanel 一致；submission_confirmed 只来自服务端通知面）。
     if (task.status === "submitted") {
       notifications.push({
         ...base,
@@ -481,16 +454,9 @@ function rememberReadNotification(session: ParticipantSession, notificationId: s
   const key = localReadStateKey(session);
   const next = Object.fromEntries(readNotificationIds(session));
   next[notificationId] = readAt;
-  // 写路径与读路径同样防护：该函数在调用方的 try 之外执行，禁存储/配额满
-  // 时抛出会变成未处理 rejection，并让已读点击整体静默失败。
   tryWriteLocalStorage(key, JSON.stringify(next));
 }
 
-/**
- * localStorage 写入永不抛出：读路径（readNotificationIds/pendingReadEntries）
- * 已有防护，写路径保持同一口径——本地已读只是缓存，写不进去降级为
- * "本次会话内已读"，不阻断已读回执的发送。
- */
 function tryWriteLocalStorage(key: string, value: string): void {
   try {
     window.localStorage.setItem(key, value);
@@ -515,15 +481,9 @@ function readNotificationIds(session: ParticipantSession): ReadonlyMap<string, s
   }
 }
 
-/** 匿名会话的已读桶 id：落 sessionStorage（每标签页独立、刷新保留）。 */
 const ANONYMOUS_READ_BUCKET_KEY = "uvp-order-app:anonymous-notification-bucket";
 let inMemoryAnonymousBucket: string | undefined;
 
-/**
- * 无钱包会话没有稳定身份，但匿名已读不能共桶：同一浏览器上的不同匿名
- * 访客会互相吃掉未读。桶 id 按标签页生成（sessionStorage），存储不可用
- * 时退化为本次页面加载的内存 id——宁可桶多，不可共享。
- */
 function anonymousReadBucket(): string {
   if (typeof window === "undefined") {
     return "anonymous-headless";
@@ -562,7 +522,6 @@ function pendingReadEntries(session: ParticipantSession): readonly (readonly [st
   }
 }
 
-/** 重试队列只是回执的兜底缓冲：封顶防止长期离线/持续失败时无界增长。 */
 const MAX_PENDING_READ_ENTRIES = 100;
 
 function enqueuePendingRead(session: ParticipantSession, notificationId: string, readAt: string): void {
@@ -571,7 +530,6 @@ function enqueuePendingRead(session: ParticipantSession, notificationId: string,
   }
   const next = Object.fromEntries(pendingReadEntries(session));
   next[notificationId] = readAt;
-  // 超限时丢 readAt 最旧的条目：新回执比旧回执更可能仍被服务端接受。
   while (Object.keys(next).length > MAX_PENDING_READ_ENTRIES) {
     const oldest = Object.entries(next).sort((left, right) => left[1].localeCompare(right[1]))[0];
     if (!oldest) {
@@ -579,7 +537,6 @@ function enqueuePendingRead(session: ParticipantSession, notificationId: string,
     }
     delete next[oldest[0]];
   }
-  // 该函数在失败回补路径（catch 分支）里调用：写失败不得顶替原返回值。
   tryWriteLocalStorage(pendingReadStateKey(session), JSON.stringify(next));
 }
 
@@ -600,12 +557,6 @@ function pendingReadStateKey(session: ParticipantSession): string {
 }
 
 function localNotificationId(kind: OrderAppNotificationKind, ...parts: readonly string[]): string {
-  // 服务端 read 回执端点按 bytes32 校验 notificationId（uvp-chain-services
-  // normalizeBytes32），非 0x+64hex 形态一律 400——本地派生 ID 若保留
-  // `local:kind:task` 可读形态，接线后已读回执永远发不上去。
-  // 派生是同步投影（deriveOrderAppNotifications 无 await），crypto.subtle
-  // 不可用，这里用内置同步 SHA-256 得到 32 字节 hex；\0 分隔避免 parts
-  // 含 ":" 时产生歧义碰撞。
   const payload = new TextEncoder().encode(["local", kind, ...parts].join("\u0000"));
   return `0x${hexOf(sha256Sync(payload))}`;
 }

@@ -1,17 +1,17 @@
-// V3 开单草稿映射：宿主友好的 stage 选择（每段金额/验收方式/期限/标准）→
-// 服务端 CreateOrderDraftV3Input。服务端 slot 集合来自配置，不接受客户端自造角色
+// 开单草稿映射：宿主友好的 stage 选择（每段金额/验收方式/期限/标准）→
+// 服务端 CreateOrderDraftInput。服务端 slot 集合来自配置，不接受客户端自造角色
 // 入参（slot 由配置派生），映射不上的字段显式报错而不是静默丢弃；期限由
 // 宿主给出，kernel 不替买家默认。
 
 import type {
-  CreateOrderDraftV3Input,
-  StageStandardRefV3,
-  StageTermsInputV3
+  CreateOrderDraftInput,
+  StageStandardRef,
+  StageTermsInput
 } from "@uvp-eth/product-dto";
 import { flatStageByKey } from "./config";
-import type { FlatConfigV3, FlatStageV3 } from "./config";
+import type { FlatConfig, FlatStage } from "./config";
 
-export interface StageSelectionV3 {
+export interface StageSelection {
   readonly stageKey: string;
   /** 本段冻款金额（base units 十进制字符串，服务端 normalizeAmount 同口径）。 */
   readonly amountBaseUnits: string;
@@ -20,7 +20,7 @@ export interface StageSelectionV3 {
   readonly workDeadline?: string | undefined;
   readonly inviteDeadline?: string | undefined;
   /** 本段最终标准；缺省时取配置可解析的默认标准，配置无 hash 则报错。 */
-  readonly standardRef?: StageStandardRefV3 | undefined;
+  readonly standardRef?: StageStandardRef | undefined;
 }
 
 export type DraftMappingProblemCode =
@@ -52,9 +52,9 @@ const BYTES32_PATTERN = /^0x[0-9a-fA-F]{64}$/u;
 const SHA256_PATTERN = /^sha256:[0-9a-fA-F]{64}$/u;
 
 export function mapStageSelection(
-  selection: StageSelectionV3,
-  stage: FlatStageV3
-): DraftMappingResult<StageTermsInputV3> {
+  selection: StageSelection,
+  stage: FlatStage
+): DraftMappingResult<StageTermsInput> {
   if (!AMOUNT_PATTERN.test(selection.amountBaseUnits)) {
     return fail("invalid_amount", `stage ${selection.stageKey} 的金额必须是 base units 十进制整数字符串`, {
       amountBaseUnits: selection.amountBaseUnits
@@ -85,7 +85,7 @@ export function mapStageSelection(
       workDeadline
     });
   }
-  let standard: StageStandardRefV3 | undefined;
+  let standard: StageStandardRef | undefined;
   if (selection.standardRef !== undefined) {
     const problem = standardProblem(selection.standardRef);
     if (problem !== undefined) {
@@ -115,9 +115,9 @@ export function mapStageSelection(
 }
 
 export interface CreateOrderDraftPlanInput {
-  readonly config: FlatConfigV3;
+  readonly config: FlatConfig;
   readonly title: string;
-  readonly stages: readonly StageSelectionV3[];
+  readonly stages: readonly StageSelection[];
   /** 缺省按 stages 顺序派生；显式给出时必须与 stages 完全一致（服务端会忽略多余条款）。 */
   readonly stageSubset?: readonly string[] | undefined;
   readonly currency?: string | undefined;
@@ -125,7 +125,7 @@ export interface CreateOrderDraftPlanInput {
 
 export function buildCreateOrderDraftInput(
   input: CreateOrderDraftPlanInput
-): DraftMappingResult<CreateOrderDraftV3Input> {
+): DraftMappingResult<CreateOrderDraftInput> {
   const title = input.title.trim();
   if (title.length === 0) {
     return fail("missing_title", "订单标题不能为空");
@@ -138,7 +138,7 @@ export function buildCreateOrderDraftInput(
     return fail("missing_currency", "配置与输入都没有声明 currency，无法开单");
   }
   const seen = new Set<string>();
-  const stageTerms: StageTermsInputV3[] = [];
+  const stageTerms: StageTermsInput[] = [];
   for (const selection of input.stages) {
     if (seen.has(selection.stageKey)) {
       return fail("duplicate_stage", `阶段 ${selection.stageKey} 重复出现`, { stageKey: selection.stageKey });
@@ -181,7 +181,7 @@ export function buildCreateOrderDraftInput(
   };
 }
 
-function standardProblem(standard: StageStandardRefV3): string | undefined {
+function standardProblem(standard: StageStandardRef): string | undefined {
   if (standard.name.trim().length === 0) {
     return "缺少 name";
   }

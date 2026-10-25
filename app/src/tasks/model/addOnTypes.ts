@@ -168,7 +168,6 @@ export function executorPatchModeOptionsForTarget(target: SelectableTargetStageD
   if (!target) {
     return [];
   }
-  // 协议词表为双模式闭集：assign=开工前选择履约者，handoff=开工后原履约者会签交接。
   const projected = target.executorPatchModes ?? [];
   if (projected.length > 0) {
     return projected.map((mode) => normalizeExecutorPatchModeOption(target, mode));
@@ -287,8 +286,6 @@ function resourceHandleSummary(resource: ProductResourceRequirementDTO): string 
     cleanString(resource.storageCID) ??
     cleanString(resource.metadataURI);
   if (reference) {
-    // 判定用内容寻址谓词（协议语义），不枚举云厂商子串：框架代码特判
-    // 特定供应商既不完整也不中立，且换一家云就漏判。
     return isContentAddressedReference(reference)
       ? `资源清单 ${compactReference(reference)}`
       : "需使用加密内容寻址清单";

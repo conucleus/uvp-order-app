@@ -7,10 +7,7 @@ import "./reader.css";
 
 /**
  * Reader 装修页（被邀请的客户视角）：theme + 阶段 / 角色 / 证据要求。
- *
  * 数据来源：Product API 的秩序详情（公共读）+ Store API 的装修数据。
- * 页面用产业语言，不出现哈希、钱包、等链语言；装修"取不到"与"没有装修"
- * 分开呈现（取不到不得坍缩成没有）。
  */
 export function DecorationPage({
   api,
@@ -19,7 +16,6 @@ export function DecorationPage({
 }: {
   readonly api: ProductApiClient;
   readonly zhixuId: string;
-  /** 进入参与者待办（有邀请/会话时可用；reader 页本身不要求登录）。 */
   readonly onEnterTasks?: (() => void) | undefined;
 }) {
   const { status, byZhixuId } = useOrderAppDecorations(api, [zhixuId], zhixuId.trim().length > 0);
@@ -111,7 +107,7 @@ function ThemeBlock({
         </ul>
       ) : null}
       <p className="muted-copy">
-        以上由发布方提供，只描述服务与流程，不替代约定文本与验收结论。
+        以上由发布方提供，只描述服务与流程，不替代约定文本与确认结论。
       </p>
       <p className="muted-copy">维护方：{zhixu.maintainer}</p>
     </section>

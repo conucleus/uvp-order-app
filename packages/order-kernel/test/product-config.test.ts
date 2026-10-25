@@ -1,4 +1,4 @@
-// V3 配置摊平：bundle → 宿主可渲染的 stage 列表（角色 C式、必须邀请的 slot、
+// 配置摊平：bundle → 宿主可渲染的 stage 列表（角色 C式、必须邀请的 slot、
 // 标准句柄、时间表达式、token 小数位来源），派生规则与服务端 canonical 同口径。
 
 import assert from "node:assert/strict";
@@ -9,7 +9,7 @@ import {
   isStandardHash,
   resolveTokenDecimals,
   slotLabel
-} from "../src/product/v3/index";
+} from "../src/product/kernel/index";
 import {
   CONFIG_HASH,
   PLAN_HASH,

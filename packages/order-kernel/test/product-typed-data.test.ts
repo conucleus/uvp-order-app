@@ -1,4 +1,4 @@
-// V3 邀请接受 EIP-712：type hash/域四要素来自 protocol-bindings 单源；本测试
+// 邀请接受 EIP-712：type hash/域四要素来自 protocol-bindings 单源；本测试
 // 固定 type hash 与域常量，验证宿主侧核对（链/合约锚/条款事实）与可读摘要。
 
 import assert from "node:assert/strict";
@@ -21,7 +21,7 @@ import {
   buildInviteAcceptTypedDataFromPreview,
   summarizeInviteAcceptTypedData,
   verifyInviteAcceptTypedData
-} from "../src/product/v3/index";
+} from "../src/product/kernel/index";
 import {
   BUYER,
   CHAIN_ID,

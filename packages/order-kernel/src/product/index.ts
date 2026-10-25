@@ -2,4 +2,4 @@
 
 export * from "./participantPath";
 export * from "./productApi";
-export * from "./v3";
+export * from "./kernel";

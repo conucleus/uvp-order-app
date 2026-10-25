@@ -1,27 +1,27 @@
-// V3 订单域 HTTP 传输：会话头、超时、拒绝跟随重定向与错误体解析都与现有
-// product client 同口径；失败一律抛 ProductV3Error（status/短码/可读文案），
+// 订单域 HTTP 传输：会话头、超时、拒绝跟随重定向与错误体解析都与现有
+// product client 同口径；失败一律抛 ProductError（status/短码/可读文案），
 // 2xx 但形状不符按 invalid_response 处理，不把畸形响应当成空结果。
 
-import { ProductV3Error } from "./errors";
-import type { ProductV3Fetcher, ProductV3RequestOptions, ProductV3SessionTokenProvider } from "./types";
+import { ProductError } from "./errors";
+import type { ProductFetcher, ProductRequestOptions, ProductSessionTokenProvider } from "./types";
 
-export const PRODUCT_V3_SESSION_HEADER = "x-uvp-store-session";
-export const PRODUCT_V3_IDEMPOTENCY_HEADER = "idempotency-key";
-export const DEFAULT_PRODUCT_V3_TIMEOUT_MS = 6000;
+export const PRODUCT_SESSION_HEADER = "x-uvp-store-session";
+export const PRODUCT_IDEMPOTENCY_HEADER = "idempotency-key";
+export const DEFAULT_PRODUCT_TIMEOUT_MS = 6000;
 
-export interface ProductV3TransportConfig {
+export interface ProductTransportConfig {
   readonly baseUrl: string;
-  readonly fetcher: ProductV3Fetcher;
+  readonly fetcher: ProductFetcher;
   readonly timeoutMs: number;
   readonly sessionToken?: string | undefined;
-  readonly getSessionToken?: ProductV3SessionTokenProvider | undefined;
+  readonly getSessionToken?: ProductSessionTokenProvider | undefined;
 }
 
-export class ProductV3Transport {
-  readonly #config: ProductV3TransportConfig;
+export class ProductTransport {
+  readonly #config: ProductTransportConfig;
   #sessionToken: string | undefined;
 
-  constructor(config: ProductV3TransportConfig) {
+  constructor(config: ProductTransportConfig) {
     this.#config = config;
     this.#sessionToken = config.sessionToken;
   }
@@ -40,17 +40,17 @@ export class ProductV3Transport {
     method: "GET" | "POST" | "PATCH",
     pathname: string,
     body: unknown,
-    options: ProductV3RequestOptions = {},
+    options: ProductRequestOptions = {},
   ): Promise<T> {
     const timeoutMs = this.#config.timeoutMs;
     const signal = AbortSignal.timeout(timeoutMs);
     const sessionToken = this.#resolveSessionToken();
     const headers: Record<string, string> = { "content-type": "application/json" };
     if (sessionToken !== undefined) {
-      headers[PRODUCT_V3_SESSION_HEADER] = sessionToken;
+      headers[PRODUCT_SESSION_HEADER] = sessionToken;
     }
     if (options.idempotencyKey !== undefined) {
-      headers[PRODUCT_V3_IDEMPOTENCY_HEADER] = options.idempotencyKey;
+      headers[PRODUCT_IDEMPOTENCY_HEADER] = options.idempotencyKey;
     }
 
     let response: Response;
@@ -68,14 +68,14 @@ export class ProductV3Transport {
       );
     } catch (error) {
       if (signal.aborted || (error instanceof DOMException && error.name === "TimeoutError")) {
-        throw new ProductV3Error({
+        throw new ProductError({
           status: 0,
           endpoint: pathname,
           kind: "timeout",
           message: `请求超时（${timeoutMs} 毫秒），服务端可能已处理本次请求。`
         });
       }
-      throw new ProductV3Error({
+      throw new ProductError({
         status: 0,
         endpoint: pathname,
         kind: "transport",
@@ -84,7 +84,7 @@ export class ProductV3Transport {
     }
 
     if (response.status === 0 || (response.status >= 300 && response.status < 400)) {
-      throw new ProductV3Error({
+      throw new ProductError({
         status: response.status,
         endpoint: pathname,
         kind: "redirect_refused",
@@ -110,8 +110,8 @@ export class ProductV3Transport {
   }
 }
 
-export function invalidResponse(endpoint: string, message: string): ProductV3Error {
-  return new ProductV3Error({ status: 0, endpoint, kind: "invalid_response", message });
+export function invalidResponse(endpoint: string, message: string): ProductError {
+  return new ProductError({ status: 0, endpoint, kind: "invalid_response", message });
 }
 
 export function requireRecord(value: unknown, endpoint: string, message: string): Record<string, unknown> {
@@ -158,7 +158,7 @@ export function optionalRecord(
   return requireRecord(value, endpoint, `响应中的 ${field} 不是对象`);
 }
 
-async function errorFromResponse(response: Response, pathname: string): Promise<ProductV3Error> {
+async function errorFromResponse(response: Response, pathname: string): Promise<ProductError> {
   const text = await response.text();
   const bodyText = text.length > 0 ? text : `${response.status} ${response.statusText}`;
   let errorCode: string | undefined;
@@ -178,7 +178,7 @@ async function errorFromResponse(response: Response, pathname: string): Promise<
   } catch {
     // 非 JSON 错误体只有文本可用。
   }
-  return new ProductV3Error({
+  return new ProductError({
     status: response.status,
     endpoint: pathname,
     message: serverMessage ?? bodyText,

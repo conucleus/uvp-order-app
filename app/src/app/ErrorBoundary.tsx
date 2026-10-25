@@ -10,10 +10,7 @@ interface ErrorBoundaryState {
 }
 
 /**
- * 应用级错误边界：子组件渲染抛错不再整页灰白（React 卸载整棵树的默认
- * 行为）。错误如实呈现——不吞错、不装成功、不自动重试；恢复导航只提供
- * 明确的整页动作（重载 / 回待办首页），因为边界无法判断崩溃的子树内部
- * 哪些状态还能被信任。
+ * 应用级错误边界：渲染抛错如实呈现、不自动重试，只提供整页恢复动作。
  */
 export class AppErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundaryState> {
   override state: ErrorBoundaryState = { error: undefined };
@@ -23,7 +20,6 @@ export class AppErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundar
   }
 
   override componentDidCatch(error: Error, info: ErrorInfo): void {
-    // 降级日志通道：边界渲染时组件树已不可信，console 是最后可靠的出口。
     console.error("order-app render error", error, info.componentStack);
   }
 
@@ -56,9 +52,6 @@ export class AppErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundar
               className="quiet-button"
               type="button"
               onClick={() => {
-                // 回默认待办路由后整页重载：崩溃可能来自某个订单/任务子树，
-                // 保留原 hash 重载可能立刻复现同一错误（appRoutes 只认
-                // section=tasks 形态的 hash）。
                 window.location.hash = "#section=tasks";
                 window.location.reload();
               }}

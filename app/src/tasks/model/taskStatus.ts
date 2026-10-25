@@ -16,8 +16,6 @@ export interface ParticipantTaskDisplay {
   readonly isOverdue: boolean;
 }
 
-// BFF 在任务行上附加的链上状态（值域 ready/submitted/cancelled/unknown），
-// 是链侧状态的唯一来源。
 interface TaskStatusExtensions {
   readonly chainStatus?: string;
 }
@@ -102,7 +100,6 @@ export function taskDisplay(task: ProductTaskDTO, now: Date = new Date()): Parti
   const chainStatus = extension.chainStatus;
   const isOverdue = task.status === "open" && isDeadlineOverdue(task.deadline, now);
 
-  // 链上 cancelled 是终态事实：即使任务行同时携带受阻原因，也如实展示已取消。
   if (chainStatus === "cancelled") {
     return {
       state: "cancelled",
@@ -113,7 +110,6 @@ export function taskDisplay(task: ProductTaskDTO, now: Date = new Date()): Parti
     };
   }
 
-  // blocked 是服务端权威受阻态：不可提交的任务不改写成待办或等待确认。
   if (task.status === "blocked") {
     return {
       state: "blocked",
@@ -125,8 +121,6 @@ export function taskDisplay(task: ProductTaskDTO, now: Date = new Date()): Parti
   }
 
   if (task.status === "submitted") {
-    // chainStatus=submitted 即链上已确认：值域内没有更深的确认信号。
-    // unknown/缺省仍在等索引，显示等待链上确认。
     if (chainStatus === "submitted") {
       return {
         state: "confirmed",
@@ -145,7 +139,6 @@ export function taskDisplay(task: ProductTaskDTO, now: Date = new Date()): Parti
     };
   }
 
-  // open（链上 ready）：可提交的待办，逾期时置顶提醒。
   if (isOverdue) {
     return {
       state: "ready",

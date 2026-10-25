@@ -48,13 +48,6 @@ declare global {
   }
 }
 
-/**
- * 每个协议 primaryType 对应的信封预期：domain、签名者字段名。
- * 常量从 protocol-bindings 取，禁止本地漂移。判定逻辑（域四要素、
- * types 字段表、签名者与预期/prepared 记录交叉核对）同样单源于
- * protocol-bindings validateTypedDataForSigning；本文件只保留
- * "primaryType 必须在协议允许集内"的锚定与面向参与者的拒绝文案。
- */
 interface TypedDataEnvelopeExpectation {
   readonly domainName: string;
   readonly domainVersion: string;
@@ -79,19 +72,11 @@ const envelopeExpectations: Readonly<Record<string, TypedDataEnvelopeExpectation
   }
 };
 
-/**
- * 本端钱包内核 = chain 轨共享面 + protocol-bindings 端口注入：判定
- * 单源于 protocol-bindings（原函数注入），
- * 连接/链核对/签名请求的机械段与错误分类学（code 四类）在
- * shared/chain/wallet 单源；本端保留 InjectedWalletError 公开类与各调用
- * 点的面向参与者文案。
- */
 const walletPorts = {
   isUserRejectedRequestError,
   validateTypedDataEnvelope: validateTypedDataForSigning
 } as const;
 
-/** 单源拒绝 reason → 本端拒绝文案（判定语义单源、文案留宿主；detail 为被拒时的关键事实值）。 */
 const orderAppMismatchTexts: TypedDataMismatchTexts = {
   missingDetail: "(缺失)",
   notTypedData: "签名对象不是 EIP-712 结构",
@@ -115,7 +100,6 @@ const orderAppMismatchTexts: TypedDataMismatchTexts = {
   signerNotPrepared: (signerField, fact) => `message.${signerField} 与 prepare 记录声明的提交方 ${fact}不一致`
 };
 
-/** 每个调用点的面向参与者文案（拒绝/失败兜底措辞按操作语境区分）。 */
 interface WalletSiteTexts {
   readonly missingWallet: string;
   readonly rejected: string;
@@ -144,7 +128,6 @@ export function getInjectedWalletProvider(): Eip1193Provider | undefined {
   return getBrowserEthereumProvider();
 }
 
-/** 请求当前连接地址（eth_requestAccounts）：邀请 accept 的会话签名前先核对连接地址。 */
 export async function requestInjectedWalletAddress(provider?: Eip1193Provider): Promise<string> {
   try {
     return await connectWalletAddress({
@@ -157,7 +140,7 @@ export async function requestInjectedWalletAddress(provider?: Eip1193Provider): 
   } catch (error) {
     if (error instanceof ChainWalletError) {
       throw mapChainWalletError(error, {
-        missingWallet: "未检测到浏览器钱包。",
+        missingWallet: "未发现浏览器钱包。",
         rejected: "连接钱包被拒绝。",
         failedFallback: "连接钱包失败。"
       });
@@ -166,7 +149,6 @@ export async function requestInjectedWalletAddress(provider?: Eip1193Provider): 
   }
 }
 
-/** 会话消息签名（personal_sign）：只证明地址控制权，不产生任何链上动作。 */
 export async function personalSignWithInjectedWallet(input: {
   readonly address: string;
   readonly message: string;
@@ -184,7 +166,7 @@ export async function personalSignWithInjectedWallet(input: {
   } catch (error) {
     if (error instanceof ChainWalletError) {
       throw mapChainWalletError(error, {
-        missingWallet: "未检测到浏览器钱包，不能完成会话签名。",
+        missingWallet: "未发现浏览器钱包，不能完成会话签名。",
         rejected: "钱包签名被拒绝，未创建会话。",
         failedFallback: "会话签名失败。"
       });
@@ -198,22 +180,16 @@ export async function signProductSubmitWithInjectedWallet(input: {
   readonly walletAddress: string;
   readonly provider?: Eip1193Provider;
   readonly expected?: TypedDataDomainExpectation | undefined;
-  /**
-   * prepare 记录声明的提交方（prepared.submitter）：参与签名前交叉核对，
-   * 防被攻陷 BFF 用别的 principal 的 prepared 信封换签名对象（三端
-   * 签名闸门最强集的一员）。undefined 条目跳过。
-   */
   readonly preparedSubmitters?: readonly (string | undefined)[] | undefined;
 }): Promise<`0x${string}`> {
   const provider = input.provider ?? getInjectedWalletProvider();
   if (!provider) {
-    throw new InjectedWalletError("missing_wallet", "未检测到浏览器钱包，不能创建业务签名。");
+    throw new InjectedWalletError("missing_wallet", "未发现浏览器钱包，不能创建业务签名。");
   }
   const signer = input.walletAddress.trim();
   if (!signer) {
     throw new InjectedWalletError("wallet_signature_failed", "缺少签名钱包。");
   }
-  // executor-kit 只核对 submitter 一致性；域与结构在这里补齐同一签名边界。
   assertTypedDataEnvelopeMatchesProtocol(
     input.typedData,
     signer,
@@ -228,7 +204,7 @@ export async function signProductSubmitWithInjectedWallet(input: {
   } catch (error) {
     if (error instanceof ChainWalletError) {
       throw mapChainWalletError(error, {
-        missingWallet: "未检测到浏览器钱包，不能创建业务签名。",
+        missingWallet: "未发现浏览器钱包，不能创建业务签名。",
         rejected: "钱包签名被拒绝，未创建提交。",
         failedFallback: "钱包签名失败。"
       });
@@ -257,12 +233,11 @@ export async function signTypedDataWithInjectedWallet(input: {
   readonly walletAddress: string;
   readonly provider?: Eip1193Provider;
   readonly expected?: TypedDataDomainExpectation | undefined;
-  /** 同 signProductSubmit：prepare 记录声明的提交方交叉核对，可选。 */
   readonly preparedSubmitters?: readonly (string | undefined)[] | undefined;
 }): Promise<`0x${string}`> {
   const provider = input.provider ?? getInjectedWalletProvider();
   if (!provider) {
-    throw new InjectedWalletError("missing_wallet", "未检测到浏览器钱包，不能创建业务签名。");
+    throw new InjectedWalletError("missing_wallet", "未发现浏览器钱包，不能创建业务签名。");
   }
   const signer = input.walletAddress.trim();
   if (!signer) {
@@ -270,8 +245,6 @@ export async function signTypedDataWithInjectedWallet(input: {
   }
   assertTypedDataEnvelopeMatchesProtocol(input.typedData, signer, input.expected, input.preparedSubmitters);
   try {
-    // 与 signProductSubmit 同一签名边界：信封校验后先核对钱包当前链与
-    // domain.chainId 一致（错链上的补丁签名对验签模块无效），再请求签名。
     await ensureCurrentChainMatchesDomain(provider, input.typedData, {
       ports: walletPorts,
       chainIdReadErrorMode: { kind: "wrap", readFailureFallback: "读取钱包当前链失败。" }
@@ -285,7 +258,7 @@ export async function signTypedDataWithInjectedWallet(input: {
   } catch (error) {
     if (error instanceof ChainWalletError) {
       throw mapChainWalletError(error, {
-        missingWallet: "未检测到浏览器钱包，不能创建业务签名。",
+        missingWallet: "未发现浏览器钱包，不能创建业务签名。",
         rejected: "钱包签名被拒绝，未创建提交。",
         failedFallback: "钱包签名失败。"
       });
@@ -294,15 +267,6 @@ export async function signTypedDataWithInjectedWallet(input: {
   }
 }
 
-/**
- * 签名前校验 typedData 的域与结构：primaryType 必须是协议信封之一（本地
- * 锚定的允许集），其余判定——domain 四要素（name/version 恒比对，
- * chainId/verifyingContract 提供预期时严格比对）、types 字段表非空、
- * message 签名者（submitter/selector）与本次签名钱包及 prepared 记录
- * 声明的提交方一致——单源消费 protocol-bindings validateTypedDataForSigning
- * （三端签名闸门的最强集）。任何不一致都在
- * 调钱包前拒绝；判定只返回 reason，面向参与者的文案由本宿主映射。
- */
 export function assertTypedDataEnvelopeMatchesProtocol(
   typedData: unknown,
   walletAddress: string,

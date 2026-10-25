@@ -1,35 +1,35 @@
-// V3 结构页（开单 / 邀请接受 / 订单房间）：只消费 V3 端口结果；未就绪的读面
+// 结构页（开单 / 邀请接受 / 订单房间）：只消费 kernel 端口结果；未就绪的读面
 // 显示 not_available + TODO，缺字段/空/无权限/结果未知分开呈现，不伪造成功。
 
 import { useEffect, useMemo, useState } from "react";
 import type {
-  FinalizeOrderDraftV3Preparation,
-  FinalizeOrderDraftV3Result,
-  OrderViewV3,
-  StageInvitePreviewV3,
-  StageViewResponseV3,
-  TaskListViewV3
-} from "@uvp-eth/order-kernel/product/v3";
+  FinalizeOrderDraftPreparation,
+  FinalizeOrderDraftResult,
+  OrderView,
+  StageInvitePreview,
+  StageViewResponse,
+  TaskListView
+} from "@uvp-eth/order-kernel/product/kernel";
 import {
   summarizeInviteAcceptTypedData,
   summarizeOrderFinalizeTypedData,
   verifyInviteAcceptTypedData,
   verifyOrderFinalizeTypedData
-} from "@uvp-eth/order-kernel/product/v3";
-import type { V3Ports } from "./ports";
-import { requestV3WalletAddress, signV3TypedData, V3SigningError } from "./signing";
+} from "@uvp-eth/order-kernel/product/kernel";
+import type { Ports } from "./ports";
+import { requestWalletAddressKernel, signTypedDataKernel, SigningError } from "./signing";
 import {
-  V3_TODOS,
-  type CreateOrderV3Result,
-  type FlatConfigV3,
-  type FlatStageV3,
-  type InviteSelectionV3,
-  type StageSelectionV3,
-  type V3Failure,
-  type V3Result
+  TODOS,
+  type CreateOrderResult,
+  type FlatConfig,
+  type FlatStage,
+  type InviteSelection,
+  type StageSelection,
+  type Failure,
+  type Result
 } from "./types";
 
-function FailureView({ failure }: { readonly failure: V3Failure }) {
+function FailureView({ failure }: { readonly failure: Failure }) {
   return (
     <section className="system-banner system-banner-error" role="alert">
       <strong>操作未完成（{failure.kind}）</strong>
@@ -40,7 +40,7 @@ function FailureView({ failure }: { readonly failure: V3Failure }) {
   );
 }
 
-function unwrap<T>(result: V3Result<T>, setFailure: (failure: V3Failure | undefined) => void): T | undefined {
+function unwrap<T>(result: Result<T>, setFailure: (failure: Failure | undefined) => void): T | undefined {
   if (result.kind === "ready") {
     setFailure(undefined);
     return result.value;
@@ -53,32 +53,32 @@ function isoInDays(days: number): string {
   return new Date(Date.now() + days * 24 * 60 * 60 * 1000).toISOString();
 }
 
-function stageRoleLabel(stage: FlatStageV3, slotKey: string): string {
+function stageRoleLabel(stage: FlatStage, slotKey: string): string {
   const slot = stage.slots.find((candidate) => candidate.slotKey === slotKey);
   return slot?.label ?? slotKey;
 }
 
-export function CreateOrderV3Page(props: {
-  readonly ports: V3Ports;
+export function CreateOrderPage(props: {
+  readonly ports: Ports;
   readonly defaultConfigId?: string | undefined;
   readonly defaultConfigVersion?: string | undefined;
-  readonly onCreated: (result: CreateOrderV3Result) => void;
+  readonly onCreated: (result: CreateOrderResult) => void;
   readonly onBack: () => void;
 }) {
   const [configId, setConfigId] = useState(props.defaultConfigId ?? "");
   const [version, setVersion] = useState(props.defaultConfigVersion ?? "");
-  const [config, setConfig] = useState<FlatConfigV3 | undefined>(undefined);
+  const [config, setConfig] = useState<FlatConfig | undefined>(undefined);
   const [profile, setProfile] = useState<string>("");
   const [title, setTitle] = useState("");
   const [selected, setSelected] = useState<Readonly<Record<string, boolean>>>({});
-  const [terms, setTerms] = useState<Readonly<Record<string, StageSelectionV3>>>({});
-  const [invites, setInvites] = useState<Readonly<Record<string, InviteSelectionV3>>>({});
-  const [failure, setFailure] = useState<V3Failure | undefined>(undefined);
+  const [terms, setTerms] = useState<Readonly<Record<string, StageSelection>>>({});
+  const [invites, setInvites] = useState<Readonly<Record<string, InviteSelection>>>({});
+  const [failure, setFailure] = useState<Failure | undefined>(undefined);
   const [busy, setBusy] = useState(false);
   const [draftId, setDraftId] = useState<string | undefined>(undefined);
-  const [created, setCreated] = useState<CreateOrderV3Result | undefined>(undefined);
-  const [prepared, setPrepared] = useState<FinalizeOrderDraftV3Preparation | undefined>(undefined);
-  const [finalized, setFinalized] = useState<FinalizeOrderDraftV3Result | undefined>(undefined);
+  const [created, setCreated] = useState<CreateOrderResult | undefined>(undefined);
+  const [prepared, setPrepared] = useState<FinalizeOrderDraftPreparation | undefined>(undefined);
+  const [finalized, setFinalized] = useState<FinalizeOrderDraftResult | undefined>(undefined);
 
   async function loadConfig(): Promise<void> {
     setBusy(true);
@@ -95,7 +95,7 @@ export function CreateOrderV3Page(props: {
     }
   }
 
-  function applyProfile(target: FlatConfigV3, profileName: string): void {
+  function applyProfile(target: FlatConfig, profileName: string): void {
     const stageKeys = target.profiles[profileName];
     setProfile(profileName);
     if (stageKeys === undefined) {
@@ -111,7 +111,7 @@ export function CreateOrderV3Page(props: {
   const stages = useMemo(() => config?.stages ?? [], [config]);
   const selectedStages = stages.filter((stage) => selected[stage.stageKey] === true);
 
-  function termFor(stage: FlatStageV3): StageSelectionV3 {
+  function termFor(stage: FlatStage): StageSelection {
     return terms[stage.stageKey] ?? {
       stageKey: stage.stageKey,
       amountBaseUnits: "",
@@ -120,8 +120,8 @@ export function CreateOrderV3Page(props: {
     };
   }
 
-  function inviteRows(): readonly { readonly stage: FlatStageV3; readonly slotKey: string; readonly role: string }[] {
-    const rows: { stage: FlatStageV3; slotKey: string; role: string }[] = [];
+  function inviteRows(): readonly { readonly stage: FlatStage; readonly slotKey: string; readonly role: string }[] {
+    const rows: { stage: FlatStage; slotKey: string; role: string }[] = [];
     for (const stage of selectedStages) {
       for (const slot of stage.slots) {
         rows.push({ stage, slotKey: slot.slotKey, role: slot.label ?? slot.slotKey });
@@ -183,13 +183,13 @@ export function CreateOrderV3Page(props: {
     }
     setBusy(true);
     try {
-      const address = await requestV3WalletAddress();
+      const address = await requestWalletAddressKernel();
       verifyOrderFinalizeTypedData(
         prepared.typedData,
         { chainId: prepared.typedData.domain.chainId, verifyingContract: prepared.typedData.domain.verifyingContract },
         { draftId, planId: prepared.planId, termsHash: prepared.termsHash, nonce: prepared.nonce, buyer: address }
       );
-      const signature = await signV3TypedData(prepared.typedData, address);
+      const signature = await signTypedDataKernel(prepared.typedData, address);
       const result = unwrap(await props.ports.finalizeWithSignature(draftId, signature), setFailure);
       if (result) {
         setFinalized(result);
@@ -197,8 +197,8 @@ export function CreateOrderV3Page(props: {
     } catch (error) {
       setFailure({
         kind: "invalid",
-        message: error instanceof V3SigningError ? error.message : error instanceof Error ? error.message : String(error),
-        ...(error instanceof V3SigningError ? { code: error.code } : {})
+        message: error instanceof SigningError ? error.message : error instanceof Error ? error.message : String(error),
+        ...(error instanceof SigningError ? { code: error.code } : {})
       });
     } finally {
       setBusy(false);
@@ -208,9 +208,9 @@ export function CreateOrderV3Page(props: {
   const finalizeSummary = prepared ? summarizeOrderFinalizeTypedData(prepared.typedData) : undefined;
 
   return (
-    <section className="panel" aria-label="V3 开单">
+    <section className="panel" aria-label="开单">
       <header className="section-head">
-        <h2>V3 开单</h2>
+        <h2>开单</h2>
         <button className="quiet-button" type="button" onClick={props.onBack}>返回</button>
       </header>
       <p className="fineprint">
@@ -269,7 +269,7 @@ export function CreateOrderV3Page(props: {
                       <label>履约截止<input value={term.workDeadline} onChange={(event) => setTerms((current) => ({ ...current, [stage.stageKey]: { ...term, workDeadline: event.target.value } }))} /></label>
                       <p className="fineprint">
                         标准：{stage.defaultStandard?.name ?? "配置无默认标准"} {stage.defaultStandard?.hash ?? ""}
-                        （V3 用 fileResources 句柄 + 显式验收信号）
+                        （用 fileResources 句柄 + 显式确认信号）
                       </p>
                     </div>
                   ) : null}
@@ -279,7 +279,7 @@ export function CreateOrderV3Page(props: {
           </fieldset>
 
           <fieldset>
-            <legend>邀请（买方熟悉的履约者/验收者，无撮合）</legend>
+            <legend>邀请（发起方熟悉的履约者/确认者，无撮合）</legend>
             {inviteRows().map((row) => {
               const key = `${row.stage.stageKey}/${row.slotKey}`;
               const value = invites[key] ?? { stageKey: row.stage.stageKey, slotKey: row.slotKey, subjectLabel: "" };
@@ -313,7 +313,7 @@ export function CreateOrderV3Page(props: {
           ) : null}
 
           <section className="panel">
-            <h3>本人确认（buyer EIP-712）</h3>
+            <h3>本人确认（EIP-712）</h3>
             <button className="quiet-button" type="button" disabled={busy || draftId === undefined} onClick={() => void prepareFinalize()}>
               准备建单确认
             </button>
@@ -323,7 +323,7 @@ export function CreateOrderV3Page(props: {
                   plan {prepared.planId} / terms {prepared.termsHash}；冻款段 {prepared.fundedStageKeys.join(", ") || "无"}；
                   跳过段 {prepared.skippedStageKeys.join(", ") || "无"}；有效期至 {finalizeSummary.deadlineIso ?? prepared.deadline}
                 </p>
-                <p className="fineprint">签名者必须是 buyer {finalizeSummary.buyer}；签名内容不可盲签，请在钱包内核对。</p>
+                <p className="fineprint">签名者必须是发起方钱包 {finalizeSummary.buyer}；签名内容不可盲签，请在钱包内核对。</p>
                 <button className="primary-button" type="button" disabled={busy} onClick={() => void signAndFinalize()}>
                   连接钱包并签名创建订单
                 </button>
@@ -347,16 +347,16 @@ export function CreateOrderV3Page(props: {
   );
 }
 
-export function InviteV3Page(props: {
-  readonly ports: V3Ports;
+export function InvitePage(props: {
+  readonly ports: Ports;
   readonly inviteId: string;
   readonly inviteToken?: string | undefined;
   readonly onAccepted: () => void;
   readonly onRejected: () => void;
   readonly onDismiss: () => void;
 }) {
-  const [preview, setPreview] = useState<StageInvitePreviewV3 | undefined>(undefined);
-  const [failure, setFailure] = useState<V3Failure | undefined>(undefined);
+  const [preview, setPreview] = useState<StageInvitePreview | undefined>(undefined);
+  const [failure, setFailure] = useState<Failure | undefined>(undefined);
   const [busy, setBusy] = useState(false);
   const [accepted, setAccepted] = useState(false);
 
@@ -388,7 +388,7 @@ export function InviteV3Page(props: {
     }
     setBusy(true);
     try {
-      const address = await requestV3WalletAddress();
+      const address = await requestWalletAddressKernel();
       verifyInviteAcceptTypedData(
         preview.typedData,
         { chainId: preview.chainId, verifyingContract: preview.stateMachineAddress },
@@ -402,9 +402,9 @@ export function InviteV3Page(props: {
         }
       );
       if (summary.invitee.toLowerCase() !== address.toLowerCase()) {
-        throw new V3SigningError("invalid_signature", `服务端预览的受邀钱包是 ${summary.invitee}，与当前钱包 ${address} 不一致。`);
+        throw new SigningError("invalid_signature", `服务端预览的受邀钱包是 ${summary.invitee}，与当前钱包 ${address} 不一致。`);
       }
-      const signature = await signV3TypedData(preview.typedData, address);
+      const signature = await signTypedDataKernel(preview.typedData, address);
       const result = unwrap(await props.ports.acceptInvite(props.inviteId, {
         token: props.inviteToken,
         signature,
@@ -419,7 +419,7 @@ export function InviteV3Page(props: {
       setFailure({
         kind: "invalid",
         message: error instanceof Error ? error.message : String(error),
-        ...(error instanceof V3SigningError ? { code: error.code } : {})
+        ...(error instanceof SigningError ? { code: error.code } : {})
       });
     } finally {
       setBusy(false);
@@ -439,7 +439,7 @@ export function InviteV3Page(props: {
   }
 
   return (
-    <section className="panel" aria-label="V3 邀请">
+    <section className="panel" aria-label="邀请">
       <header className="section-head">
         <h2>邀请：{preview?.title ?? props.inviteId}</h2>
         <button className="quiet-button" type="button" onClick={props.onDismiss}>返回</button>
@@ -482,18 +482,18 @@ export function InviteV3Page(props: {
   );
 }
 
-export function OrderRoomV3Page(props: {
-  readonly ports: V3Ports;
+export function OrderRoomPage(props: {
+  readonly ports: Ports;
   readonly orderId?: string | undefined;
   readonly onBack: () => void;
 }) {
   const [orderId, setOrderId] = useState(props.orderId ?? "");
-  const [order, setOrder] = useState<OrderViewV3 | undefined>(undefined);
+  const [order, setOrder] = useState<OrderView | undefined>(undefined);
   const [stageKey, setStageKey] = useState<string | undefined>(undefined);
-  const [stage, setStage] = useState<StageViewResponseV3 | undefined>(undefined);
-  const [tasks, setTasks] = useState<TaskListViewV3 | undefined>(undefined);
+  const [stage, setStage] = useState<StageViewResponse | undefined>(undefined);
+  const [tasks, setTasks] = useState<TaskListView | undefined>(undefined);
   const [resources, setResources] = useState<readonly string[] | undefined>(undefined);
-  const [failure, setFailure] = useState<V3Failure | undefined>(undefined);
+  const [failure, setFailure] = useState<Failure | undefined>(undefined);
   const [busy, setBusy] = useState(false);
 
   async function loadOrder(id: string): Promise<void> {
@@ -522,9 +522,9 @@ export function OrderRoomV3Page(props: {
   }
 
   return (
-    <section className="panel" aria-label="V3 订单房间">
+    <section className="panel" aria-label="订单房间">
       <header className="section-head">
-        <h2>V3 订单房间</h2>
+        <h2>订单房间</h2>
         <button className="quiet-button" type="button" onClick={props.onBack}>返回</button>
       </header>
       <fieldset>
@@ -577,14 +577,14 @@ export function OrderRoomV3Page(props: {
                 </li>
               ))}
             </ul>
-            <p className="fineprint">TODO：{V3_TODOS.taskSubmit}</p>
+            <p className="fineprint">TODO：{TODOS.taskSubmit}</p>
           </section>
           <section className="panel">
             <h3>阶段标准句柄（fileResources）</h3>
             {resources === undefined ? <p>未读取。</p> : resources.length === 0 ? <p>该阶段没有声明句柄。</p> : (
               <ul>{resources.map((item) => <li key={item}>{item}</li>)}</ul>
             )}
-            <p className="fineprint">TODO：{V3_TODOS.evidenceSubmit}</p>
+            <p className="fineprint">TODO：{TODOS.evidenceSubmit}</p>
           </section>
         </>
       ) : null}

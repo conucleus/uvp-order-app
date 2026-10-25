@@ -4,10 +4,6 @@
  */
 import { ProductApiError } from "../api/productApi";
 
-/**
- * 合意失败按服务端错误码给因：无权限/非相对方、hash 已变、未声明、
- * 签名不符、会话问题分别呈现，不把失败说成成功。
- */
 export function consentFailureCopy(error: unknown): string {
   if (!(error instanceof ProductApiError)) {
     return error instanceof Error ? error.message : "合意失败，请重试。";

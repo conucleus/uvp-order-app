@@ -1,7 +1,6 @@
 /* 要求包句柄的解析视图：句柄元数据与解析状态分开承载，失败按 resolver
  * 错误码精确到因（无权限/不可达/解密失败/摘要不符/类型不支持），绝不把
- * 读取失败坍缩成“没有文件”。授权按 public/protected/private 与本单开单人/
- * 已接受参与方判定，解析正文只留在内存视图，密钥与存储凭据不进 UI。
+ * 读取失败坍缩成“没有文件”；密钥与存储凭据不进 UI。
  */
 import type { FileResourceHandleDTO } from "@uvp-eth/product-dto";
 import {
@@ -28,9 +27,7 @@ export interface HandleResolutionView {
 }
 
 export interface RequirementsAccess {
-  /** 要求包声明人（服务端字段）；private 句柄只对他可解析。 */
   readonly declarerWallet: string;
-  /** 本单已接受参与方钱包（protected 句柄的读取面）。 */
   readonly acceptedWallets: readonly string[];
 }
 
@@ -75,7 +72,6 @@ export async function resolveFileHandle(
 
 export function handleStatusFromError(error: unknown): HandleResolutionStatus {
   if (!(error instanceof FileResourceError)) {
-    // resolver 之外的意外失败同样不是“没有文件”；按不可达呈现。
     return "unavailable";
   }
   switch (error.code) {
@@ -117,7 +113,6 @@ export function handleStatusLabel(status: HandleResolutionStatus): string {
   }
 }
 
-/** 失败原因固定文案：与“没有文件”显式区分，不暴露存储位置或凭据。 */
 export function handleFailureCopy(status: HandleResolutionStatus): string | undefined {
   switch (status) {
     case "unauthorized":

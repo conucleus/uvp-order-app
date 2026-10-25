@@ -1,9 +1,6 @@
-/* 验收提交：只把 ProductTaskDTO.submitSignals 当作候选信号来源，验收者读
- * 要求包句柄后显式选一个 signalName，再走现有 prepare-submit/submit 与钱包
- * 签名闸门；迁移契约的 intent 仍按 confirm_stage 传输（V1 不用它裁决成败，
- * 裁决只在 signalName），evidenceIds 传空数组由服务端按必填槽位裁决。本模块
- * 只读 V1 要求包/句柄与验收信号，不读 v0 产品 schema 字段，
- * 也不猜 accepted/rejected。
+/* 确认提交：候选信号只取 ProductTaskDTO.submitSignals，显式选一个 signalName
+ * 后走 prepare-submit/submit 与钱包签名闸门；intent 固定 confirm_stage，
+ * evidenceIds 传空数组由服务端按必填槽位裁决。
  */
 import { FileSearch, RefreshCw, Send, ShieldCheck } from "lucide-react";
 import { useEffect, useState } from "react";
@@ -167,18 +164,18 @@ export function AcceptancePanel({
       <div className="section-heading">
         <FileSearch aria-hidden="true" />
         <div>
-          <h2>验收提交</h2>
+          <h2>确认提交</h2>
           <p>读要求包里的文件后，由你在任务的候选信号中显式选择本次要提交的信号；界面不替你判定通过或拒绝。</p>
         </div>
       </div>
 
       {taskState.status === "no_task" ? (
         <p className="requirements-note">
-          链接未携带验收任务。请在入口里追加 <code>task=&lt;taskId&gt;</code> 后打开本页。
+          链接未携带待确认任务。请在入口里追加 <code>task=&lt;taskId&gt;</code> 后打开本页。
         </p>
       ) : taskState.status === "loading" ? (
         <p className="requirements-note" role="status">
-          <RefreshCw className="spin" aria-hidden="true" /> 正在读取验收任务…
+          <RefreshCw className="spin" aria-hidden="true" /> 正在读取待确认任务…
         </p>
       ) : taskState.status === "error" ? (
         <p className="requirements-error" role="alert">
@@ -230,7 +227,7 @@ export function AcceptancePanel({
               onClick={() => void handlePrepare()}
             >
               <ShieldCheck aria-hidden="true" />
-              {phase === "preparing" ? "准备中…" : "准备验收提交"}
+              {phase === "preparing" ? "准备中…" : "准备确认提交"}
             </button>
             {prepared ? (
               <button

@@ -851,7 +851,7 @@ function errorMessage(error: unknown): string {
 
 function descriptorFailureCopy(error: unknown): string {
   if (isRegistrationApiError(error) && error.errorCode === "descriptor_snapshot_not_found") {
-    return "服务端没有该登记哈希对应的档案快照：这不等于档案为空，只表示快照不在托管存储里。";
+    return "服务端没有该登记哈希对应的档案快照：这不等于档案为空，只表示快照不在受管存储里。";
   }
   return errorMessage(error);
 }

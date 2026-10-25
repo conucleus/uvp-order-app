@@ -31,8 +31,6 @@ export function taskAddOnKind(task: ProductTaskDTO): ParticipantAddOnKind {
   if (isParticipantAddOnKind(manifest?.addOnKind)) {
     return manifest.addOnKind;
   }
-  // 无显式加成声明统一按提交执行信号渲染，
-  // 收件箱/详情对缺字段数据中性降级，不 throw 白屏。
   return "submit_signal";
 }
 
@@ -55,10 +53,6 @@ export function taskPrimaryActionLabel(task: ProductTaskDTO, fallback?: string):
     taskAddOnLabel(taskAddOnKind(task));
 }
 
-// 提交意图推导单源：TaskSubmitIntent 词表、
-// submitIntentByPluginKind 兜底映射与 manifest/插件类型推导以
-// @uvp-eth/product-dto 为唯一出处（本端与 zhixu-store workbenchSupport
-// 不各自持镜像副本）。
 export { taskSubmitIntent, taskSubmitIntentForAction } from "@uvp-eth/product-dto";
 export type { TaskSubmitIntent } from "@uvp-eth/product-dto";
 

@@ -59,12 +59,6 @@ describe("order app Product API boundary", () => {
   });
 
   it("times out hanging requests instead of loading forever", async () => {
-    // 注入的 fetcher 不主动 settle：超时必须独立于 fetcher 何时返回。
-    // 但与真实 fetch 同语义地消费 signal——signal 中止即 reject 并撤销
-    // keepAlive。keepAlive 定时器是必须的：AbortSignal.timeout 不持有
-    // 事件循环，而永不落定的 promise 也不持有——没有它，部分 node 版本
-    // 的 test runner 会在超时到来前排空循环，按未决 promise 取消整个
-    // 套件（CI node22 实测）。
     const hangingFetcher: ProductApiClientOptions["fetcher"] = (_input, init) =>
       new Promise<Response>((_resolve, reject) => {
         const keepAlive = setInterval(() => {}, 50);
@@ -109,9 +103,6 @@ describe("order app Product API boundary", () => {
             roleLabels: ["报关行"],
             source: "wallet"
           },
-          // 服务端 summary（completedTaskCount 按 submitted 计入的"已完成"
-          // 口径）不被消费：桩即便携带也不影响客户端按 submitted 如实
-          // 命名的本地摘要。
           summary: {
             orderCount: 1,
             openTaskCount: 1,
@@ -132,7 +123,6 @@ describe("order app Product API boundary", () => {
     });
 
     assert.equal(home.source.kind, "real");
-    // 摘要与待办列表同源本地计算：open 任务计开放、无 submitted 不虚报。
     assert.deepEqual(home.summary, {
       orderCount: 1,
       openTaskCount: 1,
@@ -211,14 +201,11 @@ describe("order app Product API boundary", () => {
 
     assert.equal(preview.acceptance?.status, "can_accept");
     assert.equal(accepted.invite && (accepted.invite as { readonly status: string }).status, "accepted");
-    // 服务端契约：预览与 accept/reject 同形态——POST + body token（一次性
-    // 凭据不落 URL query），walletAddress 仍是 query 声明通道。
     const previewRequest = requested.find((request) => request.method === "POST" && request.url.includes("/product/invites/invite-1?"));
     assert.ok(previewRequest, "preview request captured");
     assert.ok(previewRequest.url.includes("walletAddress="));
     assert.ok(!previewRequest.url.includes("token="), "invite token must not leak into the preview URL");
     assert.deepEqual(JSON.parse(previewRequest.body ?? "{}"), { token: "invite-token-plaintext" });
-    // 服务端契约：accept 必须带一次性 token、query 声明钱包和会话头；reject 也必须带 token。
     const acceptRequest = requested.find((request) => request.method === "POST" && request.url.includes("/accept"));
     assert.ok(acceptRequest);
     assert.ok(acceptRequest.url.includes("walletAddress="));
@@ -304,8 +291,6 @@ describe("order app Product API boundary", () => {
 
     await client.previewInvite("invite-9", { token: "one-time-token" });
 
-    // 预览是 POST /product/invites/:id：token 在 body（与 accept/reject 同
-    // 形态），一次性凭据不得落 URL query。
     const previewRequest = requested.find((request) => request.url.includes("/product/invites/invite-9"));
     assert.ok(previewRequest, "preview request captured");
     assert.equal(previewRequest.method, "POST");
@@ -314,8 +299,6 @@ describe("order app Product API boundary", () => {
   });
 
   it("keeps the proven wallet session on subsequent participant-scoped requests", async () => {
-    // 非 local 运行时服务端强制会话锚定：proveWalletControl 成功后，
-    // me/tasks/prepare-submit 等请求统一携带 x-uvp-store-session。
     const requested: Array<{ readonly url: string; readonly headers?: Record<string, string> }> = [];
     const fetcher: ProductApiClientOptions["fetcher"] = async (input, init) => {
       const url = String(input);
@@ -530,8 +513,6 @@ function jsonResponse(body: unknown): Response {
 
 describe("2xx non-JSON responses", () => {
   it("surfaces a ProductApiError instead of a bare SyntaxError", async () => {
-    // 网关/代理返回 200 + HTML（如维护页）时，裸 SyntaxError 会把解析细节
-    // 直接抛给界面；必须归入统一错误链。
     const fetcher: ProductApiClientOptions["fetcher"] = async () =>
       new Response("<html>maintenance</html>", {
         status: 200,
@@ -562,7 +543,6 @@ describe("wallet session recovery (non-local entry)", () => {
   });
 
   it("persists the proven token and restores it into a fresh client (page reload)", async () => {
-    // node 环境没有 localStorage：安装最小桩，测试后卸载。
     const store = new Map<string, string>();
     const previousLocalStorage = (globalThis as { localStorage?: Storage }).localStorage;
     (globalThis as { localStorage?: Storage }).localStorage = {
@@ -615,7 +595,6 @@ describe("wallet session recovery (non-local entry)", () => {
       await client.proveWalletControl({ address: "0x9d8A62f656a8d1615C1294fd71e9cfB3e4855A4F" });
       assert.equal(readPersistedWalletSessionToken(), "uvs_reload");
 
-      // 模拟页面重载：新客户端实例从持久化恢复 token，参与者请求带会话头。
       const reloaded = createProductApiClient({
         baseUrl: "http://service.local/",
         fetcher,

@@ -31,15 +31,11 @@ export {
   cleanString,
   parseEvidenceIds,
   sameAddress,
-  // 签名域预期值（部署配置注入的独立来源）与提交边界签名输入组装：
-  // evidence/proof 面板经此公共边界取用，不直接依赖 tasks 内部模块。
   stagePatchSignExpectation,
   submitSignExpectation,
   taskSubmitSignInput,
   type SignDomainEnv
 } from "../tasks/model/taskUtils";
 export {
-  // 任务作用域守卫（在途上传/提交的跨任务续作丢弃）：evidence 面板经此
-  // 公共边界取用，不直接依赖 tasks 内部模块。
   useTaskScopeGuard
 } from "../tasks/model/taskScope";

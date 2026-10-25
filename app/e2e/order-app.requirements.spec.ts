@@ -1,5 +1,5 @@
 /* V1 订单要求包 e2e（api-stub）：句柄元数据/解析状态、相对方合意按错误码
- * 失败后成功、验收显式选 signalName 走 prepare-submit/submit。桩只模拟
+ * 失败后成功、确认显式选 signalName 走 prepare-submit/submit。桩只模拟
  * 服务端契约，界面行为与真实错误码是断言对象。
  */
 import { createHash } from "node:crypto";
@@ -21,8 +21,8 @@ const payloadHash = `0x${"22".repeat(32)}`;
 const stateMachineAddress = "0x8888888888888888888888888888888888888888";
 const signedMessagesKey = "__uvpRequirementsSignedMessages";
 
-const invoiceBody = "invoice body";
-const invoiceHash = sha256Hex(invoiceBody);
+const docBody = "invoice body";
+const docHash = sha256Hex(docBody);
 const privateNote = "counterparty private note";
 const preset = {
   name: "常规检测清单",
@@ -46,8 +46,8 @@ const bundle = {
         {
           key: "invoice",
           fileType: "plain_text",
-          locator: { plainText: { ref: Buffer.from(invoiceBody, "utf8").toString("base64") } },
-          contentHash: invoiceHash,
+          locator: { plainText: { ref: Buffer.from(docBody, "utf8").toString("base64") } },
+          contentHash: docHash,
           visibility: "public"
         },
         {
@@ -158,7 +158,6 @@ const order = {
 };
 
 interface RequirementsStubOptions {
-  /** 首次合意按 hash mismatch 拒绝，第二次成功：验证按错误码分流。 */
   readonly consentFailure?: "once_hash_mismatch" | undefined;
 }
 
@@ -401,13 +400,13 @@ test.describe("V1 order requirements", () => {
     await expect(page.getByText(/常规检测清单@1\.0\.0/)).toBeVisible();
     await expect(page.getByText("2026-11-01T00:00:00.000Z")).toBeVisible();
 
-    const invoiceRow = page.getByTestId("handle-row-invoice");
-    await expect(invoiceRow).toContainText("plain_text");
-    await expect(invoiceRow).toContainText("public");
-    await expect(invoiceRow).toContainText(invoiceHash);
+    const docRow = page.getByTestId("handle-row-invoice");
+    await expect(docRow).toContainText("plain_text");
+    await expect(docRow).toContainText("public");
+    await expect(docRow).toContainText(docHash);
     await expect(page.getByTestId("handle-status-invoice")).toHaveText("已解析");
-    await invoiceRow.getByText("查看已解析内容").click();
-    await expect(invoiceRow.locator("pre")).toContainText(invoiceBody);
+    await docRow.getByText("查看已解析内容").click();
+    await expect(docRow.locator("pre")).toContainText(docBody);
 
     await expect(page.getByTestId("handle-status-inspection-report")).toHaveText("不可达 / 读取失败");
     await expect(page.getByTestId("handle-status-private-note")).toHaveText("无权读取");
@@ -444,7 +443,7 @@ test.describe("V1 order requirements", () => {
     await expect(page.getByTestId("acceptance-panel")).toBeVisible();
     await expect(page.getByRole("radio", { name: "inspection.passed" })).toBeVisible();
     await expect(page.getByRole("radio", { name: "inspection.failed" })).toBeVisible();
-    const prepareButton = page.getByRole("button", { name: "准备验收提交" });
+    const prepareButton = page.getByRole("button", { name: "准备确认提交" });
     await expect(prepareButton).toBeDisabled();
 
     await page.getByRole("radio", { name: "inspection.failed" }).check();

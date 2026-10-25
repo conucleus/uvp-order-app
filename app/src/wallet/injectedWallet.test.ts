@@ -26,8 +26,6 @@ const typedData = buildProductSubmitTypedData({
 });
 
 const stagePatchTypedData: GenericTypedData = {
-  // 域版本随合约批 0.1→0.2（digest 面换血：authorizationsHash 进信封）；
-  // 字段表为最小桩，闸门只锚定域与签名者。
   domain: { name: "UVPStagePatchModule", version: "0.2", chainId: 31337, verifyingContract: "0x8888888888888888888888888888888888888888" },
   types: {
     UVPStagePatchModuleStageExecutorPatch: [
@@ -47,7 +45,6 @@ const stagePatchTypedData: GenericTypedData = {
 function acceptAllProvider(): Eip1193Provider {
   return {
     request: async ({ method }) => {
-      // 桩 typedData 的 domain.chainId=31337（0x7a69）：签名前的当前链核对按此应答。
       if (method === "eth_chainId") {
         return "0x7a69";
       }
@@ -96,7 +93,6 @@ describe("injected wallet signing", () => {
     });
 
     assert.equal(result, signature);
-    // 签名前先 eth_chainId 核对当前链，再发起 EIP-712 签名。
     assert.deepEqual(requests, [
       { method: "eth_chainId" },
       {
@@ -116,8 +112,6 @@ describe("injected wallet signing", () => {
   });
 
   it("refuses to sign when the domain differs from the expected state machine deployment", async () => {
-    // 预期 verifyingContract 来自任务投影（stateMachineAddress）：
-    // 域被攻陷 BFF 替换时必须在调钱包前拒绝。
     await assert.rejects(
       signProductSubmitWithInjectedWallet({
         typedData,
@@ -129,7 +123,6 @@ describe("injected wallet signing", () => {
         error.code === "typed_data_mismatch" &&
         /domain\.verifyingContract .* 与预期 /.test(error.message)
     );
-    // 期望一致（大小写不敏感）时放行。
     const signature = await signProductSubmitWithInjectedWallet({
       typedData,
       walletAddress,
@@ -190,7 +183,6 @@ describe("typed-data envelope gate before signing", () => {
     });
 
     assert.equal(result, signature);
-    // 补丁签名与任务提交同序：先 eth_chainId 核对当前链，再发起签名。
     assert.deepEqual(requests, [
       { method: "eth_chainId" },
       {
@@ -264,9 +256,6 @@ describe("typed-data envelope gate before signing", () => {
   });
 
   it("refuses to sign when the prepared record names a different submitter (cross-check from the strongest gate set)", async () => {
-    // 被攻陷 BFF 把别的 principal 的 prepared 信封换给本钱包：message.submitter
-    // 虽与签名钱包一致，但与 prepare 记录声明的 submitter 不一致，必须在调
-    // 钱包前拒绝（三端签名闸门同口径）。
     await assert.rejects(
       signProductSubmitWithInjectedWallet({
         typedData,
@@ -278,7 +267,6 @@ describe("typed-data envelope gate before signing", () => {
         error.code === "typed_data_mismatch" &&
         /prepare 记录声明的提交方/.test(error.message)
     );
-    // prepared 声明一致（大小写不敏感）时放行；undefined 条目跳过。
     const signature = await signProductSubmitWithInjectedWallet({
       typedData,
       walletAddress,

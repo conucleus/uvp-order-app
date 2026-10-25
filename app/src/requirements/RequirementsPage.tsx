@@ -1,8 +1,7 @@
-/* 订单要求包读面：展示 OrderRequirementsBundleDTO 的 requirements/句柄元数据
- * 与预设引用，用 file-resources resolver 按句柄展示解析/无权限/不可达/解密
- * 失败/摘要不符/类型不支持状态；失败与“没有文件”分开，密钥与存储凭据不进
- * 页面。相对方合意先按 product-dto 的格式单源核对服务端下发的合意消息再交给
- * 钱包签名，验收信号选择在 AcceptancePanel 内完成。
+/* 订单要求包读面：OrderRequirementsBundleDTO 的 requirements/句柄元数据与
+ * 预设引用，按句柄展示解析/无权限/不可达/解密失败/摘要不符/类型不支持状态；
+ * 相对方合意先核对服务端下发的合意消息再交钱包签名，确认信号选择在
+ * AcceptancePanel 内完成。
  */
 import { ArrowLeft, FileText, Fingerprint, ListChecks, RefreshCw, ShieldCheck } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";

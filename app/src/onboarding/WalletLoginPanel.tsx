@@ -2,19 +2,16 @@ import { Fingerprint, KeyRound, Wallet } from "lucide-react";
 import { useState } from "react";
 
 /**
- * 非 local 部署的参与者面登录入口：服务端对参与者读写强制钱包会话锚定，
- * 没有会话时首屏请求 401。这里独立于邀请流程提供钱包登录通道：
- * 连接钱包 → challenge → personal_sign → verify → 重载待办。
+ * 非 local 部署的参与者面登录入口：钱包登录通道（连接钱包 → challenge →
+ * personal_sign → verify → 重载待办）。
  */
 export function WalletLoginPanel({
   hasWallet,
   onLogin,
   onOpenRegistration
 }: {
-  /** 是否检测到浏览器钱包注入。 */
   readonly hasWallet: boolean;
   readonly onLogin: () => Promise<void>;
-  /** 注册与身份入口：未登录的新实体可先查看注册页（公开身份事实只读）。 */
   readonly onOpenRegistration?: (() => void) | undefined;
 }) {
   const [busy, setBusy] = useState(false);
@@ -49,7 +46,7 @@ export function WalletLoginPanel({
           {busy ? "等待钱包签名…" : "连接钱包并登录"}
         </button>
       ) : (
-        <p>未检测到浏览器钱包：请先安装钱包扩展（如 MetaMask）后刷新本页。</p>
+        <p>未发现浏览器钱包：请先安装钱包扩展（如 MetaMask）后刷新本页。</p>
       )}
       {error ? <p role="alert">{error}</p> : null}
       {onOpenRegistration ? (

@@ -99,7 +99,6 @@ describe("order app notification read receipts", () => {
       assert.equal(result.syncPending, true);
       assert.notEqual(result.readAt, undefined);
 
-      // The queued receipt replays verbatim on the next successful sync pass.
       const postedUrls: string[] = [];
       const succeedingFetcher = async (input: RequestInfo | URL) => {
         postedUrls.push(String(input));
@@ -178,7 +177,6 @@ describe("order app notification read receipts", () => {
   });
 
   it("marks read without unhandled rejection when storage is disabled or full", async () => {
-    // 禁存储/配额满：写路径抛 QuotaExceededError 时不得让已读点击整体失败。
     const backing = new Map<string, string>();
     (globalThis as { window?: unknown }).window = {
       localStorage: {
@@ -224,8 +222,6 @@ describe("order app notification loading", () => {
   });
 
   it("merges the local read cache so unsynced receipts do not flip back to unread", async () => {
-    // 回执同步失败后（重试仍在队列），刷新不得把已读通知回退成未读：
-    // 本地读缓存在加载路径合并，未同步的标 syncPending。
     installMemoryWindow();
     window.localStorage.setItem(
       "uvp-order-app:notification-read:0xabc0000000000000000000000000000000000009",
@@ -237,7 +233,6 @@ describe("order app notification loading", () => {
     );
     const fetcher = (async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
       if (init?.method === "POST") {
-        // 回执重放仍失败（5xx 瞬时错误）：条目保留在重试队列。
         return new Response("still down", { status: 503 });
       }
       return new Response(JSON.stringify({
@@ -327,8 +322,6 @@ describe("order app notification loading", () => {
   });
 
   it("normalizes invalidated notifications with the structured status field intact", async () => {
-    // reorg 失效通知按结构化状态呈现，reason 原样透传，
-    // 前端不解析 message 文案判定失效。
     const fetcher = async () => new Response(JSON.stringify({
       notifications: [
         {
@@ -410,7 +403,7 @@ describe("order app notification projection", () => {
       participants: [
         {
           ...demoOrder.participants[0],
-          contact: "private-buyer@example.com"
+          contact: "private-guest@example.com"
         }
       ]
     } as unknown as ProductOrderDTO;
@@ -428,12 +421,10 @@ describe("order app notification projection", () => {
 
     assert.equal(notifications[0]?.kind, "task_overdue");
     assert.equal(notifications[0]?.privacy, "participant_only");
-    assert.equal(JSON.stringify(notifications).includes("private-buyer@example.com"), false);
+    assert.equal(JSON.stringify(notifications).includes("private-guest@example.com"), false);
   });
 
   it("represents waiting-indexing, failed, and revoked states as non-authoritative notifications", () => {
-    // 服务端任务词表没有完成态：本地投影不派生 submission_confirmed
-    //（该类通知只来自服务端通知面）。
     const submittedTask = {
       ...demoTask,
       taskId: "submitted-task",
@@ -459,7 +450,6 @@ describe("order app notification projection", () => {
     });
     const kinds = notifications.map((notification) => notification.kind);
 
-    // submitted 只能产生等待索引的中间态通知，不得提前宣布"提交已确认"。
     const submittedNotification = notifications.find((notification) => notification.kind === "signal_submitted");
     assert.equal(submittedNotification?.taskId, "submitted-task");
     assert.equal(submittedNotification?.severity, "info");
@@ -483,14 +473,10 @@ describe("order app notification projection", () => {
       now: new Date("2026-04-29T12:00:00.000Z")
     });
 
-    // 服务端 read 回执端点按 bytes32 校验：本地 ID 必须是 0x+64hex，
-    // 否则接线即全 400。
     assert.equal(notifications.length, 2);
     for (const notification of notifications) {
       assert.match(notification.notificationId, /^0x[0-9a-f]{64}$/u);
     }
-    // 派生格式钉死：sha256(["local", kind, ...parts].join("\0"))，
-    // 本地已读状态以该 ID 落 localStorage，格式漂移会让已读记录失配。
     const expected = `0x${createHash("sha256")
       .update(new TextEncoder().encode(["local", "task_ready", "ready-task"].join("\u0000")))
       .digest("hex")}`;
@@ -499,7 +485,6 @@ describe("order app notification projection", () => {
       notifications[0]?.notificationId,
       notifications[1]?.notificationId
     );
-    // 同一任务重复派生保持确定性（dedupe/已读判定依赖稳定性）。
     const rerun = deriveOrderAppNotifications({
       orders: [demoOrder],
       tasks: [readyTask],
@@ -519,7 +504,6 @@ describe("pending read receipt queue hygiene", () => {
     const originalWarn = console.warn;
     console.warn = () => {};
     try {
-      // 本地派生通知 id 对服务端可能是未知的：404 重试永远不会成功。
       const rejected = await markOrderAppNotificationRead(
         notificationWithId("notification-gone"),
         realSourceData,
@@ -529,7 +513,6 @@ describe("pending read receipt queue hygiene", () => {
       assert.equal(rejected.readStatus, "read");
       assert.equal(rejected.syncPending, undefined);
 
-      // 既有排队项遇到 4xx 同样出队。
       await markOrderAppNotificationRead(
         notificationWithId("notification-queued"),
         realSourceData,

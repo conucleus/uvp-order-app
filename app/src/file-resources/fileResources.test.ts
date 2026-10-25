@@ -17,16 +17,16 @@ const textHeaders = { "content-type": "text/plain; charset=utf-8" };
 
 describe("fileResource resolver", () => {
   it("resolves http text when the handle content hash matches", async () => {
-    const body = "customs declaration";
+    const body = "sample declaration";
     const resolver = createV1FileResourceResolver({
       http: { fetcher: async () => new Response(body, { status: 200, headers: textHeaders }) }
     });
 
     const resolved = await resolver.resolve(
       {
-        key: "customs",
+        key: "declaration",
         fileType: "http",
-        locator: { httpFile: { url: "https://files.example/customs.txt" } },
+        locator: { httpFile: { url: "https://files.example/declaration.txt" } },
         visibility: "public",
         contentHash: await sha256Hex(body)
       },
@@ -42,16 +42,16 @@ describe("fileResource resolver", () => {
     const resolver = createV1FileResourceResolver({
       http: {
         fetcher: async () =>
-          new Response("customs declaration", { status: 200, headers: textHeaders })
+          new Response("sample declaration", { status: 200, headers: textHeaders })
       }
     });
 
     await assert.rejects(
       resolver.resolve(
         {
-          key: "customs",
+          key: "declaration",
           fileType: "http",
-          locator: { httpFile: { url: "https://files.example/customs.txt" } },
+          locator: { httpFile: { url: "https://files.example/declaration.txt" } },
           visibility: "public",
           contentHash: await sha256Hex("another document")
         },
@@ -103,7 +103,7 @@ describe("fileResource resolver", () => {
   });
 
   it("resolves a base64 plain_text fixture as text", async () => {
-    const body = "hello 报关";
+    const body = "hello 单证";
     const resolver = createV1FileResourceResolver();
 
     const resolved = await resolver.resolve(
@@ -141,7 +141,7 @@ describe("fileResource resolver", () => {
   });
 
   it("decrypts with the injected key and verifies the plaintext hash", async () => {
-    const body = "encrypted customs";
+    const body = "encrypted sample";
     const plaintext = new TextEncoder().encode(body);
     const key = await crypto.subtle.generateKey(
       { name: "AES-GCM", length: 256 },
@@ -194,9 +194,9 @@ describe("fileResource resolver", () => {
 
 function httpHandle(): FileResourceHandleDTO {
   return {
-    key: "customs",
+    key: "declaration",
     fileType: "http",
-    locator: { httpFile: { url: "https://files.example/customs.txt" } },
+    locator: { httpFile: { url: "https://files.example/declaration.txt" } },
     visibility: "public"
   };
 }

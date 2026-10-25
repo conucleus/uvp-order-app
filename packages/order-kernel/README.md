@@ -26,9 +26,9 @@ import type { Eip1193Provider } from "@uvp-eth/order-kernel/wallet/provider";
 
 `exports` 同时提供根入口 `@uvp-eth/order-kernel` 和上述子路径。
 
-## Product V3（订单域客户端）
+## Product 订单域客户端
 
-`@uvp-eth/order-kernel/product/v3` 对齐 chain-services 的 `/product/v3` 路由（配置注册、
+`@uvp-eth/order-kernel/product/kernel` 对齐 chain-services 的 `/product/v3` 路由（配置注册、
 订单草稿、slot 邀请、EIP-712 接受、finalize、订单/阶段读）。身份只经
 `x-uvp-store-session` 传递；DTO 单源是 `@uvp-eth/product-dto`，签名类型单源是
 `@uvp-eth/protocol-bindings`。
@@ -38,14 +38,14 @@ import type { Eip1193Provider } from "@uvp-eth/order-kernel/wallet/provider";
 
 ```ts
 import {
-  createProductV3Client,
+  createProductClient,
   flattenConfigVersion,
   buildCreateOrderDraftInput,
   verifyInviteAcceptTypedData,
   summarizeInviteAcceptTypedData
-} from "@uvp-eth/order-kernel/product/v3";
+} from "@uvp-eth/order-kernel/product/kernel";
 
-const client = createProductV3Client({
+const client = createProductClient({
   baseUrl: "/product",              // 同源反代；或服务绝对地址
   getSessionToken: () => session.currentSessionToken()
 });
@@ -64,9 +64,9 @@ const client = createProductV3Client({
 | `prepareFinalize` / `finalizeWithSignature` | `POST /order-drafts/:draftId/finalize/prepare` → `POST .../finalize`（buyer 的 UVPOrderFinalize 签名） |
 | `getOrder` / `getOrderStage` | `GET /orders/:orderId[/stages/:stageKey]` |
 
-错误统一为 `ProductV3Error`：`status` + `kind`（`unauthorized/forbidden/not_found/conflict/
+错误统一为 `ProductError`：`status` + `kind`（`unauthorized/forbidden/not_found/conflict/
 gone/invalid_terms/unavailable/timeout/invalid_response/transport/...`）+ 服务端短码
-`errorCode`/`details`。`isWalletIdentityRequiredV3` 用于 401 切会话登录；超时是「结果未知」，
+`errorCode`/`details`。`isWalletIdentityRequiredKernel` 用于 401 切会话登录；超时是「结果未知」，
 不得自动重发。finalize 的计划绑定失败会原样透出：409 `published_plan_missing`
 （配置版本没登记 plan，`kind:"conflict"`，重试无用）、503 `published_plan_unavailable`
 （plan 查询失败，`kind:"unavailable"`，可重试）、503 `published_plan_invalid`（返回的
@@ -74,7 +74,7 @@ planId/planHash 非 canonical）。
 
 ### 配置摊平（`flattenConfigVersion`）
 
-服务端只返回 `ConfigVersionV3.bundle`；kernel 按服务端 `canonical.ts` 同口径派生：
+服务端只返回 `ConfigVersion.bundle`；kernel 按服务端 `canonical.ts` 同口径派生：
 
 - `slots`/`requiredSlotKeys`：从配置 `stage.slots`（slotKey → 展示标签）派生；
   订单按该集合邀请，没有 payer/payee/verifier 默认或特例。
@@ -88,8 +88,8 @@ planId/planHash 非 canonical）。
 
 ### 开单草稿映射（`buildCreateOrderDraftInput`）
 
-宿主形状 `StageSelectionV3 {stageKey, amountBaseUnits, inviteDeadline, workDeadline,
-standardRef?, slots?}` 映射到服务端 `StageTermsInputV3`：
+宿主形状 `StageSelection {stageKey, amountBaseUnits, inviteDeadline, workDeadline,
+standardRef?, slots?}` 映射到服务端 `StageTermsInput`：
 
 | 宿主字段 | 服务端字段 | 说明 |
 | --- | --- | --- |
@@ -103,7 +103,7 @@ standardRef?, slots?}` 映射到服务端 `StageTermsInputV3`：
 `standard_hash_missing`、`stage_subset_mismatch`…），
 不做「尽力而为」的强制转换。
 
-**窗口不是订单权利**：`StageSelectionV3` 没有窗口字段；订单只提交金额/验收方式/期限/标准。
+**窗口不是订单权利**：`StageSelection` 没有窗口字段；订单只提交金额/验收方式/期限/标准。
 
 ### 邀请接受 EIP-712
 

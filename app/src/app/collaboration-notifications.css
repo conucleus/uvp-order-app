@@ -363,7 +363,6 @@
   }
 }
 
-/* Notification and deadline cards aligned with the refreshed workbench style. */
 .notification-center {
   border-radius: 8px;
   box-shadow: var(--app-shadow);
