@@ -1,8 +1,8 @@
 // 端口类型：order-app 只依赖这些结果类型；服务端缺的读面用 not_available
-// + 精确 TODO 表达，不用旧 v0 语义补位、不伪造成功。
+// + 精确 TODO 表达，不伪造成功。
 
 import type { FlatConfig, FlatStage } from "@uvp-eth/uvp-client/browser";
-import type { StageStandardRef } from "@uvp-eth/product-dto";
+import type { StageStandardRef } from "@uvp-eth/uvp-client/browser";
 
 export type { FlatConfig, FlatStage };
 
@@ -73,8 +73,8 @@ export interface CreateOrderResult {
 
 export const TODOS = {
   configList:
-    "服务端没有 GET /product/v3/configs 目录接口：只能按 configId+version 读取（TODO：加目录读面或由运营提供清单）。",
-  configPublish: "配置发布（POST /product/v3/configs）不在 order-app：由凝结核/Store 发布并登记 planId/planHash。",
+    "服务端没有配置目录接口：只能按 configId+version 读取（TODO：加目录读面或由运营提供清单）。",
+  configPublish: "配置发布不在 order-app：由凝结核发布并登记 planId/planHash。",
   taskSubmit:
     "任务投影只读；提交面（signal 提交与资金动作）由 executor 与资金安排面板承担，本页不伪造提交入口。",
   evidenceSubmit:

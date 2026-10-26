@@ -52,11 +52,11 @@ export class AppErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundar
               className="quiet-button"
               type="button"
               onClick={() => {
-                window.location.hash = "#section=tasks";
+                window.location.hash = "#section=create";
                 window.location.reload();
               }}
             >
-              回到待办首页
+              回到开单首页
             </button>
           </div>
           {error.stack ? (

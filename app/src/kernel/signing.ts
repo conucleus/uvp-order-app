@@ -88,6 +88,39 @@ export async function signTypedDataKernel(
   }
 }
 
+/**
+ * 会话登录用 personal_sign：message 是服务端 challenge 原文，本端口不解析
+ * 也不改写；签名失败按缺失钱包/用户拒绝/非法签名分类，不自动重试。
+ */
+export async function personalSignKernel(address: string, message: string): Promise<string> {
+  const provider = getBrowserEthereumProvider();
+  if (!provider) {
+    throw new SigningError("missing_wallet", "未发现浏览器钱包，无法完成会话签名。");
+  }
+  const signer = address.trim();
+  if (!/^0x[0-9a-fA-F]{40}$/u.test(signer)) {
+    throw new SigningError("invalid_signature", "钱包地址格式不合法，无法完成会话签名。");
+  }
+  try {
+    const signature = await provider.request({
+      method: "personal_sign",
+      params: [message, signer]
+    });
+    if (typeof signature !== "string" || !/^0x[0-9a-fA-F]+$/u.test(signature)) {
+      throw new SigningError("invalid_signature", "钱包没有返回合法的会话签名。");
+    }
+    return signature;
+  } catch (error) {
+    if (error instanceof SigningError) {
+      throw error;
+    }
+    if (isUserRejection(error)) {
+      throw new SigningError("wallet_rejected", "钱包取消了本次会话签名，未创建会话。");
+    }
+    throw new SigningError("invalid_signature", errorMessage(error));
+  }
+}
+
 function isUserRejection(error: unknown): boolean {
   const record = error as { readonly code?: unknown; readonly name?: unknown } | undefined;
   return record?.code === 4001

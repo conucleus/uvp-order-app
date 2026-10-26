@@ -1,11 +1,11 @@
-export type OrderAppSection = "tasks" | "orders" | "create" | "proof" | "registration" | "requirements";
+// app 路由：只有开单与订单房间两个视图；邀请链接走 ?invite=&inviteToken=
+// 查询参数（一次性 token 不进入 hash 导航）。
+
+export type OrderAppSection = "create" | "orders";
 
 export interface OrderAppRoute {
   readonly section: OrderAppSection;
-  readonly taskId?: string | undefined;
   readonly orderId?: string | undefined;
-  readonly inviteId?: string | undefined;
-  readonly draftId?: string | undefined;
 }
 
 export interface InviteEntry {
@@ -13,39 +13,24 @@ export interface InviteEntry {
   readonly inviteToken?: string | undefined;
 }
 
-export interface DecorationEntry {
-  readonly zhixuId: string;
-}
-
-const sections = new Set<OrderAppSection>(["tasks", "orders", "create", "proof", "registration", "requirements" ]);
+const sections = new Set<OrderAppSection>(["create", "orders"]);
 const inviteSearchKeys = ["invite", "inviteToken"] as const;
 
 export function readOrderAppRoute(hash = window.location.hash): OrderAppRoute {
   const raw = hash.replace(/^#/u, "");
   const params = new URLSearchParams(raw.startsWith("?") ? raw.slice(1) : raw);
   const section = params.get("section");
+  const orderId = params.get("order") ?? undefined;
   return {
-    section: section && sections.has(section as OrderAppSection) ? section as OrderAppSection : "tasks",
-    taskId: params.get("task") ?? undefined,
-    orderId: params.get("order") ?? undefined,
-    inviteId: params.get("invite") ?? undefined,
-    draftId: params.get("draftId") ?? undefined,
+    section: section && sections.has(section as OrderAppSection) ? section as OrderAppSection : "create",
+    ...(orderId ? { orderId } : {})
   };
 }
 
 export function routeHash(route: OrderAppRoute): string {
   const params = new URLSearchParams({ section: route.section });
-  if (route.taskId) {
-    params.set("task", route.taskId);
-  }
   if (route.orderId) {
     params.set("order", route.orderId);
-  }
-  if (route.inviteId) {
-    params.set("invite", route.inviteId);
-  }
-  if (route.draftId) {
-    params.set("draftId", route.draftId);
   }
   return `#${params.toString()}`;
 }
@@ -61,23 +46,6 @@ export function readInviteEntryFromSearch(search = readSearch()): InviteEntry | 
   }
   const inviteToken = params.get("inviteToken")?.trim();
   return { inviteId, ...(inviteToken ? { inviteToken } : {}) };
-}
-
-export function readDecorationEntryFromSearch(search = readSearch()): DecorationEntry | undefined {
-  const zhixuId = new URLSearchParams(search ?? "").get("decoration")?.trim();
-  return zhixuId ? { zhixuId } : undefined;
-}
-
-export function clearDecorationSearchParam(history = window.history): void {
-  if (typeof window === "undefined") {
-    return;
-  }
-  const url = new URL(window.location.href);
-  if (!url.searchParams.has("decoration")) {
-    return;
-  }
-  url.searchParams.delete("decoration");
-  history.replaceState(null, "", `${url.pathname}${url.search}${url.hash}`);
 }
 
 export function clearInviteSearchParams(history = window.history): void {

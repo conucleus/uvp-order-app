@@ -2,21 +2,26 @@
 
 Browser participant console for UVP Orders. The runnable package is `app/`.
 
-It displays wallet-assigned tasks, evidence requirements, typed-data preparation, submission status and proof from the Product API. Supplier capability data may be shown as Store context, while Order-level authorization and executor constraints decide whether a wallet can act.
+The app has one flow: wallet session → create order (config version → draft →
+invites → buyer EIP-712 finalize) → invite acceptance → order-room read view.
+Product access and typed-data verification come from
+`@uvp-eth/uvp-client/browser`; chain facts stay with `UVPStateMachine`.
 
 ```bash
 pnpm --filter @uvp-eth/order-app dev
 pnpm --filter @uvp-eth/order-app typecheck
 pnpm --filter @uvp-eth/order-app test
 pnpm --filter @uvp-eth/order-app test:e2e
+pnpm --filter @uvp-eth/order-app test:e2e:configured
+pnpm --filter @uvp-eth/order-app build
 ```
 
-Set `VITE_UVP_CHAIN_SERVICES_URL` for the current Product API. The app only talks to the real Product API; without it the shell renders fail-closed with no tasks or proofs.
+Set `VITE_UVP_CHAIN_SERVICES_URL` for the participant service. Without it the
+shell renders fail-closed and shows no order views. Optional
+`VITE_UVP_CONFIG_ID` / `VITE_UVP_CONFIG_VERSION` prefill the order form; the
+server has no config directory endpoint, so the version is always read by
+`configId + version`.
 
-Main build-time environment variables (Vite inlines them into the bundle; runtime env changes have no effect):
-
-- `VITE_UVP_CHAIN_SERVICES_URL`: Product API base URL; without it the shell renders fail-closed.
-- `VITE_UVP_STATE_MACHINE_ADDRESS`: expected `UVPStateMachine` address for task-submit signature domain checks; missing or malformed values refuse the wallet signature (fail-closed). One address is pinned per build, so rotating the state-machine deployment requires rebuilding the app.
-- `VITE_UVP_STAGE_PATCH_MODULE_ADDRESS`: expected `UVPStagePatchModule` address for stage-patch (executor/resource patch) signature domain checks — the patch domain is verified by the patch module, not the state machine; missing or malformed values refuse the signature (fail-closed). Same build-time pinning as the state-machine address.
-
-See `app/.env.example` for the full list and defaults.
+Wallet session currently uses the app-owned `/store/auth/challenge|verify`
+transport (token kept in `localStorage`); the server-side generic participant
+session contract is still a gap. See `app/README.md` and `app/.env.example`.

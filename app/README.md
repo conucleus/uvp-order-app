@@ -1,41 +1,54 @@
 # UVP Order App
 
-Order App 是参与者处理 Order 待办的浏览器入口。它从 Product API 读取分配给当前钱包的任务、证据要求、签名材料、提交状态和链上证明。
+参与者处理订单的浏览器工作台。只有一个流程：钱包会话 → 开单（配置版本 → 草稿 →
+邀请 → 本人 EIP-712 确认）→ 邀请接受 → 订单房间读面。客户端能力来自
+`@uvp-eth/uvp-client/browser`；本仓不再保留任务收件箱、要求包、注册、通知、
+装修或证明等第二套界面。
 
 ## 责任边界
 
-- Task 可见性来自 Product 投影。
-- 提交权来自 Order 级 Signal 授权和当前 executor overlay。
-- 业务签名由参与者钱包产生；服务端可以代付 gas，但不能代造业务授权。
-- Supplier 能力和匹配属于 Store metadata，不影响提交权。
-- Plan 发布、Order 和 Signal 事实来自 `UVPStateMachine`。
+- 开单只提交配置版本、金额、期限与验收标准；订单复用配置版本已发布的 plan。
+- 邀请是一次性 token 链接（`?invite=&inviteToken=`），token 只在页面内存与链接中，
+  不写入 hash 导航。
+- 业务签名由参与者钱包产生；app 只做域/条款核对与钱包调用，不接触私钥。
+- 订单/阶段/任务/句柄读面由服务端按 `(order, stage, slot, wallet)` scope 裁剪；
+  读不到就是读不到，不伪造空结果。
+- 链上事实以 `UVPStateMachine` 为准；app 不推进业务状态。
 
 ## 运行
 
 ```bash
 pnpm --filter @uvp-eth/order-app dev
 pnpm --filter @uvp-eth/order-app typecheck
-pnpm --filter @uvp-eth/order-app build
 pnpm --filter @uvp-eth/order-app test
+pnpm --filter @uvp-eth/order-app build
 pnpm --filter @uvp-eth/order-app test:e2e
+pnpm --filter @uvp-eth/order-app test:e2e:configured
 ```
 
-当前环境变量：
+主流程 e2e 只有两个 profile：`fail-closed`（未配置参与者服务，默认）与
+`configured`（指向假服务地址，渲染登录门与工作台外壳）。两者都不启动真实后端。
 
-- `VITE_UVP_CHAIN_SERVICES_URL`: Product API 地址（必填，缺失时启动即报错）。
-- `VITE_UVP_ORDER_APP_WALLET_ADDRESS`: 参与者钱包过滤条件。
+## 环境变量
 
-未配置 `VITE_UVP_CHAIN_SERVICES_URL` 时启动即报错，错误信息包含该变量名；应用只显示未配置错误提示，不生成任务或证明。
+- `VITE_UVP_CHAIN_SERVICES_URL`（必填）：参与者服务地址；缺失时外壳 fail-closed，
+  不渲染开单、邀请或订单房间。
+- `VITE_UVP_CONFIG_ID` / `VITE_UVP_CONFIG_VERSION`（可选）：开单页预填的默认配置
+  版本；服务端没有配置目录接口，只能按 `configId + version` 读取。
 
-## 装修数据（reader 装修页与任务证据要求）
+见 `.env.example`。
 
-- Reader 装修页入口：`/?decoration=<zhixuId>`（只读，不需要钱包会话；链接可分享、刷新可重开）。页面用产业语言渲染 theme（展示名/描述/标签/亮点）、参与方与责任、阶段与材料要求。
-- 数据来源：`GET /product/zhixus/<zhixuId>`（秩序详情，公共读）+ `GET /store/decoration/<planId>`（Store 装修数据，取 `zhixu.planPublication.planId`）。装修是 Store 数据域的可删除投影，不是链上事实；取不到时页面显式提示，不冒充"没有装修数据"。
-- 任务证据要求：任务投影自带 `evidenceSpec` 时以投影为准；缺失时按 `taskId`（精确）→ `stageId` 用装修 `taskDeclarations` 补位，任务详情标注"材料要求来自秩序装修数据"。
-- 执行者选择：任务投影带 `selectableTargets` 时走既有 stage executor patch 流程；缺失但秩序阶段声明了 `selectedStageTargets`（DSL `selectedStages`）时，按秩序详情派生目标阶段入口。界面不引入"静态/动态执行者"概念。
+## 钱包会话（已知缺口）
 
-## 通用任务动作
+当前会话 transport 是 app 自有的 `/store/auth/challenge` → `personal_sign` →
+`/store/auth/verify`，token 保存在浏览器 `localStorage`（`uvp-order-app:wallet-session`）。
+服务端尚未提供 generic participant-session 契约；契约落地后替换 `src/session/` 的
+transport，调用面（`currentSessionToken` / `proveWalletControl`）不变。
 
-Order App 支持 Signal 提交、stage executor patch、stage resource patch 和 Store 编写的 participant add-on manifest。Manifest 描述表单与按钮，不能授予链上权限。
+## 目录
 
-普通界面使用待办、提交确认、证据、证明、履约者和执行方等产品语言；协议标识放在高级证明视图。
+- `src/App.tsx`：唯一工作台外壳（会话门 + 开单/订单房间路由 + 邀请入口）。
+- `src/kernel/`：开单、邀请接受、订单房间页面与 transport 端口（DTO 单源仍是
+  `@uvp-eth/product-dto`，签名类型单源是 `@uvp-eth/protocol-bindings`）。
+- `src/session/`：钱包会话 transport 与 token 存储。
+- `src/routes/`：hash 路由与邀请查询参数。

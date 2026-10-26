@@ -1,46 +1,23 @@
-import { existsSync } from "node:fs";
+// e2e 配置：两个 profile——fail-closed（未配置参与者服务）与 configured
+// （指向假服务地址，渲染登录门与工作台外壳）。两者都不启动真实后端。
+
 import { defineConfig, devices } from "@playwright/test";
-import {
-  assertOrderAppFullModeGate,
-  isProductionLikeRuntime
-} from "./src/testing/orderAppFullModeGate";
 
 const host = "127.0.0.1";
 const port = process.env.UVP_ORDER_APP_E2E_PORT ?? "4183";
 const baseURL = process.env.PLAYWRIGHT_BASE_URL ?? `http://${host}:${port}`;
-const profile = (process.env.UVP_ORDER_APP_E2E_PROFILE ?? "api-stub").trim().toLowerCase();
-const includeMobile = process.env.UVP_ORDER_APP_E2E_MOBILE === "1";
-const runtimeProfile = process.env.VITE_UVP_RUNTIME_ENV?.trim().toLowerCase();
-const fullModeGate = profile === "full" ? assertOrderAppFullModeGate(process.env) : undefined;
+const profile = (process.env.UVP_ORDER_APP_E2E_PROFILE ?? "fail-closed").trim().toLowerCase();
 
-if (isProductionLikeRuntime(runtimeProfile) && profile === "api-stub") {
-  throw new Error("production-like Order App E2E runtime cannot use API stubs");
-}
-if (profile !== "fail-closed" && profile !== "api-stub" && profile !== "full") {
-  throw new Error(
-    `Unsupported UVP_ORDER_APP_E2E_PROFILE "${profile}". Use "api-stub" (default), "fail-closed", or "full".`
-  );
-}
-if (fullModeGate && !existsSync(fullModeGate.flowSummaryPath)) {
-  throw new Error(`Order App full-mode flow summary does not exist: ${fullModeGate.flowSummaryPath}`);
+if (profile !== "fail-closed" && profile !== "configured") {
+  throw new Error(`Unsupported UVP_ORDER_APP_E2E_PROFILE "${profile}". Use "fail-closed" or "configured".`);
 }
 
 function webServerCommand(): string {
+  const dev = `pnpm dev --host ${host} --port ${port} --strictPort`;
   if (profile === "fail-closed") {
-    return `pnpm dev --host ${host} --port ${port} --strictPort`;
+    return dev;
   }
-  if (profile === "api-stub") {
-    // 签名域预期值走部署配置注入（与 e2e 桩 typedData.domain 的地址/链
-    // ID 一致）：桩与配置同值才不会把合法用例误判为换域攻击。
-    return [
-      "VITE_UVP_CHAIN_SERVICES_URL=http://product-api.test",
-      "VITE_UVP_CHAIN_ID=31337",
-      "VITE_UVP_STATE_MACHINE_ADDRESS=0x8888888888888888888888888888888888888888",
-      "VITE_UVP_STAGE_PATCH_MODULE_ADDRESS=0x8888888888888888888888888888888888888888",
-      `pnpm dev --host ${host} --port ${port} --strictPort`
-    ].join(" ");
-  }
-  return `pnpm dev --host ${host} --port ${port} --strictPort`;
+  return `VITE_UVP_CHAIN_SERVICES_URL=http://product-api.test ${dev}`;
 }
 
 export default defineConfig({
@@ -74,16 +51,6 @@ export default defineConfig({
       use: {
         ...devices["Desktop Chrome"]
       }
-    },
-    ...(includeMobile
-      ? [
-          {
-            name: "mobile-smoke",
-            use: {
-              ...devices["Pixel 5"]
-            }
-          }
-        ]
-      : [])
+    }
   ]
 });

@@ -1,129 +1,72 @@
-import {
-  AlertCircle,
-  Bell,
-  ClipboardList,
-  Clock3,
-  FileCheck2,
-  FilePlus2,
-  Fingerprint,
-  FolderKanban,
-  RefreshCw,
-  ShieldCheck,
-  Wallet
-} from "lucide-react";
-import { useEffect, useMemo, useRef, useState } from "react";
+// 订单 app 的唯一工作台流程：钱包会话 → 开单 / 邀请接受 / 订单房间。
+// 客户端能力全部来自 @uvp-eth/uvp-client/browser；本文件只做路由与装配。
+
+import { ClipboardList, FilePlus2, FolderKanban } from "lucide-react";
+import { useEffect, useMemo, useState } from "react";
 import type { ReactElement } from "react";
-
-import {
-  createProductApiClient,
-  isWalletIdentityRequired,
-  persistWalletSessionToken,
-  readPersistedWalletSessionToken,
-  type ProductApiClient,
-  type ProductHomeData
-} from "./api/productApi";
-import { createOrderAppActions } from "./actions/orderAppActions";
-import { participantQueryFromSession, readParticipantSession, shortWallet } from "./auth/participant";
-import { NotificationCenter, useOrderAppNotifications } from "./notifications/NotificationCenter";
-import type { OrderAppNotificationDTO } from "./notifications/types";
+import { createProductClient, getBrowserEthereumProvider } from "@uvp-eth/uvp-client/browser";
 import { CreateOrderPage, InvitePage, OrderRoomPage } from "./kernel/pages";
-import { createPorts } from "./kernel/ports";
-import { createClient } from "./kernel/client";
+import { createPorts, type Ports } from "./kernel/ports";
+import { personalSignKernel, requestWalletAddressKernel } from "./kernel/signing";
 import { WalletLoginPanel } from "./onboarding/WalletLoginPanel";
-
-import { DecorationPage } from "./reader/DecorationPage";
-import { RegistrationPage } from "./registration";
-import { RequirementsPage } from "./requirements";
 import {
-  clearDecorationSearchParam,
   clearInviteSearchParams,
-  readDecorationEntryFromSearch,
   readInviteEntryFromSearch,
   readOrderAppRoute,
   routeHash,
-  type DecorationEntry,
   type InviteEntry,
-  type OrderAppRoute,
-  type OrderAppSection
+  type OrderAppRoute
 } from "./routes/appRoutes";
-import { personalSignWithInjectedWallet } from "./wallet/injectedWallet";
-import type { CreateOrderResult } from "./kernel/types";
-import "./app/collaboration-notifications.css";
+import {
+  createBrowserWalletSessionTokenStore,
+  createParticipantSession,
+  type ParticipantSession
+} from "./session";
 
-type LoadState =
-  | { readonly status: "loading" }
-  | { readonly status: "ready"; readonly data: ProductHomeData }
-  | { readonly status: "error"; readonly message: string }
-  | { readonly status: "unauthenticated"; readonly message: string };
+interface Runtime {
+  readonly session: ParticipantSession;
+  readonly ports: Ports;
+}
+
+type RuntimeState = { readonly ok: true; readonly runtime: Runtime } | { readonly ok: false; readonly message: string };
 
 export default function App() {
-  const clientState = useMemo<{ readonly api?: ProductApiClient; readonly message?: string }>(() => {
+  const runtimeState = useMemo<RuntimeState>(() => {
+    const baseUrl = (import.meta.env.VITE_UVP_CHAIN_SERVICES_URL ?? "").trim();
+    if (baseUrl.length === 0) {
+      return {
+        ok: false,
+        message:
+          "参与者服务地址未配置：请设置 VITE_UVP_CHAIN_SERVICES_URL。Order App 只连接真实参与者服务，没有本地样例数据回退。"
+      };
+    }
     try {
-      return {
-        api: createProductApiClient({
-          personalSign: (address, message) => personalSignWithInjectedWallet({ address, message })
-        })
-      };
+      const session = createParticipantSession({
+        baseUrl,
+        personalSign: personalSignKernel,
+        tokenStore: createBrowserWalletSessionTokenStore()
+      });
+      const client = createProductClient({
+        baseUrl,
+        getSessionToken: () => session.currentSessionToken()
+      });
+      return { ok: true, runtime: { session, ports: createPorts(client) } };
     } catch (error) {
-      return {
-        message: error instanceof Error ? error.message : "参与者服务地址未配置。"
-      };
+      return { ok: false, message: error instanceof Error ? error.message : String(error) };
     }
   }, []);
 
-  if (!clientState.api) {
-    return <UnconfiguredShell message={clientState.message ?? "参与者服务地址未配置。"} />;
+  if (!runtimeState.ok) {
+    return <UnconfiguredShell message={runtimeState.message} />;
   }
-  return <AppShell api={clientState.api} />;
+  return <AppShell runtime={runtimeState.runtime} />;
 }
 
-function UnconfiguredShell({ message }: { readonly message: string }) {
-  return (
-    <main className="app-shell">
-      <header className="topbar">
-        <div className="brand-block">
-          <span className="brand-mark" aria-hidden="true">
-            <ClipboardList />
-          </span>
-          <div>
-            <p>UVP Signal Console</p>
-            <h1>我的待办</h1>
-          </div>
-        </div>
-        <div className="topbar-actions">
-          <span className="source-badge source-missing">未连接</span>
-        </div>
-      </header>
-      <SystemBanner tone="warn" title="参与者服务未配置" text={message} />
-      <section className="empty-state" aria-label="我的待办">
-        <FileCheck2 aria-hidden="true" />
-        <h2>暂无待办</h2>
-        <p>连接参与者服务后，这里会显示与你的钱包或邀请身份匹配的订单任务。</p>
-      </section>
-    </main>
-  );
-}
-
-function AppShell({ api }: { readonly api: ProductApiClient }) {
-  const actions = useMemo(() => createOrderAppActions(api), [api]);
-  const kernel = useMemo(() => {
-    const client = createClient(() => api.currentSessionToken());
-    return { client, ports: createPorts(client) };
-  }, [api]);
-  const [session] = useState(() => readParticipantSession());
-  const [loadState, setLoadState] = useState<LoadState>({ status: "loading" });
-  const [sessionRestored] = useState(() => api.restoreSessionToken(readPersistedWalletSessionToken()));
+function AppShell({ runtime }: { readonly runtime: Runtime }) {
+  const [sessionToken, setSessionToken] = useState<string | undefined>(() => runtime.session.currentSessionToken());
   const [route, setRoute] = useState<OrderAppRoute>(() => readOrderAppRoute());
-  const requirementsSection = route.section === "requirements";
-  const [decorationEntry, setDecorationEntry] = useState<DecorationEntry | undefined>(() => readDecorationEntryFromSearch());
-  const [inviteEntry, setInviteEntry] = useState<InviteEntry | undefined>(() => readInviteEntryFromSearch());
-
-  const [notificationsOpen, setNotificationsOpen] = useState(false);
-  const [createdOrderNotice, setCreatedOrderNotice] = useState<
-    { readonly title: string; readonly orderId?: string | undefined } | undefined
-  >(undefined);
-  const createdOrderNoticeTimerRef = useRef<number | undefined>(undefined);
-  const loadSequenceRef = useRef(0);
+  const [invite, setInvite] = useState<InviteEntry | undefined>(() => readInviteEntryFromSearch());
+  const [notice, setNotice] = useState<string | undefined>(undefined);
 
   useEffect(() => {
     function handleHashChange() {
@@ -133,103 +76,34 @@ function AppShell({ api }: { readonly api: ProductApiClient }) {
     return () => window.removeEventListener("hashchange", handleHashChange);
   }, []);
 
-  useEffect(() => {
-    if (decorationEntry) {
-      return;
-    }
-    loadParticipantHome();
-  }, [api, session, sessionRestored, decorationEntry]);
+  const authenticated = sessionToken !== undefined;
+  const hasWallet = getBrowserEthereumProvider() !== undefined;
 
-  function loadParticipantHome(options: { readonly silent?: boolean } = {}) {
-    const sequence = loadSequenceRef.current + 1;
-    loadSequenceRef.current = sequence;
-    if (!options.silent) {
-      setLoadState({ status: "loading" });
-    }
-    void api.loadParticipantHome(participantQueryFromSession(session))
-      .then((data) => {
-        if (loadSequenceRef.current === sequence) {
-          setLoadState({ status: "ready", data });
-        }
-      })
-      .catch((error) => {
-        if (loadSequenceRef.current !== sequence) {
-          return;
-        }
-        if (isWalletIdentityRequired(error)) {
-          persistWalletSessionToken(undefined);
-          api.restoreSessionToken(undefined);
-          setLoadState({ status: "unauthenticated", message: error.message });
-          return;
-        }
-        setLoadState({
-          status: "error",
-          message: error instanceof Error ? error.message : "参与者服务加载失败"
-        });
-      });
+  async function login(): Promise<void> {
+    const address = await requestWalletAddressKernel();
+    await runtime.session.proveWalletControl(address);
+    setSessionToken(runtime.session.currentSessionToken());
   }
 
-  async function handleWalletLogin(): Promise<void> {
-    const address = await actions.requestWalletAddress();
-    await actions.proveWalletControl({ address });
-    loadParticipantHome();
+  function logout(): void {
+    runtime.session.restoreSessionToken(undefined);
+    setSessionToken(undefined);
+    setInvite(undefined);
   }
 
-  const data = loadState.status === "ready" ? loadState.data : undefined;
-  const selectedOrderId = route.orderId;
-
-  const notificationSessionToken = useMemo(() => () => api.currentSessionToken(), [api]);
-  const notificationState = useOrderAppNotifications(data, session, notificationSessionToken);
-
-  function navigate(nextRoute: OrderAppRoute) {
-    window.location.hash = routeHash(nextRoute);
-    setRoute(nextRoute);
+  function navigate(next: OrderAppRoute): void {
+    window.location.hash = routeHash(next);
+    setRoute(next);
   }
 
-  function handleRefresh(options: { readonly silent?: boolean } = {}) {
-    loadParticipantHome(options);
-  }
-
-  function handleSessionExpired(error: unknown): boolean {
-    if (!isWalletIdentityRequired(error)) {
-      return false;
-    }
-    persistWalletSessionToken(undefined);
-    api.restoreSessionToken(undefined);
-    setLoadState({ status: "unauthenticated", message: error.message });
-    return true;
-  }
-
-  function handleOpenNotification(notification: OrderAppNotificationDTO) {
-    void notificationState.markRead(notification);
-    navigate({
-      section: "tasks",
-      orderId: notification.orderId,
-      taskId: notification.taskId
-    });
-    setNotificationsOpen(false);
-  }
-
-  function handleInviteAccepted() {
+  function dismissInvite(): void {
     clearInviteSearchParams();
-    handleRefresh();
+    setInvite(undefined);
   }
 
-  function handleOrderCreated(result: CreateOrderResult) {
-    setCreatedOrderNotice({ title: `草稿 ${result.draftId} 已创建`, orderId: undefined });
-    if (createdOrderNoticeTimerRef.current !== undefined) {
-      window.clearTimeout(createdOrderNoticeTimerRef.current);
-    }
-    createdOrderNoticeTimerRef.current = window.setTimeout(() => {
-      setCreatedOrderNotice(undefined);
-      createdOrderNoticeTimerRef.current = undefined;
-    }, 20_000);
-  }
-
-  function dismissInviteEntry() {
-    clearInviteSearchParams();
-    setInviteEntry(undefined);
-    navigate({ section: "tasks" });
+  function handleInviteAccepted(): void {
+    dismissInvite();
+    navigate({ section: "orders" });
   }
 
   return (
@@ -240,177 +114,41 @@ function AppShell({ api }: { readonly api: ProductApiClient }) {
             <ClipboardList />
           </span>
           <div>
-            <p>UVP Signal Console</p>
-            <h1>我的待办</h1>
+            <p>UVP Order App</p>
+            <h1>订单工作台</h1>
           </div>
         </div>
         <div className="topbar-actions">
-          <SourceBadge source={data?.source} loading={loadState.status === "loading"} />
-          <button className="icon-button" onClick={() => handleRefresh()} type="button" aria-label="刷新">
-            <RefreshCw aria-hidden="true" />
-          </button>
+          <span className={`source-badge ${authenticated ? "source-real" : "source-missing"}`}>
+            {authenticated ? "已登录" : "未登录"}
+          </span>
+          {authenticated ? (
+            <button className="quiet-button" type="button" onClick={logout}>
+              退出登录
+            </button>
+          ) : null}
         </div>
       </header>
 
-      {loadState.status === "error" ? (
-        <SystemBanner tone="error" title="参与者服务加载失败" text={loadState.message} />
-      ) : null}
+      {notice ? <SystemBanner tone="info" title="草稿已创建" text={notice} /> : null}
 
-      {createdOrderNotice ? (
-        <SystemBanner
-          tone="info"
-          title="订单已创建"
-          text={`「${createdOrderNotice.title}」已提交创建，正在同步订单与任务；同步完成前可能暂时看不到新订单。`}
-        />
-      ) : null}
-
-      {decorationEntry ? (
-        <DecorationPage
-          api={api}
-          zhixuId={decorationEntry.zhixuId}
-          onEnterTasks={() => {
-            clearDecorationSearchParam();
-            setDecorationEntry(undefined);
-          }}
-        />
-      ) : route.inviteId || inviteEntry ? (
+      {!authenticated ? (
+        <WalletLoginPanel hasWallet={hasWallet} onLogin={login} />
+      ) : invite ? (
         <InvitePage
-          ports={kernel.ports}
-          inviteId={route.inviteId ?? inviteEntry?.inviteId ?? ""}
-          inviteToken={inviteEntry?.inviteToken}
+          ports={runtime.ports}
+          inviteId={invite.inviteId}
+          inviteToken={invite.inviteToken}
           onAccepted={handleInviteAccepted}
-          onRejected={clearInviteSearchParams}
-          onDismiss={dismissInviteEntry}
-        />
-      ) : route.section === "registration" ? (
-        <RegistrationPage
-          session={{ currentSessionToken: () => api.currentSessionToken() }}
-          wallet={actions}
-          initialAddress={data?.participant.walletAddress ?? session.walletAddress}
-          onBack={() => navigate({ section: "tasks", orderId: selectedOrderId })}
-        />
-      ) : route.section === "requirements" ? (
-        loadState.status === "unauthenticated" ? (
-          <WalletLoginPanel
-            hasWallet={actions.hasInjectedWallet()}
-            onLogin={handleWalletLogin}
-            onOpenRegistration={() => navigate({ section: "registration" })}
-          />
-        ) : (
-          <RequirementsPage
-            api={api}
-            actions={actions}
-            draftId={route.draftId}
-            taskId={route.taskId}
-            walletAddress={data?.participant.walletAddress ?? session.walletAddress}
-            onBack={() => navigate({ section: "tasks", orderId: selectedOrderId })}
-            onOpenDraft={(draftId) =>
-              navigate({
-                section: "requirements",
-                draftId,
-                taskId: route.taskId,
-                orderId: selectedOrderId
-              })
-            }
-            onSessionExpired={handleSessionExpired}
-            onSubmitted={() => handleRefresh({ silent: true })}
-          />
-        )
-      ) : route.section === "create" && loadState.status !== "unauthenticated" ? (
-        <CreateOrderPage
-          ports={kernel.ports}
-          defaultConfigId={import.meta.env.VITE_UVP_V3_CONFIG_ID}
-          defaultConfigVersion={import.meta.env.VITE_UVP_V3_CONFIG_VERSION}
-          onCreated={handleOrderCreated}
-          onBack={() => navigate({ section: "tasks", orderId: selectedOrderId })}
-        />
-      ) : loadState.status === "unauthenticated" ? (
-        <WalletLoginPanel
-          hasWallet={actions.hasInjectedWallet()}
-          onLogin={handleWalletLogin}
-          onOpenRegistration={() => navigate({ section: "registration" })}
+          onRejected={() => {
+            dismissInvite();
+            navigate({ section: "orders" });
+          }}
+          onDismiss={dismissInvite}
         />
       ) : (
         <>
-          <section className="participant-strip" aria-label="参与者信息">
-            <div>
-              <span className="overline">参与者</span>
-              <strong>{data?.participant.displayName ?? "加载中"}</strong>
-              <small>{data?.participant.roleLabels.join(" / ") || "等待身份匹配"}</small>
-            </div>
-            <div>
-              <span className="overline">钱包</span>
-              <strong>{shortWallet(data?.participant.walletAddress ?? session.walletAddress)}</strong>
-              <small>
-                {data
-                  ? data.tasks.length > 0
-                    ? `匹配 ${data.tasks.length} 个待办`
-                    : "已连接但暂无分配任务"
-                  : "用于匹配订单职责和提交签名"}
-              </small>
-            </div>
-            <button
-              className="quiet-button"
-              type="button"
-              onClick={() => navigate({ section: "registration", orderId: selectedOrderId })}
-              data-testid="open-registration-button"
-            >
-              <Fingerprint aria-hidden="true" />
-              注册与身份
-            </button>
-            <button
-              className="quiet-button notification-toggle"
-              type="button"
-              aria-expanded={notificationsOpen}
-              onClick={() => setNotificationsOpen((open) => !open)}
-            >
-              <Bell aria-hidden="true" />
-              通知{notificationState.unreadCount > 0 ? ` ${notificationState.unreadCount}` : ""}
-            </button>
-          </section>
-
-          {notificationsOpen ? (
-            <NotificationCenter
-              loadState={notificationState.loadState}
-              onMarkRead={(notification) => {
-                void notificationState.markRead(notification);
-              }}
-              onOpenNotification={handleOpenNotification}
-            />
-          ) : null}
-
-          <section className="metrics-grid" aria-label="工作概览">
-            <Metric label="待处理" value={data?.summary.openTaskCount ?? 0} icon={<FileCheck2 />} />
-            <Metric label="运行订单" value={data?.summary.orderCount ?? 0} icon={<FolderKanban />} />
-            <Metric label="受阻" value={data?.summary.blockedTaskCount ?? 0} icon={<AlertCircle />} />
-            <Metric label="已提交待确认" value={data?.summary.submittedTaskCount ?? 0} icon={<Clock3 />} />
-          </section>
-
-          <nav className="section-tabs" aria-label="参与者视图">
-            <SectionButton
-              active={route.section === "tasks"}
-              label="我的待办"
-              icon={<ClipboardList />}
-              onClick={() => navigate({ section: "tasks", orderId: selectedOrderId })}
-            />
-            <SectionButton
-              active={route.section === "orders"}
-              label="订单"
-              icon={<FolderKanban />}
-              onClick={() => navigate({ section: "orders", orderId: selectedOrderId })}
-            />
-            <SectionButton
-              active={requirementsSection}
-              label="要求"
-              icon={<FileCheck2 />}
-              onClick={() =>
-                navigate({
-                  section: "requirements",
-                  draftId: route.draftId,
-                  orderId: selectedOrderId
-                })
-              }
-            />
+          <nav className="section-tabs" aria-label="工作台视图">
             <SectionButton
               active={route.section === "create"}
               label="开单"
@@ -418,37 +156,32 @@ function AppShell({ api }: { readonly api: ProductApiClient }) {
               onClick={() => navigate({ section: "create" })}
             />
             <SectionButton
-              active={route.section === "proof"}
-              label="证明"
-              icon={<ShieldCheck />}
-              onClick={() => navigate({ section: "proof", orderId: selectedOrderId })}
+              active={route.section === "orders"}
+              label="订单房间"
+              icon={<FolderKanban />}
+              onClick={() => navigate({ section: "orders" })}
             />
           </nav>
-
-          <section className="workspace" aria-busy={loadState.status === "loading"}>
-            {loadState.status === "loading" ? (
-              <LoadingState />
-            ) : (
+          <section className="workspace">
+            {route.section === "orders" ? (
               <OrderRoomPage
-                ports={kernel.ports}
-                orderId={selectedOrderId}
-                onBack={() => navigate({ section: "tasks", orderId: selectedOrderId })}
+                ports={runtime.ports}
+                orderId={route.orderId}
+                onBack={() => navigate({ section: "create" })}
+              />
+            ) : (
+              <CreateOrderPage
+                ports={runtime.ports}
+                defaultConfigId={import.meta.env.VITE_UVP_CONFIG_ID}
+                defaultConfigVersion={import.meta.env.VITE_UVP_CONFIG_VERSION}
+                onCreated={(result) => setNotice(`草稿 ${result.draftId} 已创建；一次性邀请链接见下方「邀请链接」。`)}
+                onBack={() => navigate({ section: "create" })}
               />
             )}
           </section>
         </>
       )}
     </main>
-  );
-}
-
-function Metric({ label, value, icon }: { readonly label: string; readonly value: number; readonly icon: ReactElement }) {
-  return (
-    <div className="metric">
-      <span aria-hidden="true">{icon}</span>
-      <strong>{value}</strong>
-      <small>{label}</small>
-    </div>
   );
 }
 
@@ -459,7 +192,7 @@ function SectionButton({
   onClick
 }: {
   readonly active: boolean;
-  readonly label: OrderAppSection extends never ? never : string;
+  readonly label: string;
   readonly icon: ReactElement;
   readonly onClick: () => void;
 }) {
@@ -471,17 +204,42 @@ function SectionButton({
   );
 }
 
-function SourceBadge({ source, loading }: { readonly source?: ProductHomeData["source"] | undefined; readonly loading: boolean }) {
-  if (loading) {
-    return <span className="source-badge source-loading">加载中</span>;
-  }
-  if (!source) {
-    return <span className="source-badge source-missing">未连接</span>;
-  }
-  return <span className="source-badge source-real">已连接</span>;
+function UnconfiguredShell({ message }: { readonly message: string }) {
+  return (
+    <main className="app-shell">
+      <header className="topbar">
+        <div className="brand-block">
+          <span className="brand-mark" aria-hidden="true">
+            <ClipboardList />
+          </span>
+          <div>
+            <p>UVP Order App</p>
+            <h1>订单工作台</h1>
+          </div>
+        </div>
+        <div className="topbar-actions">
+          <span className="source-badge source-missing">未配置</span>
+        </div>
+      </header>
+      <SystemBanner tone="warn" title="参与者服务未配置" text={message} />
+      <section className="empty-state" aria-label="参与者服务未配置">
+        <ClipboardList aria-hidden="true" />
+        <h2>暂无订单视图</h2>
+        <p>配置参与者服务地址后，这里会显示与当前钱包会话匹配的开单、邀请与订单房间。</p>
+      </section>
+    </main>
+  );
 }
 
-function SystemBanner({ tone, title, text }: { readonly tone: "info" | "warn" | "error"; readonly title: string; readonly text: string }) {
+function SystemBanner({
+  tone,
+  title,
+  text
+}: {
+  readonly tone: "info" | "warn" | "error";
+  readonly title: string;
+  readonly text: string;
+}) {
   return (
     <section className={`system-banner system-banner-${tone}`} role={tone === "error" ? "alert" : "status"}>
       <strong>{title}</strong>
@@ -489,14 +247,3 @@ function SystemBanner({ tone, title, text }: { readonly tone: "info" | "warn" | 
     </section>
   );
 }
-
-function LoadingState() {
-  return (
-    <section className="empty-state">
-      <RefreshCw className="spin" aria-hidden="true" />
-      <h2>正在加载待办</h2>
-      <p>正在读取参与者订单、任务和证明摘要。</p>
-    </section>
-  );
-}
-

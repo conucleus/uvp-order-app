@@ -10,19 +10,12 @@
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview",
     "test": "tsx --test \"src/**/*.test.ts\"",
-    "test:full-mode-gate": "tsx --test src/testing/orderAppFullModeGate.test.ts",
-    "test:e2e": "playwright test e2e/order-app.smoke.spec.ts e2e/order-app.registration.spec.ts e2e/order-app.requirements.spec.ts",
-    "test:e2e:api-stub": "UVP_ORDER_APP_E2E_PROFILE=api-stub UVP_ORDER_APP_E2E_PORT=4184 playwright test e2e/order-app.mobile.spec.ts",
-    "test:e2e:fail-closed": "UVP_ORDER_APP_E2E_PROFILE=fail-closed UVP_ORDER_APP_E2E_PORT=4186 playwright test e2e/order-app.fail-closed.spec.ts",
-    "test:e2e:full": "UVP_ORDER_APP_E2E_PROFILE=full playwright test e2e/order-app.full.spec.ts --project=chromium",
-    "test:e2e:mobile": "UVP_ORDER_APP_E2E_PROFILE=api-stub UVP_ORDER_APP_E2E_MOBILE=1 UVP_ORDER_APP_E2E_PORT=4185 playwright test e2e/order-app.mobile.spec.ts --project=mobile-smoke",
-    "test:e2e:readiness": "pnpm test:e2e:api-stub && pnpm test:e2e:mobile && pnpm test:e2e:fail-closed",
-    "readiness": "pnpm typecheck && pnpm build && pnpm test && pnpm test:e2e && pnpm test:e2e:readiness"
+    "test:e2e": "playwright test",
+    "test:e2e:configured": "UVP_ORDER_APP_E2E_PROFILE=configured playwright test",
+    "readiness": "pnpm typecheck && pnpm build && pnpm test && pnpm test:e2e && pnpm test:e2e:configured"
   },
   "dependencies": {
     "@uvp-eth/uvp-client": "workspace:*",
-    "@uvp-eth/product-dto": "workspace:*",
-    "@uvp-eth/protocol-bindings": "workspace:*",
     "lucide-react": "^1.7.0",
     "react": "^19.2.5",
     "react-dom": "^19.2.5"

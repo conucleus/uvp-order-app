@@ -1,18 +1,16 @@
-import { Fingerprint, KeyRound, Wallet } from "lucide-react";
+import { KeyRound, Wallet } from "lucide-react";
 import { useState } from "react";
 
 /**
- * 非 local 部署的参与者面登录入口：钱包登录通道（连接钱包 → challenge →
- * personal_sign → verify → 重载待办）。
+ * 参与者面登录入口：连接钱包 → challenge → personal_sign → verify → 会话
+ * token 写入宿主存储。登录失败按错误信息如实呈现，不自动重试。
  */
 export function WalletLoginPanel({
   hasWallet,
-  onLogin,
-  onOpenRegistration
+  onLogin
 }: {
   readonly hasWallet: boolean;
   readonly onLogin: () => Promise<void>;
-  readonly onOpenRegistration?: (() => void) | undefined;
 }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | undefined>();
@@ -37,7 +35,7 @@ export function WalletLoginPanel({
       <KeyRound aria-hidden="true" />
       <h2>需要钱包登录</h2>
       <p>
-        此部署要求钱包会话锚定参与者身份。连接浏览器钱包完成一次签名即可查看你的订单与待办；
+        连接浏览器钱包完成一次签名即可进入你的订单工作台；
         登录在本浏览器内保持（跨标签页共用），过期后重新签名。
       </p>
       {hasWallet ? (
@@ -49,12 +47,6 @@ export function WalletLoginPanel({
         <p>未发现浏览器钱包：请先安装钱包扩展（如 MetaMask）后刷新本页。</p>
       )}
       {error ? <p role="alert">{error}</p> : null}
-      {onOpenRegistration ? (
-        <button className="quiet-button" type="button" onClick={onOpenRegistration} data-testid="open-registration-button">
-          <Fingerprint aria-hidden="true" />
-          注册与身份
-        </button>
-      ) : null}
     </section>
   );
 }

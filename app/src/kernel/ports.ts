@@ -1,5 +1,5 @@
 // 端口实现：把 uvp-client/browser 的 transport 错误收敛成宿主可分支的结果；
-// 服务端缺的读面返回 not_available + TODO，不用 v0 语义补位。
+// 服务端缺的读面返回 not_available + 精确缺口。
 
 import {
   buildCreateOrderDraftInput,
@@ -200,7 +200,7 @@ export function failure(error: unknown): Failure {
 export function notAvailable(todo: string): Failure {
   return {
     kind: "not_available",
-    message: "该读面尚未就绪；页面不会用旧 v0 语义或样例数据补位。",
+    message: "该读面尚未就绪；页面不会用样例数据补位。",
     todo
   };
 }

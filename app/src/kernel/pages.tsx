@@ -220,7 +220,7 @@ export function CreateOrderPage(props: {
       <fieldset>
         <legend>配置版本</legend>
         {configId.trim().length === 0 || version.trim().length === 0 ? (
-          <p className="fineprint">未配置默认配置版本：请填写 configId/version（或由宿主注入 VITE_UVP_V3_CONFIG_ID/VERSION）。</p>
+          <p className="fineprint">未配置默认配置版本：请填写 configId/version（或由宿主注入 VITE_UVP_CONFIG_ID/VERSION）。</p>
         ) : null}
         <label>configId <input value={configId} placeholder="例如 example/order-config" onChange={(event) => setConfigId(event.target.value)} /></label>
         <label>version <input value={version} placeholder="例如 1.0.0" onChange={(event) => setVersion(event.target.value)} /></label>
