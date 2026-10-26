@@ -1,4 +1,4 @@
-import type { ProductSubmitTypedData } from "@uvp-eth/executor-kit/participant";
+import type { ProductSubmitTypedData } from "@uvp-eth/protocol-bindings";
 
 export function cleanString(value: unknown): string | undefined {
   const trimmed = typeof value === "string" ? value.trim() : "";
@@ -28,7 +28,7 @@ export function isContentAddressedReference(value: string): boolean {
     trimmed.startsWith("bafy");
 }
 
-export { deadlineSortMs, formatDeadlineUtc, parseDeadlineUtcMs } from "@uvp-eth/order-kernel/tasks/deadline";
+export { deadlineSortMs, formatDeadlineUtc, parseDeadlineUtcMs } from "@uvp-eth/order-kernel";
 
 export interface SignDomainEnv {
   readonly VITE_UVP_STATE_MACHINE_ADDRESS?: string | undefined;

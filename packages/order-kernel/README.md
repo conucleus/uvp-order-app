@@ -1,30 +1,22 @@
 # @uvp-eth/order-kernel
 
-通用 headless 订单内核（public 包）。只放可跨宿主复用的能力：
+通用 headless 订单内核（public 包）：只放可跨宿主复用、与行业无关的能力。
 
-- Product API transport 与传输 DTO 类型（订单、任务、证据、要求包、邀请、开单草稿、装修读面）；
-- 参与者会话的纯读模型；
-- 装修/截止时间等纯展示派生；
-- EIP-1193 provider / EIP-712 签名类型与钱包错误类型。
+## 出口（冻结）
 
-不含 React 组件、CSS、路由、页面，也不含行业/宿主专用文案。构建期 env 与
-浏览器 `localStorage` 由宿主通过参数注入；kernel 本身不读 `import.meta.env`。
+| 子路径 | 内容 |
+| --- | --- |
+| `@uvp-eth/order-kernel` | 根入口：下面四组 + deadline/format 纯派生 |
+| `@uvp-eth/order-kernel/product/kernel` | V3 订单域客户端（配置/草稿/邀请/finalize/订单/阶段/任务读） |
+| `@uvp-eth/order-kernel/wallet` | EIP-1193 provider 最小形状、EIP-712 信封/域预期类型、钱包错误类型 |
+| `@uvp-eth/order-kernel/session` | 参与者会话纯读模型（`ParticipantSession`、`shortWallet`） |
 
-## 出口
+根入口另外导出 `parseDeadlineUtcMs`/`deadlineSortMs`/`formatDeadlineUtc` 与
+`formatBaseUnits`。`package.json` 的 `exports` 只有这四个键；不再有 `./*` 通配。
 
-```ts
-import {
-  createProductApiClient,
-  type ProductApiClient,
-  type ProductApiClientOptions
-} from "@uvp-eth/order-kernel/product";
-
-
-import { readParticipantSession } from "@uvp-eth/order-kernel/session/participant";
-import type { Eip1193Provider } from "@uvp-eth/order-kernel/wallet/provider";
-```
-
-`exports` 同时提供根入口 `@uvp-eth/order-kernel` 和上述子路径。
+不含 React 组件、CSS、路由、页面、行业字段，也不含 env/localStorage 策略：
+构建期 env、浏览器存储、钱包连接/会话建立（challenge → personal_sign → verify）
+都是宿主的事，kernel 只接收显式参数。
 
 ## Product 订单域客户端
 
@@ -66,7 +58,8 @@ const client = createProductClient({
 
 错误统一为 `ProductError`：`status` + `kind`（`unauthorized/forbidden/not_found/conflict/
 gone/invalid_terms/unavailable/timeout/invalid_response/transport/...`）+ 服务端短码
-`errorCode`/`details`。`isWalletIdentityRequiredKernel` 用于 401 切会话登录；超时是「结果未知」，
+`errorCode`/`details`。错误码归服务端所有，kernel 不镜像码表：`errorCode` 原样透出。
+`isWalletIdentityRequiredKernel` 用于 401 切会话登录；超时是「结果未知」，
 不得自动重发。finalize 的计划绑定失败会原样透出：409 `published_plan_missing`
 （配置版本没登记 plan，`kind:"conflict"`，重试无用）、503 `published_plan_unavailable`
 （plan 查询失败，`kind:"unavailable"`，可重试）、503 `published_plan_invalid`（返回的
@@ -129,4 +122,9 @@ standardRef?, slots?}` 映射到服务端 `StageTermsInput`：
   `published_plan_unavailable`、503 `published_plan_invalid`，kernel 原样透出。
 - 发布配置时 `planId`/`planHash` 必须成对出现（服务端 422 `invalid_request`）。
 - 配置发布/草稿/邀请都需要已锚定的钱包会话（含 `previewInvite`）；kernel 只传
-  `x-uvp-store-session`，会话建立仍由现有 `proveWalletControl` 负责。
+  `x-uvp-store-session`，会话建立由宿主负责。
+
+## 依赖
+
+`@uvp-eth/product-dto`（DTO 单源）与 `@uvp-eth/protocol-bindings`（EIP-712/ABI 单源）。
+kernel 不依赖 `@uvp-eth/executor-kit`，也不依赖任何应用/行业包。

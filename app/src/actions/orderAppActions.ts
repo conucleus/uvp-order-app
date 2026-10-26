@@ -1,4 +1,4 @@
-import type { ProductSubmitTypedData } from "@uvp-eth/executor-kit/participant";
+import type { ProductSubmitTypedData } from "@uvp-eth/protocol-bindings";
 import type {
   CreateEvidenceInput,
   Eip712TypedDataDTO,

@@ -17,88 +17,6 @@ export type ProductErrorKind =
   | "transport"
   | "unknown";
 
-/** 服务端 OrderErrorCode 的镜像（chain-services service/src/order/types.ts）。 */
-export const PRODUCT_ERROR_CODES = [
-  "invalid_request",
-  "invalid_address",
-  "invalid_amount",
-  "invalid_fee_bps",
-  "invalid_deadline",
-  "invalid_window_value",
-  "window_override_forbidden",
-  "invalid_stage_subset",
-  "invalid_stage_terms",
-  "invalid_final_standard_hash",
-  "invalid_invite_token",
-  "invalid_invite_signature",
-  "stage_terms_mismatch",
-  "invite_nonce_mismatch",
-  "wallet_identity_required",
-  "wrong_wallet",
-  "config_not_found",
-  "config_not_published",
-  "config_publish_forbidden",
-  "config_hash_mismatch",
-  "config_version_exists",
-  "config_version_not_draft",
-  "config_already_published",
-  "config_already_deprecated",
-  "order_draft_not_found",
-  "order_not_found",
-  "stage_not_found",
-  "slot_not_found",
-  "invite_not_found",
-  "invite_expired",
-  "invite_not_active",
-  "invite_already_active",
-  "invite_already_accepted",
-  "slot_already_accepted",
-  "stage_already_accepted",
-  "stage_subset_immutable",
-  "draft_frozen",
-  "order_already_triggered",
-  "required_slots_incomplete",
-  "order_anchor_unavailable",
-  "idempotency_key_reuse",
-  "stage_scope_forbidden",
-  "wallet_scope_forbidden",
-  "visibility_denied",
-  "projection_unavailable",
-  "instruction_projection_unavailable",
-  "handle_not_found",
-  "resource_forbidden",
-  "resource_parse_failed",
-  "resource_unavailable",
-  "resolver_unavailable",
-  "signal_not_allowed",
-  "signal_capability_missing",
-  "plan_capability_unavailable",
-  "birth_transport_unavailable",
-  "birth_route_missing",
-  "birth_signer_unavailable",
-  "birth_signer_mismatch",
-  "birth_broadcast_failed",
-  "finalize_signature_required",
-  "finalize_not_prepared",
-  "finalize_authorization_expired",
-  "finalize_authorization_mismatch",
-  "fee_override_forbidden",
-  "stage_skipped",
-  "published_plan_missing",
-  "published_plan_invalid",
-  "published_plan_unavailable",
-  "trigger_transport_unavailable",
-  "trigger_result_invalid"
-] as const;
-
-export type ProductErrorCode = (typeof PRODUCT_ERROR_CODES)[number];
-
-const KNOWN_CODES: ReadonlySet<string> = new Set(PRODUCT_ERROR_CODES);
-
-export function isKnownProductErrorCode(value: string): value is ProductErrorCode {
-  return KNOWN_CODES.has(value);
-}
-
 export interface ProductErrorInput {
   readonly status: number;
   readonly endpoint: string;
@@ -142,11 +60,6 @@ export class ProductError extends Error {
     return this.kind === "unavailable" || this.kind === "timeout";
   }
 
-  get knownErrorCode(): ProductErrorCode | undefined {
-    return this.errorCode !== undefined && isKnownProductErrorCode(this.errorCode)
-      ? this.errorCode
-      : undefined;
-  }
 }
 
 export function isProductError(value: unknown): value is ProductError {

@@ -1,5 +1,5 @@
 import type { ChainProofRowDTO } from "@uvp-eth/product-dto";
-import type { ProductSubmitTypedData } from "@uvp-eth/executor-kit/participant";
+import type { ProductSubmitTypedData } from "@uvp-eth/protocol-bindings";
 import type { SubmissionPhase } from "../../shared/chain/submission/phase-machine";
 
 export interface PreparedTaskSubmit {

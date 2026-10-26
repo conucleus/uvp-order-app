@@ -1,12 +1,9 @@
-// @uvp-eth/order-kernel：通用 headless 订单内核。
-// 只包含 Product API transport、阶段托管读写、参与者会话与钱包签名接口；
-// 不含 React 组件、CSS、路由、页面或任何行业/宿主专用文案。
+// @uvp-eth/order-kernel：通用 headless 订单内核。公共出口只有四组：
+// product/kernel（V3 transport）、wallet（纯类型）、session（纯读模型）与
+// deadline/format 纯派生；不含页面、路由、env/localStorage 策略或行业字段。
 
-export * from "./product";
 export * from "./product/kernel";
-export * from "./decoration/types";
+export * from "./wallet";
+export * from "./session";
 export * from "./tasks/deadline";
-export * from "./session/participant";
-export * from "./wallet/provider";
-export * from "./wallet/types";
-export * from "./wallet/errors";
+export * from "./format";

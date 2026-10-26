@@ -8,26 +8,22 @@ import {
   STAGE_RESOURCE_PATCH_DOMAIN_NAME,
   STAGE_RESOURCE_PATCH_DOMAIN_VERSION,
   STAGE_RESOURCE_PATCH_PRIMARY_TYPE,
-  requestProductSubmitSignature,
-  type ProductSubmitTypedData
-} from "@uvp-eth/executor-kit/participant";
-import {
   isUserRejectedRequestError,
   validateTypedDataForSigning,
+  type ProductSubmitTypedData
 } from "@uvp-eth/protocol-bindings";
+import { requestProductSubmitSignature } from "@uvp-eth/executor-kit/participant";
 import {
   getBrowserEthereumProvider,
-  type Eip1193Provider
-} from "@uvp-eth/order-kernel/wallet/provider";
-import {
+  InjectedWalletError,
   UnsupportedWalletTargetError,
   walletConnectorFor,
+  type Eip1193Provider,
   type GenericTypedData,
   type TypedDataDomainExpectation,
   type WalletConnector,
   type WalletTarget
-} from "@uvp-eth/order-kernel/wallet/types";
-import { InjectedWalletError } from "@uvp-eth/order-kernel/wallet/errors";
+} from "@uvp-eth/order-kernel/wallet";
 import { connectWalletAddress, personalSignWithProvider } from "../shared/chain/wallet/connect";
 import { ChainWalletError } from "../shared/chain/wallet/errors";
 import type { WalletErrorCode } from "../shared/chain/wallet/errors";

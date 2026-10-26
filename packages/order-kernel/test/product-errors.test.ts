@@ -44,7 +44,6 @@ describe("product error mapping", () => {
     assert.equal(error.kind, "conflict");
     assert.equal(error.status, 409);
     assert.equal(error.errorCode, "invite_not_active");
-    assert.equal(error.knownErrorCode, "invite_not_active");
     assert.equal(error.retryable, false);
     assert.match(error.endpoint, /\/product\/v3\/invites\/invite-1\/preview$/u);
   });
@@ -93,7 +92,7 @@ describe("product error mapping", () => {
       ).prepareFinalize("draft-1")
     );
     assert.equal(missing.kind, "conflict");
-    assert.equal(missing.knownErrorCode, "published_plan_missing");
+    assert.equal(missing.errorCode, "published_plan_missing");
     assert.equal(missing.retryable, false);
 
     const unavailable = await expectError(() =>
@@ -103,7 +102,7 @@ describe("product error mapping", () => {
       ).prepareFinalize("draft-1")
     );
     assert.equal(unavailable.kind, "unavailable");
-    assert.equal(unavailable.knownErrorCode, "published_plan_unavailable");
+    assert.equal(unavailable.errorCode, "published_plan_unavailable");
     assert.equal(unavailable.retryable, true);
   });
 
@@ -295,7 +294,7 @@ describe("product transport", () => {
       })
     );
     assert.equal(error.kind, "invalid_terms");
-    assert.equal(error.knownErrorCode, "fee_override_forbidden");
+    assert.equal(error.errorCode, "fee_override_forbidden");
     assert.equal(error.retryable, false);
   });
 });

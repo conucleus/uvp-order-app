@@ -1,7 +1,7 @@
 // 钱包签名的公有类型面：EIP-712 信封、连接器目标与域预期。浏览器注入钱包
 // 的具体实现留在宿主适配层；本模块只定义可被任意宿主实现的接口与失败类。
 
-import type { ProductSubmitTypedData } from "@uvp-eth/executor-kit/participant";
+import type { ProductSubmitTypedData } from "@uvp-eth/protocol-bindings";
 import type { Eip1193Provider } from "./provider";
 
 export type WalletTarget = "evm" | "solana";

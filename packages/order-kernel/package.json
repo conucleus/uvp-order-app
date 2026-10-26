@@ -1,16 +1,15 @@
 {
   "name": "@uvp-eth/order-kernel",
   "version": "0.1.0",
-  "description": "Headless order kernel: Product API transport, participant session and wallet interfaces.",
+  "description": "Headless order kernel: V3 product transport, participant session read model and wallet interfaces.",
   "license": "Apache-2.0",
   "type": "module",
   "sideEffects": false,
   "exports": {
     ".": "./src/index.ts",
-    "./product": "./src/product/index.ts",
     "./product/kernel": "./src/product/kernel/index.ts",
-    "./product/kernel/*": "./src/product/kernel/*.ts",
-    "./*": "./src/*.ts"
+    "./wallet": "./src/wallet/index.ts",
+    "./session": "./src/session/index.ts"
   },
   "types": "./src/index.ts",
   "files": [
@@ -22,7 +21,6 @@
     "test": "tsx --test test/*.test.ts"
   },
   "dependencies": {
-    "@uvp-eth/executor-kit": "workspace:*",
     "@uvp-eth/product-dto": "workspace:*",
     "@uvp-eth/protocol-bindings": "workspace:*"
   },
