@@ -4,4 +4,4 @@ packages:
   # 本 workspace，uvp-client/app 的 workspace:* 才能解析。
   - "../uvp-protocol/packages/product-dto"
   - "../uvp-protocol/packages/protocol-bindings"
-  - "../uvp-executor-kit/package"
+  - "../uvp-client/package"
