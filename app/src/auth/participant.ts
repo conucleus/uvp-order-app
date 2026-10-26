@@ -2,11 +2,11 @@
 // 都在宿主（kernel 只保留纯读模型类型）。环境覆写只在开发运行时放行。
 
 import type { ParticipantQueryInput } from "../api/productApi";
-import type { ParticipantSession } from "@uvp-eth/order-kernel/session";
+import type { ParticipantSession } from "@uvp-eth/uvp-client/browser";
 
 export type { ParticipantSession };
 
-export { shortWallet } from "@uvp-eth/order-kernel/session";
+export { shortWallet } from "@uvp-eth/uvp-client/browser";
 
 export interface SessionStorageLike {
   getItem(key: string): string | null;

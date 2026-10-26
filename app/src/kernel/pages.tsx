@@ -9,13 +9,13 @@ import type {
   StageInvitePreview,
   StageViewResponse,
   TaskListView
-} from "@uvp-eth/order-kernel/product/kernel";
+} from "@uvp-eth/uvp-client/browser";
 import {
   summarizeInviteAcceptTypedData,
   summarizeOrderFinalizeTypedData,
   verifyInviteAcceptTypedData,
   verifyOrderFinalizeTypedData
-} from "@uvp-eth/order-kernel/product/kernel";
+} from "@uvp-eth/uvp-client/browser";
 import type { Ports } from "./ports";
 import { requestWalletAddressKernel, signTypedDataKernel, SigningError } from "./signing";
 import {

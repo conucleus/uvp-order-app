@@ -28,7 +28,7 @@ export function isContentAddressedReference(value: string): boolean {
     trimmed.startsWith("bafy");
 }
 
-export { deadlineSortMs, formatDeadlineUtc, parseDeadlineUtcMs } from "@uvp-eth/order-kernel";
+export { deadlineSortMs, formatDeadlineUtc, parseDeadlineUtcMs } from "@uvp-eth/uvp-client/browser";
 
 export interface SignDomainEnv {
   readonly VITE_UVP_STATE_MACHINE_ADDRESS?: string | undefined;

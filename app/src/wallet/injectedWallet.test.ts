@@ -3,7 +3,7 @@ import { describe, it } from "node:test";
 import { buildProductSubmitTypedData } from "@uvp-eth/protocol-bindings";
 import {
   InjectedWalletError,
-  UnsupportedWalletTargetError,
+  UnsupportedChainTargetError,
   getWalletConnector,
   signProductSubmitWithInjectedWallet,
   signTypedDataWithInjectedWallet,
@@ -69,7 +69,7 @@ describe("injected wallet signing", () => {
     assert.equal(getWalletConnector().target, "evm");
     assert.throws(
       () => getWalletConnector("solana"),
-      (error) => error instanceof UnsupportedWalletTargetError && error.target === "solana"
+      (error) => error instanceof UnsupportedChainTargetError && error.target === "solana"
     );
   });
 

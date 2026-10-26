@@ -1,7 +1,7 @@
 // 端口类型：order-app 只依赖这些结果类型；服务端缺的读面用 not_available
 // + 精确 TODO 表达，不用旧 v0 语义补位、不伪造成功。
 
-import type { FlatConfig, FlatStage } from "@uvp-eth/order-kernel/product/kernel";
+import type { FlatConfig, FlatStage } from "@uvp-eth/uvp-client/browser";
 import type { StageStandardRef } from "@uvp-eth/product-dto";
 
 export type { FlatConfig, FlatStage };

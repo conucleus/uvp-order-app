@@ -12,18 +12,18 @@ import {
   validateTypedDataForSigning,
   type ProductSubmitTypedData
 } from "@uvp-eth/protocol-bindings";
-import { requestProductSubmitSignature } from "@uvp-eth/executor-kit/participant";
+import { requestProductSubmitSignature } from "@uvp-eth/uvp-client/browser";
 import {
   getBrowserEthereumProvider,
   InjectedWalletError,
-  UnsupportedWalletTargetError,
+  UnsupportedChainTargetError,
   walletConnectorFor,
   type Eip1193Provider,
   type GenericTypedData,
   type TypedDataDomainExpectation,
   type WalletConnector,
   type WalletTarget
-} from "@uvp-eth/order-kernel/wallet";
+} from "@uvp-eth/uvp-client/browser";
 import { connectWalletAddress, personalSignWithProvider } from "../shared/chain/wallet/connect";
 import { ChainWalletError } from "../shared/chain/wallet/errors";
 import type { WalletErrorCode } from "../shared/chain/wallet/errors";
@@ -36,7 +36,7 @@ import type { TypedDataMismatchTexts } from "../shared/chain/wallet/typed-data";
 
 export type { Eip1193Provider, ProductSubmitTypedData };
 export type { GenericTypedData, TypedDataDomainExpectation, WalletConnector, WalletTarget };
-export { UnsupportedWalletTargetError, InjectedWalletError };
+export { UnsupportedChainTargetError, InjectedWalletError };
 
 declare global {
   interface Window {

@@ -20,8 +20,7 @@
     "readiness": "pnpm typecheck && pnpm build && pnpm test && pnpm test:e2e && pnpm test:e2e:readiness"
   },
   "dependencies": {
-    "@uvp-eth/executor-kit": "workspace:*",
-    "@uvp-eth/order-kernel": "workspace:*",
+    "@uvp-eth/uvp-client": "workspace:*",
     "@uvp-eth/product-dto": "workspace:*",
     "@uvp-eth/protocol-bindings": "workspace:*",
     "lucide-react": "^1.7.0",

@@ -12,7 +12,7 @@ import {
   buildProductSubmitTypedData,
   STAGE_EXECUTOR_PATCH_DOMAIN_NAME,
   STAGE_EXECUTOR_PATCH_DOMAIN_VERSION
-} from "@uvp-eth/executor-kit/participant";
+} from "@uvp-eth/protocol-bindings";
 import type { ProductTaskWithAddOns } from "../src/tasks/model/addOnTypes";
 
 export type { ProductTaskWithAddOns };

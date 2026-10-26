@@ -4,7 +4,7 @@
 import {
   createProductClient,
   type ProductClient
-} from "@uvp-eth/order-kernel/product/kernel";
+} from "@uvp-eth/uvp-client/browser";
 
 export function createClient(getSessionToken: () => string | undefined): ProductClient {
   const baseUrl = import.meta.env?.VITE_UVP_CHAIN_SERVICES_URL;

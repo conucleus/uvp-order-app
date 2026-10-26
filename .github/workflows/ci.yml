@@ -31,7 +31,7 @@ jobs:
           submodules: recursive
           token: ${{ secrets.CI_SUBMODULE_TOKEN || github.token }}
 
-      # app 依赖 @uvp-eth/executor-kit / product-dto / protocol-bindings
+      # app 依赖 @uvp-eth/uvp-client / product-dto / protocol-bindings
       # （均 workspace:*），本仓 workspace 不含它们——姊妹仓检出 + 合成
       # 安装根。跨仓私有 checkout 用伞仓 CI_SUBMODULE_TOKEN 模式；ref 用
       # 默认分支，同 uvp-core 仓既有 ci.yml 检出姊妹仓的形态。
@@ -43,11 +43,11 @@ jobs:
           fetch-depth: 1
           token: ${{ secrets.CI_SUBMODULE_TOKEN || github.token }}
 
-      - name: Checkout uvp-executor-kit (executor-kit)
+      - name: Checkout uvp-client
         uses: actions/checkout@v4
         with:
-          repository: conucleus/uvp-executor-kit
-          path: uvp-executor-kit
+          repository: conucleus/uvp-client
+          path: uvp-client
           fetch-depth: 1
           token: ${{ secrets.CI_SUBMODULE_TOKEN || github.token }}
 
@@ -60,7 +60,7 @@ jobs:
             - "uvp-order-app/app"
             - "uvp-protocol/packages/product-dto"
             - "uvp-protocol/packages/protocol-bindings"
-            - "uvp-executor-kit/package"
+            - "uvp-client/package"
           EOF
           printf '{"name":"ci-workspace","private":true,"packageManager":"pnpm@9.15.0"}' > package.json
 

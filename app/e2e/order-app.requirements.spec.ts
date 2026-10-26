@@ -4,7 +4,7 @@
  */
 import { createHash } from "node:crypto";
 import { expect, test, type Page, type Route } from "@playwright/test";
-import { buildProductSubmitTypedData } from "@uvp-eth/executor-kit/participant";
+import { buildProductSubmitTypedData } from "@uvp-eth/protocol-bindings";
 import { orderRequirementsConsentMessage } from "@uvp-eth/product-dto";
 import { participantWallet, productApiBaseUrl } from "./product-api-stub";
 

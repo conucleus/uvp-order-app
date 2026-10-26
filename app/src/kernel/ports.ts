@@ -1,4 +1,4 @@
-// 端口实现：把 order-kernel product/kernel 的 transport 错误收敛成宿主可分支的结果；
+// 端口实现：把 uvp-client/browser 的 transport 错误收敛成宿主可分支的结果；
 // 服务端缺的读面返回 not_available + TODO，不用 v0 语义补位。
 
 import {
@@ -6,7 +6,7 @@ import {
   flattenConfigVersion,
   isProductError,
   type ProductClient
-} from "@uvp-eth/order-kernel/product/kernel";
+} from "@uvp-eth/uvp-client/browser";
 import type {
   FinalizeOrderDraftPreparation,
   FinalizeOrderDraftResult,
@@ -15,7 +15,7 @@ import type {
   StageInvitePreview,
   StageViewResponse,
   TaskListView
-} from "@uvp-eth/order-kernel/product/kernel";
+} from "@uvp-eth/uvp-client/browser";
 import {
   TODOS,
   type CreateOrderInput,

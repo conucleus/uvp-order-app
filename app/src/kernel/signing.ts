@@ -2,7 +2,7 @@
 // kernel（verifyInviteAcceptTypedData / verifyOrderFinalizeTypedData）在签名前完成，
 // 本模块不接触私钥，也不在失败时自动重试。
 
-import { getBrowserEthereumProvider } from "@uvp-eth/order-kernel/wallet";
+import { getBrowserEthereumProvider } from "@uvp-eth/uvp-client/browser";
 
 export type SigningErrorCode =
   | "missing_wallet"

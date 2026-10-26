@@ -1,8 +1,7 @@
 packages:
   - "app"
-  - "packages/*"
   # app 既有依赖位于 uvp-eth 单仓其他目录；独立 pnpm install 时把它们纳入
-  # 本 workspace，kernel/app 的 workspace:* 才能解析。
+  # 本 workspace，uvp-client/app 的 workspace:* 才能解析。
   - "../uvp-protocol/packages/product-dto"
   - "../uvp-protocol/packages/protocol-bindings"
   - "../uvp-executor-kit/package"

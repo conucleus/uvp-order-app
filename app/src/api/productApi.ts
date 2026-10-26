@@ -1,5 +1,5 @@
 // order-app 自有的 V0/V1 BFF 客户端（Product API transport + 会话 token 存储）：
-// kernel 不再承载旧 BFF，V3 transport 在 @uvp-eth/order-kernel/product/kernel。
+// 旧 BFF 由 app 自有，V3 transport 在 @uvp-eth/uvp-client/browser。
 // 行业/草稿字段只存在于本文件定义的 V1 契约，Phase 3 随 V1 stack 一并删除。
 
 import {
@@ -30,7 +30,7 @@ import type {
   ZhixuDecorationView
 } from "../decoration/types";
 import { participantPath } from "./participantPath";
-import { deadlineSortMs } from "@uvp-eth/order-kernel";
+import { deadlineSortMs } from "@uvp-eth/uvp-client/browser";
 
 // 写侧契约单源：提交意图、prepare/submit 请求体、
 // 提交回执与证据证明以 @uvp-eth/product-dto 为唯一出处（形状按
@@ -1061,7 +1061,7 @@ class BrowserProductApiClient implements ProductApiClient {
           ...extraHeaders
         },
         ...(body === undefined ? {} : { body: JSON.stringify(body) }),
-        // 禁止跟随重定向（executor-kit 同款）：这些请求携带钱包会话头，
+        // 禁止跟随重定向（uvp-client/core transport 同款）：这些请求携带钱包会话头，
         // 3xx 会让凭据头随重定向重放到 Location 指向的任意主机。
         redirect: "manual",
         signal
@@ -1075,7 +1075,7 @@ class BrowserProductApiClient implements ProductApiClient {
       throw error;
     }
     // manual 模式下浏览器的跨源重定向是 status 0 的 opaqueredirect：与所有
-    // 3xx 一样按错误处理（executor-kit isProductApiRedirectStatus 同口径）。
+    // 3xx 一样按错误处理（uvp-client/core 的 redirect_refused 分类同口径）。
     if (response.status === 0 || (response.status >= 300 && response.status < 400)) {
       throw new ProductApiError(response.status, pathname, `redirect_refused:${response.status}`);
     }
