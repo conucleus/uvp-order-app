@@ -17,13 +17,7 @@ import {
   type WalletConnection
 } from "./chain/client";
 import type { ChainEvent, SignalSubmittedFact } from "./chain/events";
-import {
-  buildSubmitSignalArguments,
-  mapWalletError,
-  parseBytes32,
-  randomBytes32,
-  type SignalArguments
-} from "./chain/input";
+import { buildSignalCall, parseBytes32, randomBytes32 } from "./chain/input";
 
 type QueryState =
   | { readonly kind: "idle" }
@@ -103,15 +97,22 @@ function ChainWorkbench({ config }: { readonly config: ChainConfig }) {
   }
 
   async function send(): Promise<void> {
-    const built = buildSubmitSignalArguments({
-      planId: planInput,
-      orderId: orderInput,
-      sourceId,
-      signalId,
-      payloadHash,
-      idempotencyKey,
-      attributionRaw: attribution
-    });
+    const built = buildSignalCall(
+      {
+        stateMachine: config.stateMachine,
+        chainId: config.chainId,
+        rpcUrl: config.rpcUrl
+      },
+      {
+        planId: planInput,
+        orderId: orderInput,
+        sourceId,
+        signalId,
+        payloadHash,
+        idempotencyKey,
+        attributionRaw: attribution
+      }
+    );
     if (!built.ok) {
       setSubmit({ kind: "failed", failure: { code: "invalid_input", message: built.message } });
       return;
@@ -460,4 +461,3 @@ function safeRandomBytes32(): string {
   }
 }
 
-export type { SignalArguments };

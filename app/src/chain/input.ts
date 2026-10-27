@@ -1,13 +1,15 @@
-// 发信号输入的纯校验与 calldata 参数构造：bytes32/attribution JSON/idempotencyKey；
-// 不做网络。attribution 只解析 stageId + proof[]（proof 语义不解析），其余字段由
-// 表单的 sourceId/signalId 填充，与合约 FactAttribution 元组对齐。
+// 发信号输入校验 + uvp-client core 构造 calldata：bytes32/attribution JSON/
+// idempotencyKey；不做网络。attribution 只解析 stageId + proof[]（proof 语义不解析），
+// 其余字段由表单的 sourceId/signalId 填充；submitSignal ABI/参数编码不在本文件复制。
 
-import type { Hex } from "viem";
+import {
+  buildSubmitStateMachineSignalCall,
+  type SubmitStateMachineSignalCall
+} from "@uvp-eth/uvp-client/core";
 
 export type Bytes32 = `0x${string}`;
 
 const BYTES32_PATTERN = /^0x[0-9a-fA-F]{64}$/u;
-const ZERO_BYTES32: Bytes32 = `0x${"0".repeat(64)}`;
 
 export interface Attribution {
   readonly stageId: Bytes32;
@@ -24,19 +26,10 @@ export interface SignalFormInput {
   readonly attributionRaw?: string | undefined;
 }
 
-export interface SignalArguments {
-  readonly planId: Bytes32;
-  readonly orderId: Bytes32;
-  readonly sourceId: Bytes32;
-  readonly signalId: Bytes32;
-  readonly payloadHash: Bytes32;
-  readonly idempotencyKey: Bytes32;
-  readonly attribution: {
-    readonly sourceId: Bytes32;
-    readonly signalId: Bytes32;
-    readonly stageId: Bytes32;
-    readonly capabilityProof: readonly Bytes32[];
-  };
+export interface SignalCallConfig {
+  readonly stateMachine: Bytes32;
+  readonly chainId: number;
+  readonly rpcUrl: string;
 }
 
 export type FieldResult<T> =
@@ -127,7 +120,10 @@ export function randomBytes32(
   return `0x${Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("")}`;
 }
 
-export function buildSubmitSignalArguments(input: SignalFormInput): FieldResult<SignalArguments> {
+export function buildSignalCall(
+  config: SignalCallConfig,
+  input: SignalFormInput
+): FieldResult<SubmitStateMachineSignalCall> {
   const planId = parseBytes32(input.planId, "planId");
   if (!planId.ok) {
     return planId;
@@ -166,31 +162,40 @@ export function buildSubmitSignalArguments(input: SignalFormInput): FieldResult<
     return attribution;
   }
 
-  return {
-    ok: true,
-    value: {
-      planId: planId.value,
-      orderId: orderId.value,
-      sourceId: sourceId.value,
-      signalId: signalId.value,
-      payloadHash: payloadHash.value,
-      idempotencyKey,
-      attribution:
-        attribution.value === undefined
-          ? {
-              sourceId: ZERO_BYTES32,
-              signalId: ZERO_BYTES32,
-              stageId: ZERO_BYTES32,
-              capabilityProof: []
-            }
+  try {
+    const call = buildSubmitStateMachineSignalCall(
+      {
+        stateMachineAddress: config.stateMachine,
+        chainId: config.chainId,
+        rpcUrl: config.rpcUrl
+      },
+      {
+        planId: planId.value,
+        orderId: orderId.value,
+        sourceId: sourceId.value,
+        signalId: signalId.value,
+        payloadHash: payloadHash.value,
+        idempotencyKey,
+        ...(attribution.value === undefined
+          ? {}
           : {
-              sourceId: sourceId.value,
-              signalId: signalId.value,
-              stageId: attribution.value.stageId,
-              capabilityProof: attribution.value.proof
-            }
-    }
-  };
+              attribution: {
+                sourceId: sourceId.value,
+                signalId: signalId.value,
+                stageId: attribution.value.stageId,
+                capabilityProof: attribution.value.proof
+              }
+            })
+      }
+    );
+    return { ok: true, value: call };
+  } catch (error) {
+    return {
+      ok: false,
+      field: "signal",
+      message: error instanceof Error ? error.message : String(error)
+    };
+  }
 }
 
 export function mapWalletError(error: unknown): {
@@ -249,4 +254,3 @@ function defaultRandom(bytes: Uint8Array): Uint8Array {
   return globalThis.crypto.getRandomValues(bytes);
 }
 
-export type { Hex };

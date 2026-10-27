@@ -1,11 +1,10 @@
-// 链上事件解码/过滤：只认四类事实事件（SignalSubmitted / HookReady /
-// StageMaterialized / StageExecutorActivated），字段原样透传；ABI 解码失败显式报错，
-// 不猜测、不补字段。
+// 链上事件解码/过滤：SignalSubmitted / StageMaterialized / StageExecutorActivated 用
+// viem + 最小事件 ABI（STATE_MACHINE_ABI 尚未从 uvp-client core 导出，单源缺口）；
+// HookReady 由 uvp-client decodeHookReadyLog 解码后合入。字段原样透传，解码失败显式报错。
 
 import { decodeEventLog, type Hex, type Log } from "viem";
 import {
   chainEvents,
-  hookReadyEvent,
   signalSubmittedEvent,
   stageExecutorActivatedEvent,
   stageMaterializedEvent
@@ -69,12 +68,14 @@ export type ChainEvent =
   | StageMaterializedFact
   | StageExecutorActivatedFact;
 
+export type ViemDecodedFact = Exclude<ChainEvent, HookReadyFact>;
+
 export type DecodeResult =
-  | { readonly ok: true; readonly events: readonly ChainEvent[] }
+  | { readonly ok: true; readonly events: readonly ViemDecodedFact[] }
   | { readonly ok: false; readonly message: string };
 
 export function decodeChainLogs(logs: readonly Log[]): DecodeResult {
-  const events: ChainEvent[] = [];
+  const events: ViemDecodedFact[] = [];
   for (const log of logs) {
     let decoded: ReturnType<typeof decodeEventLog>;
     try {
@@ -111,17 +112,6 @@ export function decodeChainLogs(logs: readonly Log[]): DecodeResult {
           factStageId: Bytes32;
         };
         events.push({ ...base, kind: "signal_submitted", ...args });
-        break;
-      }
-      case "HookReady": {
-        const args = decoded.args as unknown as {
-          planId: Bytes32;
-          orderId: Bytes32;
-          hookId: Bytes32;
-          stageId: Bytes32;
-          hookName: Bytes32;
-        };
-        events.push({ ...base, kind: "hook_ready", ...args });
         break;
       }
       case "StageMaterialized": {
@@ -179,4 +169,4 @@ export function withTimestamps(
   });
 }
 
-export { hookReadyEvent, signalSubmittedEvent, stageExecutorActivatedEvent, stageMaterializedEvent };
+export { signalSubmittedEvent, stageExecutorActivatedEvent, stageMaterializedEvent };

@@ -1,14 +1,16 @@
-// 最小链上 ABI：只包含 order-app 读取/fact 展示与 submitSignal 需要的方法/事件；
+// 最小只读 ABI + 三类事实事件：submitSignal 的 ABI/参数编码由 uvp-client core
+// buildSubmitStateMachineSignalCall 单源提供，这里不复制写函数；HookReady 用
+// uvp-client decodeHookReadyLog + HOOK_READY_TOPIC 解码。STATE_MACHINE_ABI 尚未从
+// uvp-client core 对外导出，故这三类事件仍需最小 ABI（单源缺口，已记录）。
 // 不包含配置、资金、文件、任务接口。
 
 import { parseAbi, parseAbiItem } from "viem";
 
-export const uvpStateMachineAbi = parseAbi([
+export const stateMachineReadAbi = parseAbi([
   "function planExists(bytes32 planId) view returns (bool)",
   "function orderExists(bytes32 planId, bytes32 orderId) view returns (bool)",
   "function orderCreator(bytes32 planId, bytes32 orderId) view returns (address)",
-  "function orderRelayer(bytes32 planId, bytes32 orderId) view returns (address)",
-  "function submitSignal(bytes32 planId, bytes32 orderId, bytes32 sourceId, bytes32 signalId, bytes32 payloadHash, bytes32 idempotencyKey, (bytes32 sourceId, bytes32 signalId, bytes32 stageId, bytes32[] capabilityProof) attribution)"
+  "function orderRelayer(bytes32 planId, bytes32 orderId) view returns (address)"
 ]);
 
 export const signalSubmittedEvent = parseAbiItem(
@@ -20,13 +22,10 @@ export const stageMaterializedEvent = parseAbiItem(
 export const stageExecutorActivatedEvent = parseAbiItem(
   "event StageExecutorActivated(bytes32 indexed planId, bytes32 indexed orderId, bytes32 indexed targetStageId, address executor, bytes32 role, bytes32 metadataHash, uint256 patchNonce, string metadataURI)"
 );
-export const hookReadyEvent = parseAbiItem(
-  "event HookReady(bytes32 indexed planId, bytes32 indexed orderId, bytes32 indexed hookId, bytes32 stageId, bytes32 hookName)"
-);
+
 
 export const chainEvents = [
   signalSubmittedEvent,
   stageMaterializedEvent,
-  stageExecutorActivatedEvent,
-  hookReadyEvent
+  stageExecutorActivatedEvent
 ] as const;
