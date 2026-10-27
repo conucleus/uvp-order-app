@@ -1,245 +1,419 @@
-// 订单 app 的唯一工作台流程：钱包会话 → 开单 / 邀请接受 / 订单房间。
-// 客户端能力全部来自 @uvp-eth/uvp-client/browser；本文件只做路由与装配。
+// order-app 最小可用：链上直连查看/发送信号。没有 backend、账户体系、会话 token、
+// 配置目录、金额/文件/任务承诺；读用公共 RPC，写用浏览器钱包 submitSignal。
+// 失败与空分开：读取失败具名，空事件列表只表示链上没有这些事实。
 
-import { ClipboardList, FilePlus2, FolderKanban } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
-import type { ReactElement } from "react";
-import { createProductClient, getBrowserEthereumProvider } from "@uvp-eth/uvp-client/browser";
-import { CreateOrderPage, InvitePage, OrderRoomPage } from "./kernel/pages";
-import { createPorts, type Ports } from "./kernel/ports";
-import { personalSignKernel, requestWalletAddressKernel } from "./kernel/signing";
-import { WalletLoginPanel } from "./onboarding/WalletLoginPanel";
+import { useMemo, useState } from "react";
 import {
-  clearInviteSearchParams,
-  readInviteEntryFromSearch,
-  readOrderAppRoute,
-  routeHash,
-  type InviteEntry,
-  type OrderAppRoute
-} from "./routes/appRoutes";
+  chainConfigProblemText,
+  readChainConfig,
+  type ChainConfig
+} from "./chain/config";
 import {
-  createBrowserWalletSessionTokenStore,
-  createParticipantSession,
-  type ParticipantSession
-} from "./session";
+  connectWallet,
+  createChainReader,
+  submitSignal,
+  type ChainFailure,
+  type OrderFacts,
+  type WalletConnection
+} from "./chain/client";
+import type { ChainEvent, SignalSubmittedFact } from "./chain/events";
+import {
+  buildSubmitSignalArguments,
+  mapWalletError,
+  parseBytes32,
+  randomBytes32,
+  type SignalArguments
+} from "./chain/input";
 
-interface Runtime {
-  readonly session: ParticipantSession;
-  readonly ports: Ports;
-}
+type QueryState =
+  | { readonly kind: "idle" }
+  | { readonly kind: "loading" }
+  | { readonly kind: "ready"; readonly facts: OrderFacts }
+  | { readonly kind: "failed"; readonly failure: ChainFailure };
 
-type RuntimeState = { readonly ok: true; readonly runtime: Runtime } | { readonly ok: false; readonly message: string };
+type EventsState =
+  | { readonly kind: "idle" }
+  | { readonly kind: "loading" }
+  | { readonly kind: "ready"; readonly events: readonly ChainEvent[] }
+  | { readonly kind: "failed"; readonly failure: ChainFailure };
+
+type SubmitState =
+  | { readonly kind: "idle" }
+  | { readonly kind: "pending" }
+  | { readonly kind: "success"; readonly txHash: string }
+  | { readonly kind: "failed"; readonly failure: ChainFailure };
 
 export default function App() {
-  const runtimeState = useMemo<RuntimeState>(() => {
-    const baseUrl = (import.meta.env.VITE_UVP_CHAIN_SERVICES_URL ?? "").trim();
-    if (baseUrl.length === 0) {
-      return {
-        ok: false,
-        message:
-          "参与者服务地址未配置：请设置 VITE_UVP_CHAIN_SERVICES_URL。Order App 只连接真实参与者服务，没有本地样例数据回退。"
-      };
-    }
-    try {
-      const session = createParticipantSession({
-        baseUrl,
-        personalSign: personalSignKernel,
-        tokenStore: createBrowserWalletSessionTokenStore()
-      });
-      const client = createProductClient({
-        baseUrl,
-        getSessionToken: () => session.currentSessionToken()
-      });
-      return { ok: true, runtime: { session, ports: createPorts(client) } };
-    } catch (error) {
-      return { ok: false, message: error instanceof Error ? error.message : String(error) };
-    }
-  }, []);
-
-  if (!runtimeState.ok) {
-    return <UnconfiguredShell message={runtimeState.message} />;
+  const configState = useMemo(() => readChainConfig(import.meta.env), []);
+  if (!configState.ok) {
+    return <ConfigProblem problem={chainConfigProblemText(configState.problem)} />;
   }
-  return <AppShell runtime={runtimeState.runtime} />;
+  return <ChainWorkbench config={configState.config} />;
 }
 
-function AppShell({ runtime }: { readonly runtime: Runtime }) {
-  const [sessionToken, setSessionToken] = useState<string | undefined>(() => runtime.session.currentSessionToken());
-  const [route, setRoute] = useState<OrderAppRoute>(() => readOrderAppRoute());
-  const [invite, setInvite] = useState<InviteEntry | undefined>(() => readInviteEntryFromSearch());
-  const [notice, setNotice] = useState<string | undefined>(undefined);
+function ChainWorkbench({ config }: { readonly config: ChainConfig }) {
+  const reader = useMemo(() => createChainReader(config), [config]);
+  const [wallet, setWallet] = useState<WalletConnection | undefined>(undefined);
+  const [walletFailure, setWalletFailure] = useState<ChainFailure | undefined>(undefined);
+  const [planInput, setPlanInput] = useState("");
+  const [orderInput, setOrderInput] = useState("");
+  const [query, setQuery] = useState<QueryState>({ kind: "idle" });
+  const [events, setEvents] = useState<EventsState>({ kind: "idle" });
 
-  useEffect(() => {
-    function handleHashChange() {
-      setRoute(readOrderAppRoute());
+  const [sourceId, setSourceId] = useState("");
+  const [signalId, setSignalId] = useState("");
+  const [payloadHash, setPayloadHash] = useState("");
+  const [idempotencyKey, setIdempotencyKey] = useState(() => safeRandomBytes32());
+  const [attribution, setAttribution] = useState("");
+  const [submit, setSubmit] = useState<SubmitState>({ kind: "idle" });
+
+  async function connect(): Promise<void> {
+    setWalletFailure(undefined);
+    const result = await connectWallet(config);
+    if (!result.ok) {
+      setWalletFailure(result.failure);
+      return;
     }
-    window.addEventListener("hashchange", handleHashChange);
-    return () => window.removeEventListener("hashchange", handleHashChange);
-  }, []);
-
-  const authenticated = sessionToken !== undefined;
-  const hasWallet = getBrowserEthereumProvider() !== undefined;
-
-  async function login(): Promise<void> {
-    const address = await requestWalletAddressKernel();
-    await runtime.session.proveWalletControl(address);
-    setSessionToken(runtime.session.currentSessionToken());
+    setWallet(result.value);
   }
 
-  function logout(): void {
-    runtime.session.restoreSessionToken(undefined);
-    setSessionToken(undefined);
-    setInvite(undefined);
+  async function load(): Promise<void> {
+    const planId = parseBytes32(planInput, "planId");
+    if (!planId.ok) {
+      setQuery({ kind: "failed", failure: { code: "invalid_input", message: planId.message } });
+      setEvents({ kind: "failed", failure: { code: "invalid_input", message: planId.message } });
+      return;
+    }
+    const orderId = parseBytes32(orderInput, "orderId");
+    if (!orderId.ok) {
+      setQuery({ kind: "failed", failure: { code: "invalid_input", message: orderId.message } });
+      setEvents({ kind: "failed", failure: { code: "invalid_input", message: orderId.message } });
+      return;
+    }
+    setQuery({ kind: "loading" });
+    setEvents({ kind: "loading" });
+    const [facts, chainEvents] = await Promise.all([
+      reader.readOrder(planId.value, orderId.value),
+      reader.readEvents(planId.value, orderId.value)
+    ]);
+    setQuery(facts.ok ? { kind: "ready", facts: facts.value } : { kind: "failed", failure: facts.failure });
+    setEvents(
+      chainEvents.ok ? { kind: "ready", events: chainEvents.value } : { kind: "failed", failure: chainEvents.failure }
+    );
   }
 
-  function navigate(next: OrderAppRoute): void {
-    window.location.hash = routeHash(next);
-    setRoute(next);
+  async function send(): Promise<void> {
+    const built = buildSubmitSignalArguments({
+      planId: planInput,
+      orderId: orderInput,
+      sourceId,
+      signalId,
+      payloadHash,
+      idempotencyKey,
+      attributionRaw: attribution
+    });
+    if (!built.ok) {
+      setSubmit({ kind: "failed", failure: { code: "invalid_input", message: built.message } });
+      return;
+    }
+    if (wallet === undefined) {
+      setSubmit({ kind: "failed", failure: { code: "no_wallet", message: "先连接钱包再发送信号" } });
+      return;
+    }
+    setSubmit({ kind: "pending" });
+    const result = await submitSignal(config, wallet, built.value);
+    if (!result.ok) {
+      setSubmit({ kind: "failed", failure: result.failure });
+      return;
+    }
+    setSubmit({ kind: "success", txHash: result.value.txHash });
+    setIdempotencyKey(safeRandomBytes32());
+    await load();
   }
 
-  function dismissInvite(): void {
-    clearInviteSearchParams();
-    setInvite(undefined);
-  }
-
-  function handleInviteAccepted(): void {
-    dismissInvite();
-    navigate({ section: "orders" });
-  }
+  const signals = events.kind === "ready" ? events.events.filter(isSignal) : [];
+  const otherEvents = events.kind === "ready" ? events.events.filter((event) => !isSignal(event)) : [];
 
   return (
     <main className="app-shell">
       <header className="topbar">
         <div className="brand-block">
-          <span className="brand-mark" aria-hidden="true">
-            <ClipboardList />
-          </span>
           <div>
             <p>UVP Order App</p>
-            <h1>订单工作台</h1>
+            <h1>链上信号</h1>
           </div>
         </div>
         <div className="topbar-actions">
-          <span className={`source-badge ${authenticated ? "source-real" : "source-missing"}`}>
-            {authenticated ? "已登录" : "未登录"}
-          </span>
-          {authenticated ? (
-            <button className="quiet-button" type="button" onClick={logout}>
-              退出登录
+          {wallet === undefined ? (
+            <button className="primary-button" type="button" onClick={() => void connect()}>
+              连接钱包
             </button>
-          ) : null}
+          ) : (
+            <span className="source-badge source-real" title={wallet.address}>
+              钱包 {short(wallet.address)}
+            </span>
+          )}
         </div>
       </header>
 
-      {notice ? <SystemBanner tone="info" title="草稿已创建" text={notice} /> : null}
+      <SystemBanner
+        tone="info"
+        title="最小、链上直连"
+        text="order-app 只提供链上信号/秩序查看与发送；资金、文件、配置、任务不在承诺范围；也没有 backend、账户体系或会话 token。"
+      />
 
-      {!authenticated ? (
-        <WalletLoginPanel hasWallet={hasWallet} onLogin={login} />
-      ) : invite ? (
-        <InvitePage
-          ports={runtime.ports}
-          inviteId={invite.inviteId}
-          inviteToken={invite.inviteToken}
-          onAccepted={handleInviteAccepted}
-          onRejected={() => {
-            dismissInvite();
-            navigate({ section: "orders" });
-          }}
-          onDismiss={dismissInvite}
-        />
-      ) : (
-        <>
-          <nav className="section-tabs" aria-label="工作台视图">
-            <SectionButton
-              active={route.section === "create"}
-              label="开单"
-              icon={<FilePlus2 />}
-              onClick={() => navigate({ section: "create" })}
-            />
-            <SectionButton
-              active={route.section === "orders"}
-              label="订单房间"
-              icon={<FolderKanban />}
-              onClick={() => navigate({ section: "orders" })}
-            />
-          </nav>
-          <section className="workspace">
-            {route.section === "orders" ? (
-              <OrderRoomPage
-                ports={runtime.ports}
-                orderId={route.orderId}
-                onBack={() => navigate({ section: "create" })}
-              />
-            ) : (
-              <CreateOrderPage
-                ports={runtime.ports}
-                defaultConfigId={import.meta.env.VITE_UVP_CONFIG_ID}
-                defaultConfigVersion={import.meta.env.VITE_UVP_CONFIG_VERSION}
-                onCreated={(result) => setNotice(`草稿 ${result.draftId} 已创建；一次性邀请链接见下方「邀请链接」。`)}
-                onBack={() => navigate({ section: "create" })}
-              />
-            )}
-          </section>
-        </>
+      {walletFailure === undefined ? null : (
+        <SystemBanner tone="warn" title="钱包连接失败" text={`${walletFailure.code}：${walletFailure.message}`} />
       )}
-    </main>
-  );
-}
 
-function SectionButton({
-  active,
-  label,
-  icon,
-  onClick
-}: {
-  readonly active: boolean;
-  readonly label: string;
-  readonly icon: ReactElement;
-  readonly onClick: () => void;
-}) {
-  return (
-    <button className={`section-tab ${active ? "is-active" : ""}`} onClick={onClick} type="button">
-      {icon}
-      {label}
-    </button>
-  );
-}
+      <section className="panel">
+        <h2>订单</h2>
+        <div className="grid-2">
+          <label>
+            planId
+            <input
+              value={planInput}
+              onChange={(event) => setPlanInput(event.target.value)}
+              placeholder="0x + 64 hex"
+              spellCheck={false}
+            />
+          </label>
+          <label>
+            orderId
+            <input
+              value={orderInput}
+              onChange={(event) => setOrderInput(event.target.value)}
+              placeholder="0x + 64 hex"
+              spellCheck={false}
+            />
+          </label>
+        </div>
+        <div className="submit-actions">
+          <button
+            className="primary-button"
+            type="button"
+            disabled={query.kind === "loading"}
+            onClick={() => void load()}
+          >
+            {query.kind === "loading" ? "读取中…" : "读取链上事实"}
+          </button>
+        </div>
 
-function UnconfiguredShell({ message }: { readonly message: string }) {
-  return (
-    <main className="app-shell">
-      <header className="topbar">
-        <div className="brand-block">
-          <span className="brand-mark" aria-hidden="true">
-            <ClipboardList />
-          </span>
-          <div>
-            <p>UVP Order App</p>
-            <h1>订单工作台</h1>
-          </div>
+        {query.kind === "failed" ? (
+          <FailureBlock title="订单事实读取失败" failure={query.failure} />
+        ) : null}
+        {query.kind === "ready" ? (
+          <dl className="facts">
+            <div>
+              <dt>planExists</dt>
+              <dd>{String(query.facts.planExists)}</dd>
+            </div>
+            <div>
+              <dt>orderExists</dt>
+              <dd>{String(query.facts.orderExists)}</dd>
+            </div>
+            {query.facts.orderExists ? (
+              <>
+                <div>
+                  <dt>creator</dt>
+                  <dd>{query.facts.creator ?? "未返回"}</dd>
+                </div>
+                <div>
+                  <dt>relayer</dt>
+                  <dd>{query.facts.relayer ?? "未返回"}</dd>
+                </div>
+              </>
+            ) : (
+              <div>
+                <dt>说明</dt>
+                <dd>链上没有这个订单（不是读取失败）。</dd>
+              </div>
+            )}
+          </dl>
+        ) : null}
+      </section>
+
+      <section className="panel">
+        <h2>信号（SignalSubmitted）</h2>
+        <p className="fineprint">
+          SignalSubmitted 事件不含 fee/金额字段；这里的字段全部来自链上事件，不补造配置或阶段名。
+        </p>
+        {events.kind === "loading" ? <p className="fineprint">正在读取事件…</p> : null}
+        {events.kind === "failed" ? (
+          <FailureBlock title="事件读取失败" failure={events.failure} />
+        ) : null}
+        {events.kind === "ready" && events.events.length === 0 ? (
+          <p className="fineprint">读取成功：链上没有匹配的事实事件（空不是失败）。</p>
+        ) : null}
+        {signals.length > 0 ? (
+          <ul className="event-list">
+            {signals.map((event) => (
+              <li key={`${event.transactionHash}-${event.logIndex}`} className="event-card">
+                <EventHead event={event} />
+                <SignalFields event={event} />
+              </li>
+            ))}
+          </ul>
+        ) : null}
+      </section>
+
+      <section className="panel">
+        <h2>其他链上事实</h2>
+        {otherEvents.length > 0 ? (
+          <ul className="event-list">
+            {otherEvents.map((event) => (
+              <li key={`${event.transactionHash}-${event.logIndex}`} className="event-card">
+                <EventHead event={event} />
+                <OtherFields event={event} />
+              </li>
+            ))}
+          </ul>
+        ) : (
+          <p className="fineprint">没有 HookReady / StageMaterialized / StageExecutorActivated 事件。</p>
+        )}
+      </section>
+
+      <section className="panel">
+        <h2>发信号</h2>
+        <p className="fineprint">
+          钱包直接调用 UVPStateMachine.submitSignal；不经 relay/backend。attribution 可选 JSON：
+          {` { "stageId": "0x…", "proof": ["0x…"] }`}（proof 语义不解析）。
+        </p>
+        <div className="grid-2">
+          <label>
+            sourceId
+            <input value={sourceId} onChange={(event) => setSourceId(event.target.value)} placeholder="0x + 64 hex" spellCheck={false} />
+          </label>
+          <label>
+            signalId
+            <input value={signalId} onChange={(event) => setSignalId(event.target.value)} placeholder="0x + 64 hex" spellCheck={false} />
+          </label>
+          <label>
+            payloadHash
+            <input value={payloadHash} onChange={(event) => setPayloadHash(event.target.value)} placeholder="0x + 64 hex" spellCheck={false} />
+          </label>
+          <label>
+            idempotencyKey
+            <input value={idempotencyKey} onChange={(event) => setIdempotencyKey(event.target.value)} placeholder="0x + 64 hex（默认随机）" spellCheck={false} />
+          </label>
         </div>
-        <div className="topbar-actions">
-          <span className="source-badge source-missing">未配置</span>
+        <label>
+          attribution（可选 JSON）
+          <textarea
+            value={attribution}
+            onChange={(event) => setAttribution(event.target.value)}
+            rows={4}
+            spellCheck={false}
+            placeholder={`{ "stageId": "0x…", "proof": [] }`}
+          />
+        </label>
+        <div className="submit-actions">
+          <button
+            className="primary-button"
+            type="button"
+            disabled={submit.kind === "pending"}
+            onClick={() => void send()}
+          >
+            {submit.kind === "pending" ? "等待钱包/回执…" : "发送信号"}
+          </button>
         </div>
-      </header>
-      <SystemBanner tone="warn" title="参与者服务未配置" text={message} />
-      <section className="empty-state" aria-label="参与者服务未配置">
-        <ClipboardList aria-hidden="true" />
-        <h2>暂无订单视图</h2>
-        <p>配置参与者服务地址后，这里会显示与当前钱包会话匹配的开单、邀请与订单房间。</p>
+        {submit.kind === "success" ? (
+          <p className="status-ok">已上链：{submit.txHash}</p>
+        ) : null}
+        {submit.kind === "failed" ? <FailureBlock title="发送失败" failure={submit.failure} /> : null}
       </section>
     </main>
   );
 }
 
-function SystemBanner({
-  tone,
-  title,
-  text
-}: {
-  readonly tone: "info" | "warn" | "error";
-  readonly title: string;
-  readonly text: string;
-}) {
+function SignalFields({ event }: { readonly event: SignalSubmittedFact }) {
+  return (
+    <dl className="facts">
+      <div>
+        <dt>sourceId / signalId</dt>
+        <dd>
+          {short(event.sourceId)} / {short(event.signalId)}
+        </dd>
+      </div>
+      <div>
+        <dt>submitter</dt>
+        <dd>{event.submitter}</dd>
+      </div>
+      <div>
+        <dt>payloadHash</dt>
+        <dd>{event.payloadHash}</dd>
+      </div>
+      <div>
+        <dt>idempotencyKey</dt>
+        <dd>{event.idempotencyKey}</dd>
+      </div>
+      <div>
+        <dt>factStageId</dt>
+        <dd>{event.factStageId}</dd>
+      </div>
+    </dl>
+  );
+}
+
+function OtherFields({ event }: { readonly event: ChainEvent }) {
+  switch (event.kind) {
+    case "hook_ready":
+      return (
+        <dl className="facts">
+          <div><dt>hookId</dt><dd>{event.hookId}</dd></div>
+          <div><dt>stageId</dt><dd>{event.stageId}</dd></div>
+          <div><dt>hookName</dt><dd>{event.hookName}</dd></div>
+        </dl>
+      );
+    case "stage_materialized":
+      return (
+        <dl className="facts">
+          <div><dt>stageId</dt><dd>{event.stageId}</dd></div>
+          <div><dt>triggerHookId</dt><dd>{event.triggerHookId}</dd></div>
+          <div><dt>source / signal</dt><dd>{short(event.sourceId)} / {short(event.signalId)}</dd></div>
+        </dl>
+      );
+    case "stage_executor_activated":
+      return (
+        <dl className="facts">
+          <div><dt>stageId</dt><dd>{event.targetStageId}</dd></div>
+          <div><dt>executor</dt><dd>{event.executor}</dd></div>
+          <div><dt>role / metadataHash</dt><dd>{short(event.role)} / {short(event.metadataHash)}</dd></div>
+          <div><dt>patchNonce</dt><dd>{String(event.patchNonce)}</dd></div>
+          <div><dt>metadataURI</dt><dd>{event.metadataURI || "（空）"}</dd></div>
+        </dl>
+      );
+    case "signal_submitted":
+      return <SignalFields event={event} />;
+    default:
+      return null;
+  }
+}
+
+function EventHead({ event }: { readonly event: ChainEvent }) {
+  const timestamp =
+    event.timestamp === undefined ? "时间未知" : new Date(Number(event.timestamp) * 1000).toLocaleString();
+  return (
+    <div className="event-head">
+      <strong>{event.kind}</strong>
+      <span className="fineprint">
+        block {String(event.blockNumber)} · {timestamp} · tx {short(event.transactionHash)}
+      </span>
+    </div>
+  );
+}
+
+function FailureBlock({ title, failure }: { readonly title: string; readonly failure: ChainFailure }) {
+  return (
+    <section className="system-banner system-banner-error" role="alert">
+      <strong>{title}（{failure.code}）</strong>
+      <span>{failure.message}</span>
+      {failure.txHash === undefined ? null : <span className="fineprint">txHash：{failure.txHash}</span>}
+    </section>
+  );
+}
+
+function SystemBanner({ tone, title, text }: { readonly tone: "info" | "warn" | "error"; readonly title: string; readonly text: string }) {
   return (
     <section className={`system-banner system-banner-${tone}`} role={tone === "error" ? "alert" : "status"}>
       <strong>{title}</strong>
@@ -247,3 +421,43 @@ function SystemBanner({
     </section>
   );
 }
+
+function ConfigProblem({ problem }: { readonly problem: string }) {
+  return (
+    <main className="app-shell">
+      <header className="topbar">
+        <div className="brand-block">
+          <div>
+            <p>UVP Order App</p>
+            <h1>链上信号</h1>
+          </div>
+        </div>
+        <span className="source-badge source-missing">未配置</span>
+      </header>
+      <SystemBanner tone="warn" title="链配置缺失/不合法" text={problem} />
+      <section className="panel">
+        <p className="fineprint">
+          需要 VITE_UVP_STATE_MACHINE、VITE_CHAIN_ID、VITE_RPC_URL；可选 VITE_UVP_FROM_BLOCK（默认 0）。
+        </p>
+      </section>
+    </main>
+  );
+}
+
+function isSignal(event: ChainEvent): event is SignalSubmittedFact {
+  return event.kind === "signal_submitted";
+}
+
+function short(value: string): string {
+  return value.length <= 14 ? value : `${value.slice(0, 8)}…${value.slice(-6)}`;
+}
+
+function safeRandomBytes32(): string {
+  try {
+    return randomBytes32();
+  } catch {
+    return "";
+  }
+}
+
+export type { SignalArguments };

@@ -18,7 +18,8 @@
     "@uvp-eth/uvp-client": "workspace:*",
     "lucide-react": "^1.7.0",
     "react": "^19.2.5",
-    "react-dom": "^19.2.5"
+    "react-dom": "^19.2.5",
+    "viem": "^2.48.4"
   },
   "devDependencies": {
     "@playwright/test": "^1.59.1",
