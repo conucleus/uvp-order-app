@@ -5,6 +5,7 @@ import { useEffect, useMemo, useState } from "react";
 import type {
   FinalizeOrderDraftPreparation,
   FinalizeOrderDraftResult,
+  HandleView,
   OrderView,
   StageInvitePreview,
   StageViewResponse,
@@ -56,6 +57,18 @@ function isoInDays(days: number): string {
 function stageRoleLabel(stage: FlatStage, slotKey: string): string {
   const slot = stage.slots.find((candidate) => candidate.slotKey === slotKey);
   return slot?.label ?? slotKey;
+}
+
+function describeResourceHandle(handle: HandleView): string {
+  const fields = Object.entries(handle.fields).map(([key, value]) => `${key}=${displayHandleValue(value)}`);
+  return fields.length === 0 ? handle.type : `${handle.type} ${fields.join(" ")}`;
+}
+
+function displayHandleValue(value: unknown): string {
+  if (typeof value === "string") {
+    return value;
+  }
+  return JSON.stringify(value) ?? String(value);
 }
 
 export function CreateOrderPage(props: {
@@ -518,7 +531,7 @@ export function OrderRoomPage(props: {
     const taskList = unwrap(await props.ports.listTasks(id), setFailure);
     setTasks(taskList ?? undefined);
     const handleList = unwrap(await props.ports.listStageResources(id, key), setFailure);
-    setResources(handleList?.items.map((item) => `${item.handleKey}${item.version ? `@${item.version}` : ""}${item.hash ? ` ${item.hash.slice(0, 10)}…` : ""}`) ?? undefined);
+    setResources(handleList?.items.map(describeResourceHandle) ?? undefined);
   }
 
   return (
