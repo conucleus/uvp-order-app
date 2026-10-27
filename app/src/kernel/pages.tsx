@@ -59,16 +59,117 @@ function stageRoleLabel(stage: FlatStage, slotKey: string): string {
   return slot?.label ?? slotKey;
 }
 
-function describeResourceHandle(handle: HandleView): string {
-  const fields = Object.entries(handle.fields).map(([key, value]) => `${key}=${displayHandleValue(value)}`);
-  return fields.length === 0 ? handle.type : `${handle.type} ${fields.join(" ")}`;
+type ResourceItem =
+  | {
+      readonly kind: "inline";
+      readonly handleKey: string;
+      readonly type: string;
+      readonly text: string;
+    }
+  | {
+      readonly kind: "link";
+      readonly handleKey: string;
+      readonly type: string;
+      readonly url: string;
+    }
+  | {
+      readonly kind: "unsupported";
+      readonly handleKey: string;
+      readonly type: string;
+      readonly raw: string;
+    }
+  | {
+      readonly kind: "invalid";
+      readonly handleKey: string;
+      readonly type: string;
+      readonly reason: string;
+      readonly raw: string;
+    };
+
+function rawHandle(handle: HandleView): string {
+  return JSON.stringify({ type: handle.type, fields: handle.fields });
 }
 
-function displayHandleValue(value: unknown): string {
-  if (typeof value === "string") {
-    return value;
+function resourceItem(handle: HandleView): ResourceItem {
+  const type = handle.type.trim().toLowerCase();
+  if (type === "plaintext") {
+    const text = handle.fields["text"];
+    if (typeof text === "string") {
+      return { kind: "inline", handleKey: handle.handleKey, type, text };
+    }
+    return {
+      kind: "invalid",
+      handleKey: handle.handleKey,
+      type,
+      reason: "plaintext 句柄缺少 text",
+      raw: rawHandle(handle)
+    };
   }
-  return JSON.stringify(value) ?? String(value);
+  if (type === "http" || type === "https") {
+    const url = handle.fields["url"];
+    if (typeof url === "string" && /^https?:\/\//iu.test(url)) {
+      return { kind: "link", handleKey: handle.handleKey, type, url };
+    }
+    return {
+      kind: "invalid",
+      handleKey: handle.handleKey,
+      type,
+      reason: "http 句柄缺少合法的 http(s) url",
+      raw: rawHandle(handle)
+    };
+  }
+  return { kind: "unsupported", handleKey: handle.handleKey, type, raw: rawHandle(handle) };
+}
+
+function resourceItems(handles: readonly HandleView[]): readonly ResourceItem[] {
+  return handles.map(resourceItem);
+}
+
+function ResourceRow({ item }: { readonly item: ResourceItem }) {
+  const [copyState, setCopyState] = useState<"idle" | "ok" | "failed">("idle");
+  async function copyRaw(): Promise<void> {
+    if (item.kind !== "unsupported" && item.kind !== "invalid") {
+      return;
+    }
+    try {
+      await navigator.clipboard.writeText(item.raw);
+      setCopyState("ok");
+    } catch {
+      setCopyState("failed");
+    }
+  }
+  if (item.kind === "inline") {
+    return (
+      <li>
+        <p>{item.text}</p>
+      </li>
+    );
+  }
+  if (item.kind === "link") {
+    return (
+      <li>
+        <a href={item.url} target="_blank" rel="noreferrer">
+          {item.url}
+        </a>
+      </li>
+    );
+  }
+  return (
+    <li>
+      <p>
+        {item.kind === "unsupported"
+          ? `order-app 不支持该资源类型：${item.type}`
+          : item.reason}
+      </p>
+      {item.kind === "unsupported" || item.kind === "invalid" ? (
+        <button className="quiet-button" type="button" onClick={() => void copyRaw()}>
+          复制原始句柄
+        </button>
+      ) : null}
+      {copyState === "ok" ? <span className="fineprint">已复制。</span> : null}
+      {copyState === "failed" ? <span className="fineprint">复制不可用（浏览器剪贴板权限）。</span> : null}
+    </li>
+  );
 }
 
 export function CreateOrderPage(props: {
@@ -505,7 +606,7 @@ export function OrderRoomPage(props: {
   const [stageKey, setStageKey] = useState<string | undefined>(undefined);
   const [stage, setStage] = useState<StageViewResponse | undefined>(undefined);
   const [tasks, setTasks] = useState<TaskListView | undefined>(undefined);
-  const [resources, setResources] = useState<readonly string[] | undefined>(undefined);
+  const [resources, setResources] = useState<readonly ResourceItem[] | undefined>(undefined);
   const [failure, setFailure] = useState<Failure | undefined>(undefined);
   const [busy, setBusy] = useState(false);
 
@@ -531,7 +632,7 @@ export function OrderRoomPage(props: {
     const taskList = unwrap(await props.ports.listTasks(id), setFailure);
     setTasks(taskList ?? undefined);
     const handleList = unwrap(await props.ports.listStageResources(id, key), setFailure);
-    setResources(handleList?.items.map(describeResourceHandle) ?? undefined);
+    setResources(handleList === undefined ? undefined : resourceItems(handleList.items));
   }
 
   return (
@@ -595,7 +696,7 @@ export function OrderRoomPage(props: {
           <section className="panel">
             <h3>阶段标准句柄（fileResources）</h3>
             {resources === undefined ? <p>未读取。</p> : resources.length === 0 ? <p>该阶段没有声明句柄。</p> : (
-              <ul>{resources.map((item) => <li key={item}>{item}</li>)}</ul>
+              <ul>{resources.map((item) => <ResourceRow key={item.handleKey} item={item} />)}</ul>
             )}
             <p className="fineprint">TODO：{TODOS.evidenceSubmit}</p>
           </section>
