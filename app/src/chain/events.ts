@@ -3,12 +3,7 @@
 // HookReady 由 uvp-client decodeHookReadyLog 解码后合入。字段原样透传，解码失败显式报错。
 
 import { decodeEventLog, type Hex, type Log } from "viem";
-import {
-  chainEvents,
-  signalSubmittedEvent,
-  stageExecutorActivatedEvent,
-  stageMaterializedEvent
-} from "./abi";
+import { chainEvents } from "./abi";
 import type { Bytes32 } from "./input";
 
 interface EventBase {
@@ -169,4 +164,3 @@ export function withTimestamps(
   });
 }
 
-export { signalSubmittedEvent, stageExecutorActivatedEvent, stageMaterializedEvent };

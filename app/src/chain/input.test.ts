@@ -1,6 +1,5 @@
-// 发信号入口的行为不变量：attribution JSON 只接受 stageId/proof[]（坏输入具名，
-// 不静默退化成零元组）；钱包拒绝/revert 具名，不伪装成功。calldata 编码本身由
-// uvp-client core 拥有，不在这里重测。
+// 发信号入口的行为不变量：attribution JSON 只接受 stageId/proof[]（坏输入具名）；
+// 钱包拒绝/revert 具名，不伪装成功。
 
 import assert from "node:assert/strict";
 import test from "node:test";

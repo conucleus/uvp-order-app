@@ -1,7 +1,7 @@
 // 最小只读 ABI + 三类事实事件：submitSignal 的 ABI/参数编码由 uvp-client core
 // buildSubmitStateMachineSignalCall 单源提供，这里不复制写函数；HookReady 用
 // uvp-client decodeHookReadyLog + HOOK_READY_TOPIC 解码。STATE_MACHINE_ABI 尚未从
-// uvp-client core 对外导出，故这三类事件仍需最小 ABI（单源缺口，已记录）。
+// uvp-client core 对外导出，故这三类事件仍需最小 ABI（单源缺口）。
 // 不包含配置、资金、文件、任务接口。
 
 import { parseAbi, parseAbiItem } from "viem";

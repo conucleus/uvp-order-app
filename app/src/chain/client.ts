@@ -174,8 +174,8 @@ export function createChainReader(config: ChainConfig): ChainReader {
             try {
               const block = await client.getBlock({ blockNumber });
               timestamps.set(blockNumber, block.timestamp);
-            } catch {
-              // 时间戳读不到不影响事实本身：页面显示“时间未知”。
+            } catch (error) {
+              void error;
             }
           })
         );
