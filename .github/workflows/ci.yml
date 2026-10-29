@@ -58,9 +58,13 @@ jobs:
           cat > pnpm-workspace.yaml <<'EOF'
           packages:
             - "uvp-order-app/app"
-            - "uvp-protocol/packages/product-dto"
-            - "uvp-protocol/packages/protocol-bindings"
             - "uvp-client/package"
+            - "uvp-protocol/packages/canonical-json"
+            - "uvp-protocol/packages/chain-read-contract"
+            - "uvp-protocol/packages/compiler"
+            - "uvp-protocol/packages/hook-core"
+            - "uvp-core/crates/uvp-node"
+            - "uvp-protocol/packages/protocol-bindings"
           EOF
           printf '{"name":"ci-workspace","private":true,"packageManager":"pnpm@9.15.0"}' > package.json
 

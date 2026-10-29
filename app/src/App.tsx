@@ -1,8 +1,11 @@
-// order-app 最小可用：链上直连查看/发送信号。没有 backend、账户体系、会话 token、
-// 配置目录、金额/文件/任务承诺；读用公共 RPC，写用浏览器钱包 submitSignal。
-// 失败与空分开：读取失败具名，空事件列表只表示链上没有这些事实。
+// order-app 链直连 demo B：连接钱包 → 解析手填编译 artifact（definition/onchain/
+// registerArgs/planId）→ 钱包签 commitPlan + finalizePlan 注册计划 → 钱包签
+// triggerOrderFromOutsideFor 出生订单 → 读链上事实/事件 → 发信号。没有 backend、
+// 会话 token、草稿或邀请；浏览器不编译 DSL（compiler 非浏览器安全）。
+// 读取失败与空事实分开：读取失败具名，空事件只表示链上没有这些事实。
 
-import { useMemo, useState } from "react";
+import { useMemo, useState, type ChangeEvent } from "react";
+import { isAddress } from "viem";
 import {
   chainConfigProblemText,
   readChainConfig,
@@ -11,6 +14,8 @@ import {
 import {
   connectWallet,
   createChainReader,
+  sendWalletCall,
+  signTypedDataWithWallet,
   submitSignal,
   type ChainFailure,
   type OrderFacts,
@@ -18,6 +23,18 @@ import {
 } from "./chain/client";
 import type { ChainEvent, SignalSubmittedFact } from "./chain/events";
 import { buildSignalCall, parseBytes32, randomBytes32 } from "./chain/input";
+import {
+  buildCommitPlanCalls,
+  buildCommitPlanTypedData,
+  buildOrderBirthCall,
+  parseCompiledPlanArtifact,
+  prepareOrderBirth,
+  signalAttributionFor,
+  type CompiledPlanArtifact
+} from "./chain/plan";
+
+const ARTIFACT_SIZE_LIMIT = 5_000_000;
+const CALL_DEADLINE_SECONDS = 3_600n;
 
 type QueryState =
   | { readonly kind: "idle" }
@@ -37,6 +54,23 @@ type SubmitState =
   | { readonly kind: "success"; readonly txHash: string }
   | { readonly kind: "failed"; readonly failure: ChainFailure };
 
+type ArtifactState =
+  | { readonly kind: "idle" }
+  | { readonly kind: "ready"; readonly artifact: CompiledPlanArtifact }
+  | { readonly kind: "failed"; readonly failure: ChainFailure };
+
+type RegisterState =
+  | { readonly kind: "idle" }
+  | { readonly kind: "pending"; readonly step: string }
+  | { readonly kind: "success"; readonly commitTx: string; readonly finalizeTx: string }
+  | { readonly kind: "failed"; readonly failure: ChainFailure };
+
+type BirthState =
+  | { readonly kind: "idle" }
+  | { readonly kind: "pending"; readonly step: string }
+  | { readonly kind: "success"; readonly txHash: string; readonly orderId: string }
+  | { readonly kind: "failed"; readonly failure: ChainFailure };
+
 export default function App() {
   const configState = useMemo(() => readChainConfig(import.meta.env), []);
   if (!configState.ok) {
@@ -49,15 +83,27 @@ function ChainWorkbench({ config }: { readonly config: ChainConfig }) {
   const reader = useMemo(() => createChainReader(config), [config]);
   const [wallet, setWallet] = useState<WalletConnection | undefined>(undefined);
   const [walletFailure, setWalletFailure] = useState<ChainFailure | undefined>(undefined);
+
+  const [artifactText, setArtifactText] = useState("");
+  const [artifactName, setArtifactName] = useState("");
+  const [artifactState, setArtifactState] = useState<ArtifactState>({ kind: "idle" });
+  const artifact = artifactState.kind === "ready" ? artifactState.artifact : undefined;
+
   const [planInput, setPlanInput] = useState("");
   const [orderInput, setOrderInput] = useState("");
   const [query, setQuery] = useState<QueryState>({ kind: "idle" });
   const [events, setEvents] = useState<EventsState>({ kind: "idle" });
 
+  const [creator, setCreator] = useState("");
+  const [birthPayloadHash, setBirthPayloadHash] = useState(() => safeRandomBytes32());
+  const [birthIdempotencyKey, setBirthIdempotencyKey] = useState(() => safeRandomBytes32());
+  const [signalIdempotencyKey, setSignalIdempotencyKey] = useState(() => safeRandomBytes32());
+  const [registerState, setRegisterState] = useState<RegisterState>({ kind: "idle" });
+  const [birthState, setBirthState] = useState<BirthState>({ kind: "idle" });
+
   const [sourceId, setSourceId] = useState("");
   const [signalId, setSignalId] = useState("");
-  const [payloadHash, setPayloadHash] = useState("");
-  const [idempotencyKey, setIdempotencyKey] = useState(() => safeRandomBytes32());
+  const [signalPayloadHash, setSignalPayloadHash] = useState("");
   const [attribution, setAttribution] = useState("");
   const [submit, setSubmit] = useState<SubmitState>({ kind: "idle" });
 
@@ -69,16 +115,238 @@ function ChainWorkbench({ config }: { readonly config: ChainConfig }) {
       return;
     }
     setWallet(result.value);
+    if (creator.trim() === "") {
+      setCreator(result.value.address);
+    }
   }
 
-  async function load(): Promise<void> {
-    const planId = parseBytes32(planInput, "planId");
+  function applyArtifact(text: string, label: string): void {
+    const parsed = parseCompiledPlanArtifact(text);
+    if (!parsed.ok) {
+      setArtifactState({ kind: "failed", failure: { code: parsed.code, message: parsed.message } });
+      return;
+    }
+    setArtifactState({ kind: "ready", artifact: parsed.value });
+    setArtifactName(label);
+    setPlanInput(parsed.value.planId);
+    setRegisterState({ kind: "idle" });
+    setBirthState({ kind: "idle" });
+  }
+
+  async function loadArtifactFile(event: ChangeEvent<HTMLInputElement>): Promise<void> {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    if (file === undefined) {
+      return;
+    }
+    if (file.size > ARTIFACT_SIZE_LIMIT) {
+      setArtifactState({
+        kind: "failed",
+        failure: {
+          code: "artifact_too_large",
+          message: `artifact 文件 ${String(file.size)} 字节超过上限 ${String(ARTIFACT_SIZE_LIMIT)} 字节。`
+        }
+      });
+      return;
+    }
+    let text: string;
+    try {
+      text = await file.text();
+    } catch (error) {
+      setArtifactState({
+        kind: "failed",
+        failure: {
+          code: "artifact_read_failed",
+          message: error instanceof Error ? error.message : String(error)
+        }
+      });
+      return;
+    }
+    setArtifactText(text);
+    applyArtifact(text, file.name);
+  }
+
+  async function registerPlan(): Promise<void> {
+    if (artifact === undefined) {
+      setRegisterState({
+        kind: "failed",
+        failure: { code: "artifact_missing", message: "先解析 artifact 再注册计划。" }
+      });
+      return;
+    }
+    if (wallet === undefined) {
+      setRegisterState({
+        kind: "failed",
+        failure: { code: "no_wallet", message: "先连接钱包再注册计划。" }
+      });
+      return;
+    }
+    setRegisterState({ kind: "pending", step: "读取链上时间" });
+    const timestamp = await reader.latestTimestamp();
+    if (!timestamp.ok) {
+      setRegisterState({ kind: "failed", failure: timestamp.failure });
+      return;
+    }
+    const input = {
+      artifact,
+      publisher: wallet.address,
+      chainId: config.chainId,
+      stateMachineAddress: config.stateMachine,
+      deadline: timestamp.value + CALL_DEADLINE_SECONDS
+    };
+    const typedData = buildCommitPlanTypedData(input);
+    if (!typedData.ok) {
+      setRegisterState({ kind: "failed", failure: { code: typedData.code, message: typedData.message } });
+      return;
+    }
+    setRegisterState({ kind: "pending", step: "等待钱包签名 commitPlan typed data" });
+    const signature = await signTypedDataWithWallet(wallet, typedData.value);
+    if (!signature.ok) {
+      setRegisterState({ kind: "failed", failure: signature.failure });
+      return;
+    }
+    const calls = buildCommitPlanCalls({ ...input, signature: signature.value });
+    if (!calls.ok) {
+      setRegisterState({ kind: "failed", failure: { code: calls.code, message: calls.message } });
+      return;
+    }
+    setRegisterState({ kind: "pending", step: "发送 commitPlan" });
+    const commit = await sendWalletCall(config, wallet, calls.value.commit, "commitPlan");
+    if (!commit.ok) {
+      setRegisterState({ kind: "failed", failure: commit.failure });
+      return;
+    }
+    setRegisterState({ kind: "pending", step: "发送 finalizePlan" });
+    const finalize = await sendWalletCall(config, wallet, calls.value.finalize, "finalizePlan");
+    if (!finalize.ok) {
+      setRegisterState({ kind: "failed", failure: finalize.failure });
+      return;
+    }
+    setRegisterState({ kind: "pending", step: "校验 planExists(artifact.planId)" });
+    const plan = await reader.readPlanExists(artifact.planId);
+    if (!plan.ok) {
+      setRegisterState({ kind: "failed", failure: plan.failure });
+      return;
+    }
+    if (!plan.value) {
+      setRegisterState({
+        kind: "failed",
+        failure: {
+          code: "plan_id_mismatch",
+          message:
+            `commitPlan+finalizePlan 已上链，但 planExists(${artifact.planId}) 为 false：` +
+            "artifact.planId 不是当前 publisher（钱包）注册出的 plan，请改用按此钱包编译/发布的 artifact。"
+        }
+      });
+      return;
+    }
+    setRegisterState({
+      kind: "success",
+      commitTx: commit.value.txHash,
+      finalizeTx: finalize.value.txHash
+    });
+  }
+
+  async function createOrder(): Promise<void> {
+    if (artifact === undefined) {
+      setBirthState({
+        kind: "failed",
+        failure: { code: "artifact_missing", message: "先解析 artifact 再出生订单。" }
+      });
+      return;
+    }
+    if (wallet === undefined) {
+      setBirthState({
+        kind: "failed",
+        failure: { code: "no_wallet", message: "先连接钱包再出生订单。" }
+      });
+      return;
+    }
+    const creatorRaw = creator.trim() === "" ? wallet.address : creator.trim();
+    if (!isAddress(creatorRaw, { strict: true })) {
+      setBirthState({
+        kind: "failed",
+        failure: { code: "birth_creator", message: `creator ${creatorRaw} 不是合法 EVM 地址。` }
+      });
+      return;
+    }
+    const payload = parseBytes32(birthPayloadHash, "payloadHash");
+    if (!payload.ok) {
+      setBirthState({
+        kind: "failed",
+        failure: { code: "birth_payload_hash", message: payload.message }
+      });
+      return;
+    }
+    const idempotency = parseBytes32(birthIdempotencyKey, "idempotencyKey");
+    if (!idempotency.ok) {
+      setBirthState({
+        kind: "failed",
+        failure: { code: "birth_idempotency_key", message: idempotency.message }
+      });
+      return;
+    }
+    setBirthState({ kind: "pending", step: "读取链上时间" });
+    const timestamp = await reader.latestTimestamp();
+    if (!timestamp.ok) {
+      setBirthState({ kind: "failed", failure: timestamp.failure });
+      return;
+    }
+    const prepared = prepareOrderBirth({
+      artifact,
+      creator: creatorRaw,
+      submitter: wallet.address,
+      chainId: config.chainId,
+      stateMachineAddress: config.stateMachine,
+      payloadHash: payload.value,
+      idempotencyKey: idempotency.value,
+      deadline: timestamp.value + CALL_DEADLINE_SECONDS
+    });
+    if (!prepared.ok) {
+      setBirthState({ kind: "failed", failure: { code: prepared.code, message: prepared.message } });
+      return;
+    }
+    setBirthState({ kind: "pending", step: "等待钱包签名 triggerOrderFromOutsideFor typed data" });
+    const signature = await signTypedDataWithWallet(wallet, prepared.value.typedData);
+    if (!signature.ok) {
+      setBirthState({ kind: "failed", failure: signature.failure });
+      return;
+    }
+    const call = buildOrderBirthCall({
+      prepared: prepared.value,
+      chainId: config.chainId,
+      stateMachineAddress: config.stateMachine,
+      signature: signature.value
+    });
+    if (!call.ok) {
+      setBirthState({ kind: "failed", failure: { code: call.code, message: call.message } });
+      return;
+    }
+    setBirthState({ kind: "pending", step: "发送 triggerOrderFromOutsideFor" });
+    const sent = await sendWalletCall(config, wallet, call.value, "triggerOrderFromOutsideFor");
+    if (!sent.ok) {
+      setBirthState({ kind: "failed", failure: sent.failure });
+      return;
+    }
+    const orderId = prepared.value.orderId;
+    setBirthState({ kind: "success", txHash: sent.value.txHash, orderId });
+    setPlanInput(artifact.planId);
+    setOrderInput(orderId);
+    setBirthPayloadHash(safeRandomBytes32());
+    setBirthIdempotencyKey(safeRandomBytes32());
+    await load(artifact.planId, orderId);
+  }
+
+  async function load(planArg?: string, orderArg?: string): Promise<void> {
+    const planRaw = planArg ?? planInput;
+    const orderRaw = orderArg ?? orderInput;
+    const planId = parseBytes32(planRaw, "planId");
     if (!planId.ok) {
       setQuery({ kind: "failed", failure: { code: "invalid_input", message: planId.message } });
       setEvents({ kind: "failed", failure: { code: "invalid_input", message: planId.message } });
       return;
     }
-    const orderId = parseBytes32(orderInput, "orderId");
+    const orderId = parseBytes32(orderRaw, "orderId");
     if (!orderId.ok) {
       setQuery({ kind: "failed", failure: { code: "invalid_input", message: orderId.message } });
       setEvents({ kind: "failed", failure: { code: "invalid_input", message: orderId.message } });
@@ -92,8 +360,33 @@ function ChainWorkbench({ config }: { readonly config: ChainConfig }) {
     ]);
     setQuery(facts.ok ? { kind: "ready", facts: facts.value } : { kind: "failed", failure: facts.failure });
     setEvents(
-      chainEvents.ok ? { kind: "ready", events: chainEvents.value } : { kind: "failed", failure: chainEvents.failure }
+      chainEvents.ok
+        ? { kind: "ready", events: chainEvents.value }
+        : { kind: "failed", failure: chainEvents.failure }
     );
+  }
+
+  function autoSignalAttribution(): string {
+    if (artifact === undefined || planInput.trim().toLowerCase() !== artifact.planId.toLowerCase()) {
+      return "";
+    }
+    const source = parseBytes32(sourceId, "sourceId");
+    const signal = parseBytes32(signalId, "signalId");
+    const payload = parseBytes32(signalPayloadHash, "payloadHash");
+    const order = parseBytes32(orderInput, "orderId");
+    const key = parseBytes32(signalIdempotencyKey, "idempotencyKey");
+    if (!source.ok || !signal.ok || !payload.ok || !order.ok || !key.ok) {
+      return "";
+    }
+    const derived = signalAttributionFor(
+      artifact,
+      order.value,
+      source.value,
+      signal.value,
+      payload.value,
+      key.value
+    );
+    return JSON.stringify({ stageId: derived.stageId, proof: derived.capabilityProof });
   }
 
   async function send(): Promise<void> {
@@ -108,9 +401,9 @@ function ChainWorkbench({ config }: { readonly config: ChainConfig }) {
         orderId: orderInput,
         sourceId,
         signalId,
-        payloadHash,
-        idempotencyKey,
-        attributionRaw: attribution
+        payloadHash: signalPayloadHash,
+        idempotencyKey: signalIdempotencyKey,
+        attributionRaw: attribution.trim() === "" ? autoSignalAttribution() : attribution
       }
     );
     if (!built.ok) {
@@ -118,7 +411,7 @@ function ChainWorkbench({ config }: { readonly config: ChainConfig }) {
       return;
     }
     if (wallet === undefined) {
-      setSubmit({ kind: "failed", failure: { code: "no_wallet", message: "先连接钱包再发送信号" } });
+      setSubmit({ kind: "failed", failure: { code: "no_wallet", message: "先连接钱包再发送信号。" } });
       return;
     }
     setSubmit({ kind: "pending" });
@@ -128,7 +421,7 @@ function ChainWorkbench({ config }: { readonly config: ChainConfig }) {
       return;
     }
     setSubmit({ kind: "success", txHash: result.value.txHash });
-    setIdempotencyKey(safeRandomBytes32());
+    setSignalIdempotencyKey(safeRandomBytes32());
     await load();
   }
 
@@ -141,7 +434,7 @@ function ChainWorkbench({ config }: { readonly config: ChainConfig }) {
         <div className="brand-block">
           <div>
             <p>UVP Order App</p>
-            <h1>链上信号</h1>
+            <h1>链上直连 demo B</h1>
           </div>
         </div>
         <div className="topbar-actions">
@@ -159,8 +452,8 @@ function ChainWorkbench({ config }: { readonly config: ChainConfig }) {
 
       <SystemBanner
         tone="info"
-        title="最小、链上直连"
-        text="order-app 只提供链上信号/秩序查看与发送；资金、文件、配置、任务不在承诺范围；也没有 backend、账户体系或会话 token。"
+        title="artifact → commitPlan → 出生，钱包直发"
+        text="浏览器不编译 DSL；artifact 由 used-car 编译器/发布脚本产出后手填。注册与出生都只经当前钱包签名直发链上，没有 backend、会话、草稿或邀请。"
       />
 
       {walletFailure === undefined ? null : (
@@ -168,7 +461,205 @@ function ChainWorkbench({ config }: { readonly config: ChainConfig }) {
       )}
 
       <section className="panel">
-        <h2>订单</h2>
+        <h2>1 · 计划 artifact（手填编译产物）</h2>
+        <p className="fineprint">
+          粘贴 used-car 编译器 bundle{` {definition, onchain, registerArgs, planId}`}，或从 JSON
+          文件载入。浏览器只解析 bundle 与选择出生 trigger；commitPlan/finalizePlan 和出生的
+          typed data/calldata 全部由 @uvp-eth/uvp-client/core 构造。
+        </p>
+        <label>
+          artifact JSON
+          <textarea
+            value={artifactText}
+            onChange={(event) => {
+              setArtifactText(event.target.value);
+              setArtifactState({ kind: "idle" });
+              setRegisterState({ kind: "idle" });
+              setBirthState({ kind: "idle" });
+            }}
+            rows={10}
+            spellCheck={false}
+            placeholder='{"definition":{…},"onchain":{…},"registerArgs":{…},"planId":"0x…"}'
+          />
+        </label>
+        <label>
+          从文件载入 JSON
+          <input
+            type="file"
+            accept="application/json,.json"
+            onChange={(event) => void loadArtifactFile(event)}
+          />
+        </label>
+        {artifactName === "" ? null : <p className="fineprint">已载入：{artifactName}</p>}
+        <div className="submit-actions">
+          <button
+            className="primary-button"
+            type="button"
+            disabled={artifactText.trim() === ""}
+            onClick={() => applyArtifact(artifactText, "粘贴内容")}
+          >
+            解析 artifact
+          </button>
+        </div>
+        {artifactState.kind === "failed" ? (
+          <FailureBlock title="artifact 解析失败" failure={artifactState.failure} />
+        ) : null}
+        {artifact === undefined ? null : <ArtifactFacts artifact={artifact} />}
+      </section>
+
+      <section className="panel">
+        <h2>2 · 注册计划（commitPlan → finalizePlan）</h2>
+        <p className="fineprint">
+          签名人 = publisher = birthAuthorizer = 当前钱包；deadline = 链上时间 + 1 小时。
+          commitPlan 写入 hooks/roots，finalizePlan 后计划才可出生。注册成功后链上 planId
+          必须等于 artifact.planId，否则说明 artifact 不是按当前钱包发布的。
+        </p>
+        <dl className="facts">
+          <div>
+            <dt>publisher / birthAuthorizer</dt>
+            <dd>{wallet?.address ?? "未连接钱包"}</dd>
+          </div>
+          <div>
+            <dt>planId</dt>
+            <dd>{artifact?.planId ?? "未解析 artifact"}</dd>
+          </div>
+          <div>
+            <dt>hooksHash</dt>
+            <dd>{artifact === undefined ? "—" : short(artifact.registerArgs.hooksHash)}</dd>
+          </div>
+          <div>
+            <dt>capabilitiesRoot</dt>
+            <dd>{artifact === undefined ? "—" : short(artifact.registerArgs.capabilitiesRoot)}</dd>
+          </div>
+          <div>
+            <dt>dockRoutesRoot / dockInterfaceRoot</dt>
+            <dd>
+              {artifact === undefined
+                ? "—"
+                : `${short(artifact.registerArgs.dockRoutesRoot)} / ${short(artifact.registerArgs.dockInterfaceRoot)}`}
+            </dd>
+          </div>
+          <div>
+            <dt>deadline</dt>
+            <dd>链上时间 + 1 小时</dd>
+          </div>
+        </dl>
+        <div className="submit-actions">
+          <button
+            className="primary-button"
+            type="button"
+            disabled={registerState.kind === "pending" || artifact === undefined || wallet === undefined}
+            onClick={() => void registerPlan()}
+          >
+            {registerState.kind === "pending" ? registerState.step : "钱包签名并注册计划"}
+          </button>
+        </div>
+        {registerState.kind === "success" ? (
+          <p className="status-ok">
+            已注册：commitPlan {registerState.commitTx} · finalizePlan {registerState.finalizeTx} · planExists=true
+          </p>
+        ) : null}
+        {registerState.kind === "failed" ? (
+          <FailureBlock title="注册计划失败" failure={registerState.failure} />
+        ) : null}
+      </section>
+
+      <section className="panel">
+        <h2>3 · 出生订单（triggerOrderFromOutsideFor）</h2>
+        <p className="fineprint">
+          出生提交人（submitter）与 birthAuthorizer 都是当前钱包；creator 默认当前钱包、可改。
+          出生时把 artifact 声明的全部事实键授权给当前钱包（role/metadataHash 置零，仅 demo
+          引导）。payloadHash/idempotencyKey 是本次出生的承诺，缺省随机。
+        </p>
+        <div className="grid-2">
+          <label>
+            creator（默认当前钱包）
+            <input
+              value={creator}
+              onChange={(event) => setCreator(event.target.value)}
+              placeholder="0x + 40 hex"
+              spellCheck={false}
+            />
+          </label>
+          <label>
+            payloadHash
+            <input
+              value={birthPayloadHash}
+              onChange={(event) => setBirthPayloadHash(event.target.value)}
+              placeholder="0x + 64 hex"
+              spellCheck={false}
+            />
+          </label>
+          <label>
+            idempotencyKey
+            <input
+              value={birthIdempotencyKey}
+              onChange={(event) => setBirthIdempotencyKey(event.target.value)}
+              placeholder="0x + 64 hex"
+              spellCheck={false}
+            />
+          </label>
+        </div>
+        <dl className="facts">
+          <div>
+            <dt>submitter / birthAuthorizer</dt>
+            <dd>{wallet?.address ?? "未连接钱包"}</dd>
+          </div>
+          <div>
+            <dt>planId</dt>
+            <dd>{artifact?.planId ?? "未解析 artifact"}</dd>
+          </div>
+          <div>
+            <dt>出生 trigger hook / stage</dt>
+            <dd>
+              {artifact === undefined
+                ? "—"
+                : `${short(artifact.trigger.hookId)} / ${short(artifact.trigger.stageId)}`}
+            </dd>
+          </div>
+          <div>
+            <dt>出生 source / signal</dt>
+            <dd>
+              {artifact === undefined
+                ? "—"
+                : `${artifact.trigger.source} / ${artifact.trigger.signalName}`}
+            </dd>
+          </div>
+          <div>
+            <dt>sourceId / signalId</dt>
+            <dd>
+              {artifact === undefined
+                ? "—"
+                : `${short(artifact.trigger.sourceId)} / ${short(artifact.trigger.signalId)}`}
+            </dd>
+          </div>
+          <div>
+            <dt>出生授权</dt>
+            <dd>{artifact === undefined ? "—" : `${String(artifact.facts.length)} 个事实键`}</dd>
+          </div>
+        </dl>
+        <div className="submit-actions">
+          <button
+            className="primary-button"
+            type="button"
+            disabled={birthState.kind === "pending" || artifact === undefined || wallet === undefined}
+            onClick={() => void createOrder()}
+          >
+            {birthState.kind === "pending" ? birthState.step : "钱包签出生并创建订单"}
+          </button>
+        </div>
+        {birthState.kind === "success" ? (
+          <p className="status-ok">
+            已出生：orderId {birthState.orderId} · tx {birthState.txHash}（已自动读取事实）
+          </p>
+        ) : null}
+        {birthState.kind === "failed" ? (
+          <FailureBlock title="出生失败" failure={birthState.failure} />
+        ) : null}
+      </section>
+
+      <section className="panel">
+        <h2>4 · 订单事实</h2>
         <div className="grid-2">
           <label>
             planId
@@ -235,7 +726,7 @@ function ChainWorkbench({ config }: { readonly config: ChainConfig }) {
       </section>
 
       <section className="panel">
-        <h2>信号（SignalSubmitted）</h2>
+        <h2>5 · 链上事实事件</h2>
         <p className="fineprint">
           SignalSubmitted 事件不含 fee/金额字段；这里的字段全部来自链上事件，不补造配置或阶段名。
         </p>
@@ -256,10 +747,6 @@ function ChainWorkbench({ config }: { readonly config: ChainConfig }) {
             ))}
           </ul>
         ) : null}
-      </section>
-
-      <section className="panel">
-        <h2>其他链上事实</h2>
         {otherEvents.length > 0 ? (
           <ul className="event-list">
             {otherEvents.map((event) => (
@@ -275,10 +762,12 @@ function ChainWorkbench({ config }: { readonly config: ChainConfig }) {
       </section>
 
       <section className="panel">
-        <h2>发信号</h2>
+        <h2>6 · 发信号（submitSignal）</h2>
         <p className="fineprint">
-          钱包直接调用 UVPStateMachine.submitSignal；不经 relay/backend。attribution 可选 JSON：
-          {` { "stageId": "0x…", "proof": ["0x…"] }`}（proof 语义不解析）。
+          钱包直接调用 UVPStateMachine.submitSignal；不经 relay/backend。链上要求提交人对该
+          (sourceId, signalId) 有授权，否则回滚具名 UnauthorizedSignalSubmitter。attribution
+          可选 JSON：{` { "stageId": "0x…", "proof": ["0x…"] }`}（proof 语义不解析；
+          留空且 planId 等于已解析 artifact 时按 artifact 能力表自动补 proof）。
         </p>
         <div className="grid-2">
           <label>
@@ -291,11 +780,11 @@ function ChainWorkbench({ config }: { readonly config: ChainConfig }) {
           </label>
           <label>
             payloadHash
-            <input value={payloadHash} onChange={(event) => setPayloadHash(event.target.value)} placeholder="0x + 64 hex" spellCheck={false} />
+            <input value={signalPayloadHash} onChange={(event) => setSignalPayloadHash(event.target.value)} placeholder="0x + 64 hex" spellCheck={false} />
           </label>
           <label>
             idempotencyKey
-            <input value={idempotencyKey} onChange={(event) => setIdempotencyKey(event.target.value)} placeholder="0x + 64 hex（默认随机）" spellCheck={false} />
+            <input value={signalIdempotencyKey} onChange={(event) => setSignalIdempotencyKey(event.target.value)} placeholder="0x + 64 hex（默认随机）" spellCheck={false} />
           </label>
         </div>
         <label>
@@ -324,6 +813,45 @@ function ChainWorkbench({ config }: { readonly config: ChainConfig }) {
         {submit.kind === "failed" ? <FailureBlock title="发送失败" failure={submit.failure} /> : null}
       </section>
     </main>
+  );
+}
+
+function ArtifactFacts({ artifact }: { readonly artifact: CompiledPlanArtifact }) {
+  return (
+    <dl className="facts">
+      <div>
+        <dt>planId</dt>
+        <dd>{artifact.planId}</dd>
+      </div>
+      <div>
+        <dt>zhixu</dt>
+        <dd>{artifact.zhixuId ?? artifact.zhixuName ?? "未标注"}</dd>
+      </div>
+      <div>
+        <dt>hooks / 声明事实</dt>
+        <dd>
+          {String(artifact.hookCount)} / {String(artifact.facts.length)}
+        </dd>
+      </div>
+      <div>
+        <dt>出生 trigger hook / stage</dt>
+        <dd>
+          {short(artifact.trigger.hookId)} / {short(artifact.trigger.stageId)}
+        </dd>
+      </div>
+      <div>
+        <dt>出生 source / signal</dt>
+        <dd>
+          {artifact.trigger.source} / {artifact.trigger.signalName}
+        </dd>
+      </div>
+      <div>
+        <dt>sourceId / signalId</dt>
+        <dd>
+          {short(artifact.trigger.sourceId)} / {short(artifact.trigger.signalId)}
+        </dd>
+      </div>
+    </dl>
   );
 }
 
@@ -430,7 +958,7 @@ function ConfigProblem({ problem }: { readonly problem: string }) {
         <div className="brand-block">
           <div>
             <p>UVP Order App</p>
-            <h1>链上信号</h1>
+            <h1>链上直连 demo B</h1>
           </div>
         </div>
         <span className="source-badge source-missing">未配置</span>
@@ -460,4 +988,3 @@ function safeRandomBytes32(): string {
     return "";
   }
 }
-

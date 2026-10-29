@@ -48,16 +48,6 @@ export class AppErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundar
             >
               重新加载
             </button>
-            <button
-              className="quiet-button"
-              type="button"
-              onClick={() => {
-                window.location.hash = "#section=create";
-                window.location.reload();
-              }}
-            >
-              回到开单首页
-            </button>
           </div>
           {error.stack ? (
             <details className="error-boundary-stack">

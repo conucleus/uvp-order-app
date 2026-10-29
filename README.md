@@ -1,27 +1,36 @@
 # uvp-order-app
 
-Browser participant console for UVP Orders. The runnable package is `app/`.
+Chain-direct browser console for UVP Orders (demo B). The runnable package is `app/`.
 
-The app has one flow: wallet session → create order (config version → draft →
-invites → buyer EIP-712 finalize) → invite acceptance → order-room read view.
-Product access and typed-data verification come from
-`@uvp-eth/uvp-client/browser`; chain facts stay with `UVPStateMachine`.
+Flow: connect an injected EIP-1193 wallet → paste or load a hand-filled compiled
+plan artifact `{definition, onchain, registerArgs, planId}` produced by the
+used-car compiler/publish scripts → the wallet signs `commitPlan` and
+`finalizePlan` → the wallet signs `triggerOrderFromOutsideFor` to birth the order
+(wallet = publisher = birthAuthorizer) → read order facts/events from the state
+machine → submit a signal.
+
+There is no backend, session token, draft, invite, config directory, or task
+inbox. The compiler is not browser-safe (`zhixu-loader` depends on `node:fs`), so
+the browser never compiles DSL: the artifact is compiled outside and pasted/loaded.
+Typed-data and calldata come from `@uvp-eth/uvp-client/core`; chain facts stay on
+`UVPStateMachine`.
 
 ```bash
 pnpm --filter @uvp-eth/order-app dev
 pnpm --filter @uvp-eth/order-app typecheck
 pnpm --filter @uvp-eth/order-app test
-pnpm --filter @uvp-eth/order-app test:e2e
-pnpm --filter @uvp-eth/order-app test:e2e:configured
 pnpm --filter @uvp-eth/order-app build
 ```
 
-Set `VITE_UVP_CHAIN_SERVICES_URL` for the participant service. Without it the
-shell renders fail-closed and shows no order views. Optional
-`VITE_UVP_CONFIG_ID` / `VITE_UVP_CONFIG_VERSION` prefill the order form; the
-server has no config directory endpoint, so the version is always read by
-`configId + version`.
+Required env: `VITE_UVP_STATE_MACHINE`, `VITE_CHAIN_ID`, `VITE_RPC_URL`;
+optional `VITE_UVP_FROM_BLOCK`. See `app/.env.example`.
 
-Wallet session currently uses the app-owned `/store/auth/challenge|verify`
-transport (token kept in `localStorage`); the server-side generic participant
-session contract is still a gap. See `app/README.md` and `app/.env.example`.
+The artifact must be compiled/published for the connected wallet as publisher;
+after finalize the app reads `planExists(artifact.planId)` and fails named
+(`plan_id_mismatch`) when the artifact belongs to another publisher.
+
+Playwright e2e was removed: the old specs asserted copy from the deleted backend
+flow (already red), and a meaningful replacement needs a live chain, a deployed
+state machine, a published artifact, and an injected wallet — L6
+integration/live-chain territory, not this L5 app. Static-copy browser specs are
+echo tests and are not reintroduced. See `app/README.md`.

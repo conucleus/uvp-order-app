@@ -1,7 +1,7 @@
-// 链上直连：公共 RPC 只读（order facts + 事实事件，fromBlock 可配、分块查询、
-// 失败具名）；写走 uvp-client core 构造的 submitSignal call + browser
-// sendProviderTransaction（不 relay、不代付、无 backend）。失败保留 code/message，
-// 不伪造空/成功。
+// 链上直连：公共 RPC 只读（order facts/plan 存在性/事实事件/块时间，fromBlock
+// 可配、分块查询、失败具名）；写走 uvp-client core 构造的 call + 钱包 EIP-712
+// 签名 + browser sendProviderTransaction（不 relay、不代付、无 backend）。失败
+// 保留 code/message，不伪造空/成功。
 
 import {
   createPublicClient,
@@ -9,11 +9,13 @@ import {
   isAddress,
   type Address,
   type Hex,
-  type Log
+  type Log,
+  type TypedDataDefinition
 } from "viem";
 import {
   getBrowserEthereumProvider,
   sendProviderTransaction,
+  signTypedDataWithProvider,
   type Eip1193Provider
 } from "@uvp-eth/uvp-client/browser";
 import {
@@ -52,7 +54,15 @@ export interface OrderFacts {
 
 export interface ChainReader {
   readOrder(planId: Bytes32, orderId: Bytes32): Promise<ChainResult<OrderFacts>>;
+  readPlanExists(planId: Bytes32): Promise<ChainResult<boolean>>;
   readEvents(planId: Bytes32, orderId: Bytes32): Promise<ChainResult<readonly ChainEvent[]>>;
+  latestTimestamp(): Promise<ChainResult<bigint>>;
+}
+
+export interface WalletCall {
+  readonly address: Address;
+  readonly data: Hex;
+  readonly chainId?: number | undefined;
 }
 
 export interface WalletConnection {
@@ -99,6 +109,29 @@ export function createChainReader(config: ChainConfig): ChainReader {
         return { ok: true, value: { planExists, orderExists, creator, relayer } };
       } catch (error) {
         return { ok: false, failure: mapReadError(error, "读取订单事实失败") };
+      }
+    },
+
+    async readPlanExists(planId) {
+      try {
+        const planExists = await client.readContract({
+          address: config.stateMachine,
+          abi: stateMachineReadAbi,
+          functionName: "planExists",
+          args: [planId]
+        });
+        return { ok: true, value: planExists };
+      } catch (error) {
+        return { ok: false, failure: mapReadError(error, "读取计划存在性失败") };
+      }
+    },
+
+    async latestTimestamp() {
+      try {
+        const block = await client.getBlock();
+        return { ok: true, value: block.timestamp };
+      } catch (error) {
+        return { ok: false, failure: mapReadError(error, "读取链上时间失败") };
       }
     },
 
@@ -275,15 +308,32 @@ export async function connectWallet(config: ChainConfig): Promise<ChainResult<Wa
   }
 }
 
-export async function submitSignal(
+export async function signTypedDataWithWallet(
+  connection: WalletConnection,
+  typedData: TypedDataDefinition
+): Promise<ChainResult<Hex>> {
+  try {
+    const signature = await signTypedDataWithProvider(connection.provider, typedData, connection.address);
+    return { ok: true, value: signature };
+  } catch (error) {
+    const mapped = mapWalletError(error);
+    return { ok: false, failure: { code: mapped.code, message: mapped.message } };
+  }
+}
+
+export async function sendWalletCall(
   config: ChainConfig,
   connection: WalletConnection,
-  call: SubmitStateMachineSignalCall
+  call: WalletCall,
+  label: string
 ): Promise<ChainResult<{ readonly txHash: Hex }>> {
-  if (call.chainId !== config.chainId) {
+  if (call.chainId !== undefined && call.chainId !== config.chainId) {
     return {
       ok: false,
-      failure: { code: "chain_mismatch", message: `构造 call 的链 ID ${call.chainId} 与配置 ${config.chainId} 不一致` }
+      failure: {
+        code: "chain_mismatch",
+        message: `${label} 的链 ID ${call.chainId} 与配置 ${config.chainId} 不一致`
+      }
     };
   }
   const publicClient = createPublicClient({ transport: http(config.rpcUrl) });
@@ -296,7 +346,7 @@ export async function submitSignal(
     });
   } catch (error) {
     const mapped = mapWalletError(error);
-    return { ok: false, failure: { code: mapped.code, message: mapped.message } };
+    return { ok: false, failure: { code: mapped.code, message: `${label} 预检失败：${mapped.message}` } };
   }
 
   let hash: Hex;
@@ -314,17 +364,32 @@ export async function submitSignal(
   try {
     const receipt = await publicClient.waitForTransactionReceipt({ hash });
     if (receipt.status !== "success") {
-      return { ok: false, failure: receiptRevertedFailure(hash) };
+      return {
+        ok: false,
+        failure: { code: "reverted", message: `${label} 已上链但回执状态是 reverted`, txHash: hash }
+      };
     }
     return { ok: true, value: { txHash: hash } };
   } catch (error) {
     const mapped = mapWalletError(error);
-    return { ok: false, failure: { code: mapped.code, message: mapped.message, txHash: hash } };
+    return {
+      ok: false,
+      failure: { code: mapped.code, message: `${label} 回执等待失败：${mapped.message}`, txHash: hash }
+    };
   }
 }
 
-export function receiptRevertedFailure(txHash: Hex): ChainFailure {
-  return { code: "reverted", message: "交易已上链但回执状态是 reverted", txHash };
+export async function submitSignal(
+  config: ChainConfig,
+  connection: WalletConnection,
+  call: SubmitStateMachineSignalCall
+): Promise<ChainResult<{ readonly txHash: Hex }>> {
+  return sendWalletCall(
+    config,
+    connection,
+    { address: call.address, data: call.data, chainId: call.chainId },
+    "submitSignal"
+  );
 }
 
 export function logChunkRanges(
