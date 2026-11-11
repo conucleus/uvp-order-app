@@ -1,9 +1,11 @@
 // artifact 入口的不变量：手填 bundle 的坏形状/坏 planId/坏出生 trigger 必须具名
-// 拒绝（不落到通用异常）；出生准备按 artifact 声明的事实键授权并去重，capability
+// 拒绝（不落到通用异常）；多 trigger 按 artifact 顺序枚举、dock 入口不进出生；
+// 出生准备使用显式选择的 trigger，并按 artifact 声明的事实键授权、去重，capability
 // 计划带 stage attribution（否则链上 InvalidSignalCapability）。
 
 import assert from "node:assert/strict";
 import test from "node:test";
+import { deriveTriggerOrderId } from "@uvp-eth/uvp-client/core";
 import {
   parseCompiledPlanArtifact,
   prepareOrderBirth,
@@ -24,6 +26,30 @@ const TRIGGER_FACT = {
   signalKey: H(5)
 };
 
+const SECOND_TRIGGER = {
+  hookId: H(50),
+  stageIdentifier: "renew",
+  stageId: H(51),
+  hookName: "renew",
+  orderTriggerKind: "trigger",
+  source: "seller",
+  signalName: "renew.renew",
+  sourceId: H(52),
+  signalId: H(53)
+};
+
+const DOCK_TRIGGER = {
+  hookId: H(60),
+  stageIdentifier: "dockin",
+  stageId: H(61),
+  hookName: "arrive",
+  orderTriggerKind: "dock",
+  source: "dock",
+  signalName: "dockin.arrive",
+  sourceId: H(62),
+  signalId: H(63)
+};
+
 function baseArtifact(): Record<string, unknown> {
   return {
     definition: {
@@ -40,9 +66,9 @@ function baseArtifact(): Record<string, unknown> {
           hookId: H(1),
           stageId: H(2),
           stageIdentifier: "birth",
-          hookName: "BIRTH",
+          hookName: "order_requested",
           kind: "receive",
-          orderTriggerKind: "mint",
+          orderTriggerKind: "trigger",
           emitReady: true,
           instructions: [],
           dependencies: [TRIGGER_FACT]
@@ -57,6 +83,19 @@ function baseArtifact(): Record<string, unknown> {
           emitReady: true,
           instructions: [],
           dependencies: [TRIGGER_FACT]
+        }
+      ],
+      triggers: [
+        {
+          hookId: H(1),
+          stageIdentifier: "birth",
+          stageId: H(2),
+          hookName: "order_requested",
+          orderTriggerKind: "trigger",
+          source: "platform",
+          signalName: "birth_intake.order_requested",
+          sourceId: H(3),
+          signalId: H(4)
         }
       ],
       signalCapabilities: [
@@ -111,6 +150,66 @@ function cloneArtifact(): Record<string, unknown> {
   return JSON.parse(JSON.stringify(baseArtifact())) as Record<string, unknown>;
 }
 
+function addTriggerEntries(raw: Record<string, unknown>): Record<string, unknown> {
+  const onchain = raw["onchain"] as Record<string, unknown>;
+  (onchain["compiledHooks"] as Record<string, unknown>[]).push(
+    {
+      hookId: SECOND_TRIGGER.hookId,
+      stageId: SECOND_TRIGGER.stageId,
+      stageIdentifier: SECOND_TRIGGER.stageIdentifier,
+      hookName: SECOND_TRIGGER.hookName,
+      kind: "receive",
+      orderTriggerKind: "trigger",
+      emitReady: true,
+      instructions: [],
+      dependencies: [
+        {
+          kind: "positive",
+          source: SECOND_TRIGGER.source,
+          signalName: SECOND_TRIGGER.signalName,
+          sourceId: SECOND_TRIGGER.sourceId,
+          signalId: SECOND_TRIGGER.signalId,
+          signalKey: H(54)
+        }
+      ]
+    },
+    {
+      hookId: DOCK_TRIGGER.hookId,
+      stageId: DOCK_TRIGGER.stageId,
+      stageIdentifier: DOCK_TRIGGER.stageIdentifier,
+      hookName: DOCK_TRIGGER.hookName,
+      kind: "receive",
+      orderTriggerKind: "dock",
+      emitReady: true,
+      instructions: [],
+      dependencies: [
+        {
+          kind: "positive",
+          source: DOCK_TRIGGER.source,
+          signalName: DOCK_TRIGGER.signalName,
+          sourceId: DOCK_TRIGGER.sourceId,
+          signalId: DOCK_TRIGGER.signalId,
+          signalKey: H(64)
+        }
+      ]
+    }
+  );
+  (onchain["triggers"] as Record<string, unknown>[]).push(SECOND_TRIGGER, DOCK_TRIGGER);
+  (onchain["signalCapabilities"] as Record<string, unknown>[]).push({
+    stageIdentifier: SECOND_TRIGGER.stageIdentifier,
+    stageId: SECOND_TRIGGER.stageId,
+    source: SECOND_TRIGGER.source,
+    declaredSignal: "renew",
+    targetSource: SECOND_TRIGGER.source,
+    targetSourceId: SECOND_TRIGGER.sourceId,
+    targetSignalName: SECOND_TRIGGER.signalName,
+    signalId: SECOND_TRIGGER.signalId,
+    targetOrderRelation: "current",
+    capabilityHash: H(70)
+  });
+  return raw;
+}
+
 function parseOk(raw: Record<string, unknown>): CompiledPlanArtifact {
   const parsed = parseCompiledPlanArtifact(JSON.stringify(raw));
   if (!parsed.ok) {
@@ -119,7 +218,7 @@ function parseOk(raw: Record<string, unknown>): CompiledPlanArtifact {
   return parsed.value;
 }
 
-test("artifact 解析：空/坏 JSON/坏形状/坏 planId 具名拒绝", () => {
+test("artifact 解析：坏 JSON/坏形状/坏 planId 具名拒绝；多 trigger 保序且排除 dock 入口", () => {
   const empty = parseCompiledPlanArtifact(" ");
   assert.equal(empty.ok, false);
   if (!empty.ok) assert.equal(empty.code, "artifact_empty");
@@ -158,87 +257,41 @@ test("artifact 解析：空/坏 JSON/坏形状/坏 planId 具名拒绝", () => {
     assert.equal(relation.code, "artifact_invalid");
     assert.match(relation.message, /targetOrderRelation/u);
   }
-});
 
-test("出生 trigger 选择：唯一 mint 取 positive 依赖；多 mint 优先 bootstrap；缺失/多义具名", () => {
-  const artifact = parseOk(cloneArtifact());
-  assert.equal(artifact.trigger.hookId, H(1));
-  assert.equal(artifact.trigger.stageId, H(2));
-  assert.equal(artifact.trigger.sourceId, H(3));
-  assert.equal(artifact.trigger.signalId, H(4));
-  assert.equal(artifact.trigger.source, "platform");
-  assert.equal(artifact.trigger.signalName, "birth_intake.order_requested");
+  const multiTrigger = parseOk(addTriggerEntries(cloneArtifact()));
+  assert.equal(multiTrigger.triggers.length, 2);
+  assert.equal(multiTrigger.triggers[0]?.hookId, H(1));
+  assert.equal(multiTrigger.triggers[1]?.hookId, SECOND_TRIGGER.hookId);
+  assert.equal(multiTrigger.triggers.some((entry) => entry.hookId === DOCK_TRIGGER.hookId), false);
 
-  const bootstrapPreferred = cloneArtifact();
-  const hooks = (bootstrapPreferred["onchain"] as Record<string, unknown>)["compiledHooks"] as Record<string, unknown>[];
-  hooks.push({
-    hookId: H(20),
-    stageId: H(21),
-    kind: "receive",
-    orderTriggerKind: "mint",
-    dependencies: [
-      {
-        kind: "positive",
-        source: "bootstrap",
-        signalName: "update.init.trigger",
-        sourceId: H(22),
-        signalId: H(23),
-        signalKey: H(24)
-      }
-    ]
-  });
-  const preferred = parseOk(bootstrapPreferred);
-  assert.equal(preferred.trigger.hookId, H(20));
-  assert.equal(preferred.trigger.sourceId, H(22));
-  assert.equal(preferred.trigger.source, "bootstrap");
+  const dockOnly = cloneArtifact();
+  (dockOnly["onchain"] as Record<string, unknown>)["triggers"] = [DOCK_TRIGGER];
+  const dockOnlyResult = parseCompiledPlanArtifact(JSON.stringify(dockOnly));
+  assert.equal(dockOnlyResult.ok, false);
+  if (!dockOnlyResult.ok) assert.equal(dockOnlyResult.code, "artifact_missing_trigger");
 
-  const ambiguous = cloneArtifact();
-  const ambiguousHooks = (ambiguous["onchain"] as Record<string, unknown>)["compiledHooks"] as Record<string, unknown>[];
-  ambiguousHooks.push({
-    hookId: H(25),
-    stageId: H(26),
-    kind: "receive",
-    orderTriggerKind: "mint",
-    dependencies: [
-      { kind: "positive", source: "other", signalName: "other.trigger", sourceId: H(27), signalId: H(28), signalKey: H(29) }
-    ]
-  });
-  const ambiguousResult = parseCompiledPlanArtifact(JSON.stringify(ambiguous));
-  assert.equal(ambiguousResult.ok, false);
-  if (!ambiguousResult.ok) assert.equal(ambiguousResult.code, "artifact_ambiguous_trigger");
+  const noTriggers = cloneArtifact();
+  (noTriggers["onchain"] as Record<string, unknown>)["triggers"] = [];
+  const noTriggersResult = parseCompiledPlanArtifact(JSON.stringify(noTriggers));
+  assert.equal(noTriggersResult.ok, false);
+  if (!noTriggersResult.ok) assert.equal(noTriggersResult.code, "artifact_missing_trigger");
 
-  const missing = cloneArtifact();
-  const missingOnchain = missing["onchain"] as Record<string, unknown>;
-  missingOnchain["compiledHooks"] = (missingOnchain["compiledHooks"] as Record<string, unknown>[]).filter(
-    (hook) => hook["orderTriggerKind"] !== "mint"
-  );
-  const missingResult = parseCompiledPlanArtifact(JSON.stringify(missing));
-  assert.equal(missingResult.ok, false);
-  if (!missingResult.ok) assert.equal(missingResult.code, "artifact_missing_trigger");
-
-  const doublePositive = cloneArtifact();
-  const doubleHooks = (doublePositive["onchain"] as Record<string, unknown>)["compiledHooks"] as Record<string, unknown>[];
-  const mint = doubleHooks[0];
-  if (mint === undefined) assert.fail("fixture mint hook missing");
-  (mint["dependencies"] as Record<string, unknown>[]).push({
-    kind: "positive",
-    source: "second",
-    signalName: "second.trigger",
-    sourceId: H(30),
-    signalId: H(31),
-    signalKey: H(32)
-  });
-  const doubleResult = parseCompiledPlanArtifact(JSON.stringify(doublePositive));
-  assert.equal(doubleResult.ok, false);
-  if (!doubleResult.ok) assert.equal(doubleResult.code, "artifact_ambiguous_trigger");
+  const noTriggerField = cloneArtifact();
+  delete (noTriggerField["onchain"] as Record<string, unknown>)["triggers"];
+  const noTriggerFieldResult = parseCompiledPlanArtifact(JSON.stringify(noTriggerField));
+  assert.equal(noTriggerFieldResult.ok, false);
+  if (!noTriggerFieldResult.ok) assert.equal(noTriggerFieldResult.code, "artifact_shape");
 });
 
 test("出生准备：capability 计划带 stage attribution；授权按事实键去重", () => {
   const artifact = parseOk(cloneArtifact());
   assert.equal(artifact.facts.length, 1);
+  const trigger = artifact.triggers[0];
+  if (trigger === undefined) assert.fail("fixture trigger missing");
 
   const prepared = prepareOrderBirth({
     artifact,
+    trigger,
     creator: CREATOR,
     submitter: WALLET,
     chainId: 31_337,
@@ -262,4 +315,35 @@ test("出生准备：capability 计划带 stage attribution；授权按事实键
   assert.equal(prepared.value.birthFactAttribution.stageId, H(2));
   assert.equal(prepared.value.typedData.message.submitter, WALLET);
   assert.equal(prepared.value.typedData.message.creator, CREATOR);
+
+  const multiArtifact = parseOk(addTriggerEntries(cloneArtifact()));
+  const triggerA = multiArtifact.triggers[0];
+  const triggerB = multiArtifact.triggers[1];
+  if (triggerA === undefined || triggerB === undefined) assert.fail("expected two triggers");
+
+  for (const selected of [triggerA, triggerB]) {
+    const chosen = prepareOrderBirth({
+      artifact: multiArtifact,
+      trigger: selected,
+      creator: CREATOR,
+      submitter: WALLET,
+      chainId: 31_337,
+      stateMachineAddress: STATE_MACHINE,
+      payloadHash: H(40),
+      idempotencyKey: H(41),
+      deadline: 1_900_000_000n
+    });
+    if (!chosen.ok) {
+      assert.fail(`expected birth preparation ok, got ${chosen.code}: ${chosen.message}`);
+    }
+    assert.equal(chosen.value.typedData.message.triggerHookId, selected.hookId);
+    assert.equal(chosen.value.typedData.message.triggerStageId, selected.stageId);
+    assert.equal(chosen.value.typedData.message.sourceId, selected.sourceId);
+    assert.equal(chosen.value.typedData.message.signalId, selected.signalId);
+    assert.equal(
+      chosen.value.orderId,
+      deriveTriggerOrderId(multiArtifact.planId, selected.sourceId, selected.signalId, H(40))
+    );
+    assert.equal(chosen.value.birthFactAttribution.stageId, selected.stageId);
+  }
 });

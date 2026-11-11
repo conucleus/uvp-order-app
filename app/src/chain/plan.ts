@@ -1,5 +1,6 @@
 // 手填编译产物（used-car 编译器 bundle：definition/onchain/registerArgs/planId）
-// 的浏览器侧入口：解析 artifact、选出生 trigger、把 commitPlan/finalizePlan 与
+// 的浏览器侧入口：解析 artifact（含 onchain.triggers 枚举，多 trigger 合法）、
+// 按 stage/signal 选本次出生 trigger，把 commitPlan/finalizePlan 与
 // triggerOrderFromOutsideFor 的 typed data/calldata 交给 uvp-client core 构造。
 // 浏览器不编译 DSL、不重算协议 hash；失败按具体字段/原因具名。
 
@@ -60,11 +61,13 @@ export interface DeclaredFact {
 
 export interface PlanTrigger {
   readonly hookId: Bytes32;
+  readonly stageIdentifier: string;
   readonly stageId: Bytes32;
-  readonly sourceId: Bytes32;
-  readonly signalId: Bytes32;
+  readonly hookName: string;
   readonly source: string;
   readonly signalName: string;
+  readonly sourceId: Bytes32;
+  readonly signalId: Bytes32;
 }
 
 export interface CompiledPlanArtifact {
@@ -75,7 +78,7 @@ export interface CompiledPlanArtifact {
   readonly capabilities: readonly PlanCapability[];
   readonly selectorBindings: readonly { readonly selectorStageId: Bytes32; readonly targetStageId: Bytes32 }[];
   readonly facts: readonly DeclaredFact[];
-  readonly trigger: PlanTrigger;
+  readonly triggers: readonly PlanTrigger[];
   readonly registerArgs: PlanRegistrationSource;
 }
 
@@ -112,6 +115,7 @@ export interface PreparedOrderBirth {
 
 export interface OrderBirthInput {
   readonly artifact: CompiledPlanArtifact;
+  readonly trigger: PlanTrigger;
   readonly creator: Address;
   readonly submitter: Address;
   readonly chainId: number;
@@ -166,9 +170,9 @@ export function parseCompiledPlanArtifact(text: string): PlanResult<CompiledPlan
   if (!hooks.ok) {
     return hooks;
   }
-  const trigger = selectBirthTrigger(hooks.value);
-  if (!trigger.ok) {
-    return trigger;
+  const triggers = readTriggers(onchain["triggers"]);
+  if (!triggers.ok) {
+    return triggers;
   }
   const capabilities = readCapabilities(onchain["signalCapabilities"]);
   if (!capabilities.ok) {
@@ -188,7 +192,7 @@ export function parseCompiledPlanArtifact(text: string): PlanResult<CompiledPlan
       capabilities: capabilities.value,
       selectorBindings: selectorBindings.value,
       facts: declaredFacts(capabilities.value, hooks.value),
-      trigger: trigger.value,
+      triggers: triggers.value,
       registerArgs: registerArgs as unknown as PlanRegistrationSource
     }
   };
@@ -242,7 +246,7 @@ export function buildCommitPlanCalls(
 }
 
 export function prepareOrderBirth(input: OrderBirthInput): PlanResult<PreparedOrderBirth> {
-  const trigger = input.artifact.trigger;
+  const trigger = input.trigger;
   const authorizations = birthAuthorizations(input.artifact, input.submitter);
   try {
     const orderId = deriveTriggerOrderId(
@@ -495,62 +499,78 @@ function readHooks(value: unknown): PlanResult<readonly PlanHook[]> {
   return { ok: true, value: hooks };
 }
 
-function selectBirthTrigger(hooks: readonly PlanHook[]): PlanResult<PlanTrigger> {
-  const mintHooks = hooks.filter(
-    (hook) => hook.orderTriggerKind === "mint" && hook.kind === "receive"
-  );
-  if (mintHooks.length === 0) {
+function readTriggers(value: unknown): PlanResult<readonly PlanTrigger[]> {
+  if (!Array.isArray(value)) {
+    return fail("artifact_shape", "artifact.onchain.triggers 必须是数组（无出生入口时为 []）。");
+  }
+  const triggers: PlanTrigger[] = [];
+  for (let index = 0; index < value.length; index += 1) {
+    const entry = value[index];
+    if (!isRecord(entry)) {
+      return fail("artifact_invalid", `artifact.onchain.triggers[${index}] 必须是对象。`);
+    }
+    const orderTriggerKind = entry["orderTriggerKind"];
+    if (orderTriggerKind !== "trigger" && orderTriggerKind !== "dock") {
+      return fail(
+        "artifact_invalid",
+        `artifact.onchain.triggers[${index}].orderTriggerKind 只能是 "trigger"/"dock"（诊断值：${String(
+          orderTriggerKind
+        )}）。`
+      );
+    }
+    if (orderTriggerKind === "dock") {
+      continue;
+    }
+    const hookId = nonZeroBytes32(entry["hookId"], `triggers[${index}].hookId`);
+    if (!hookId.ok) {
+      return hookId;
+    }
+    const stageId = nonZeroBytes32(entry["stageId"], `triggers[${index}].stageId`);
+    if (!stageId.ok) {
+      return stageId;
+    }
+    const sourceId = nonZeroBytes32(entry["sourceId"], `triggers[${index}].sourceId`);
+    if (!sourceId.ok) {
+      return sourceId;
+    }
+    const signalId = nonZeroBytes32(entry["signalId"], `triggers[${index}].signalId`);
+    if (!signalId.ok) {
+      return signalId;
+    }
+    const stageIdentifier = nonEmptyString(entry["stageIdentifier"], `triggers[${index}].stageIdentifier`);
+    if (!stageIdentifier.ok) {
+      return stageIdentifier;
+    }
+    const hookName = nonEmptyString(entry["hookName"], `triggers[${index}].hookName`);
+    if (!hookName.ok) {
+      return hookName;
+    }
+    const source = nonEmptyString(entry["source"], `triggers[${index}].source`);
+    if (!source.ok) {
+      return source;
+    }
+    const signalName = nonEmptyString(entry["signalName"], `triggers[${index}].signalName`);
+    if (!signalName.ok) {
+      return signalName;
+    }
+    triggers.push({
+      hookId: hookId.value,
+      stageIdentifier: stageIdentifier.value,
+      stageId: stageId.value,
+      hookName: hookName.value,
+      source: source.value,
+      signalName: signalName.value,
+      sourceId: sourceId.value,
+      signalId: signalId.value
+    });
+  }
+  if (triggers.length === 0) {
     return fail(
       "artifact_missing_trigger",
-      "artifact.onchain.compiledHooks 里没有 orderTriggerKind=mint 的出生 hook。"
+      "artifact.onchain.triggers 里没有 orderTriggerKind=trigger 的出生入口（dock 入口不能在 triggerOrderFromOutsideFor 出生）。"
     );
   }
-  const withPositive = mintHooks.filter((hook) =>
-    hook.dependencies.some((dependency) => dependency.kind === "positive")
-  );
-  if (withPositive.length === 0) {
-    return fail("artifact_missing_trigger", "mint 出生 hook 没有 positive 依赖，无法确定出生 source/signal。");
-  }
-  const bootstrap = withPositive.filter((hook) =>
-    hook.dependencies.some(
-      (dependency) =>
-        dependency.kind === "positive" &&
-        dependency.source === "bootstrap" &&
-        dependency.signalName === "update.init.trigger"
-    )
-  );
-  if (bootstrap.length > 1) {
-    return fail("artifact_ambiguous_trigger", `有 ${bootstrap.length} 个 bootstrap 出生 hook，无法确定 trigger。`);
-  }
-  if (bootstrap.length === 0 && withPositive.length > 1) {
-    return fail("artifact_ambiguous_trigger", `有 ${withPositive.length} 个 mint 出生 hook，无法确定 trigger。`);
-  }
-  const hook = bootstrap[0] ?? withPositive[0];
-  if (hook === undefined) {
-    return fail("artifact_missing_trigger", "没有可用的 mint 出生 hook。");
-  }
-  const positives = hook.dependencies.filter((dependency) => dependency.kind === "positive");
-  if (positives.length !== 1) {
-    return fail(
-      "artifact_ambiguous_trigger",
-      `出生 hook ${hook.hookId} 有 ${positives.length} 个 positive 依赖，无法确定出生 source/signal。`
-    );
-  }
-  const dependency = positives[0];
-  if (dependency === undefined) {
-    return fail("artifact_missing_trigger", "出生 hook 没有 positive 依赖。");
-  }
-  return {
-    ok: true,
-    value: {
-      hookId: hook.hookId,
-      stageId: hook.stageId,
-      sourceId: dependency.sourceId,
-      signalId: dependency.signalId,
-      source: dependency.source,
-      signalName: dependency.signalName
-    }
-  };
+  return { ok: true, value: triggers };
 }
 
 function readCapabilities(value: unknown): PlanResult<readonly PlanCapability[]> {
@@ -652,6 +672,13 @@ function nonZeroBytes32(value: unknown, field: string): PlanResult<Bytes32> {
     return fail("artifact_invalid", `${field} 不能是零值。`);
   }
   return { ok: true, value: parsed.value };
+}
+
+function nonEmptyString(value: unknown, field: string): PlanResult<string> {
+  if (typeof value !== "string" || value.trim().length === 0) {
+    return fail("artifact_invalid", `${field} 必须是非空字符串。`);
+  }
+  return { ok: true, value };
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

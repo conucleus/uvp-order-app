@@ -95,6 +95,7 @@ function ChainWorkbench({ config }: { readonly config: ChainConfig }) {
   const [events, setEvents] = useState<EventsState>({ kind: "idle" });
 
   const [creator, setCreator] = useState("");
+  const [selectedTriggerHookId, setSelectedTriggerHookId] = useState("");
   const [birthPayloadHash, setBirthPayloadHash] = useState(() => safeRandomBytes32());
   const [birthIdempotencyKey, setBirthIdempotencyKey] = useState(() => safeRandomBytes32());
   const [signalIdempotencyKey, setSignalIdempotencyKey] = useState(() => safeRandomBytes32());
@@ -106,6 +107,8 @@ function ChainWorkbench({ config }: { readonly config: ChainConfig }) {
   const [signalPayloadHash, setSignalPayloadHash] = useState("");
   const [attribution, setAttribution] = useState("");
   const [submit, setSubmit] = useState<SubmitState>({ kind: "idle" });
+
+  const selectedTrigger = artifact?.triggers.find((trigger) => trigger.hookId === selectedTriggerHookId);
 
   async function connect(): Promise<void> {
     setWalletFailure(undefined);
@@ -128,6 +131,7 @@ function ChainWorkbench({ config }: { readonly config: ChainConfig }) {
     }
     setArtifactState({ kind: "ready", artifact: parsed.value });
     setArtifactName(label);
+    setSelectedTriggerHookId(parsed.value.triggers.length === 1 ? parsed.value.triggers[0]?.hookId ?? "" : "");
     setPlanInput(parsed.value.planId);
     setRegisterState({ kind: "idle" });
     setBirthState({ kind: "idle" });
@@ -262,6 +266,16 @@ function ChainWorkbench({ config }: { readonly config: ChainConfig }) {
       });
       return;
     }
+    if (selectedTrigger === undefined) {
+      setBirthState({
+        kind: "failed",
+        failure: {
+          code: "artifact_trigger_not_selected",
+          message: `artifact 声明了 ${String(artifact.triggers.length)} 个出生 trigger，先按 stage/signal 选择本次出生入口。`
+        }
+      });
+      return;
+    }
     const creatorRaw = creator.trim() === "" ? wallet.address : creator.trim();
     if (!isAddress(creatorRaw, { strict: true })) {
       setBirthState({
@@ -294,6 +308,7 @@ function ChainWorkbench({ config }: { readonly config: ChainConfig }) {
     }
     const prepared = prepareOrderBirth({
       artifact,
+      trigger: selectedTrigger,
       creator: creatorRaw,
       submitter: wallet.address,
       chainId: config.chainId,
@@ -474,6 +489,7 @@ function ChainWorkbench({ config }: { readonly config: ChainConfig }) {
             onChange={(event) => {
               setArtifactText(event.target.value);
               setArtifactState({ kind: "idle" });
+              setSelectedTriggerHookId("");
               setRegisterState({ kind: "idle" });
               setBirthState({ kind: "idle" });
             }}
@@ -567,10 +583,29 @@ function ChainWorkbench({ config }: { readonly config: ChainConfig }) {
       <section className="panel">
         <h2>3 · 出生订单（triggerOrderFromOutsideFor）</h2>
         <p className="fineprint">
-          出生提交人（submitter）与 birthAuthorizer 都是当前钱包；creator 默认当前钱包、可改。
-          出生时把 artifact 声明的全部事实键授权给当前钱包（role/metadataHash 置零，仅 demo
-          引导）。payloadHash/idempotencyKey 是本次出生的承诺，缺省随机。
+          出生提交人（submitter）与 birthAuthorizer 都是当前钱包，birthAuthorizer 是计划级角色；
+          creator 默认当前钱包、可改。计划可声明多个出生 trigger，本次入口按 stage/signal 显式选择，
+          triggerHookId 随之显式进入出生 typed data。出生时把 artifact 声明的全部事实键授权给当前
+          钱包（role/metadataHash 置零，仅 demo 引导）。payloadHash/idempotencyKey 是本次出生的承诺，
+          缺省随机。
         </p>
+        <label>
+          出生 trigger（stage / signal）
+          <select
+            value={selectedTriggerHookId}
+            onChange={(event) => setSelectedTriggerHookId(event.target.value)}
+            disabled={artifact === undefined || artifact.triggers.length === 1}
+          >
+            <option value="" disabled>
+              {artifact === undefined ? "先解析 artifact" : "选择出生 trigger"}
+            </option>
+            {(artifact?.triggers ?? []).map((trigger) => (
+              <option key={trigger.hookId} value={trigger.hookId}>
+                {trigger.stageIdentifier} / {trigger.signalName}
+              </option>
+            ))}
+          </select>
+        </label>
         <div className="grid-2">
           <label>
             creator（默认当前钱包）
@@ -602,40 +637,54 @@ function ChainWorkbench({ config }: { readonly config: ChainConfig }) {
         </div>
         <dl className="facts">
           <div>
-            <dt>submitter / birthAuthorizer</dt>
-            <dd>{wallet?.address ?? "未连接钱包"}</dd>
+            <dt>出生角色 / submitter</dt>
+            <dd>birthAuthorizer（计划级） / {wallet?.address ?? "未连接钱包"}</dd>
           </div>
           <div>
             <dt>planId</dt>
             <dd>{artifact?.planId ?? "未解析 artifact"}</dd>
           </div>
           <div>
-            <dt>出生 trigger hook / stage</dt>
+            <dt>已选 trigger hook / stage</dt>
             <dd>
-              {artifact === undefined
-                ? "—"
-                : `${short(artifact.trigger.hookId)} / ${short(artifact.trigger.stageId)}`}
+              {selectedTrigger === undefined
+                ? artifact === undefined
+                  ? "—"
+                  : "未选择"
+                : `${short(selectedTrigger.hookId)} / ${short(selectedTrigger.stageId)}`}
             </dd>
           </div>
           <div>
             <dt>出生 source / signal</dt>
             <dd>
-              {artifact === undefined
+              {selectedTrigger === undefined
                 ? "—"
-                : `${artifact.trigger.source} / ${artifact.trigger.signalName}`}
+                : `${selectedTrigger.source} / ${selectedTrigger.signalName}`}
+            </dd>
+          </div>
+          <div>
+            <dt>stageIdentifier / hookName</dt>
+            <dd>
+              {selectedTrigger === undefined
+                ? "—"
+                : `${selectedTrigger.stageIdentifier} / ${selectedTrigger.hookName}`}
             </dd>
           </div>
           <div>
             <dt>sourceId / signalId</dt>
             <dd>
-              {artifact === undefined
+              {selectedTrigger === undefined
                 ? "—"
-                : `${short(artifact.trigger.sourceId)} / ${short(artifact.trigger.signalId)}`}
+                : `${short(selectedTrigger.sourceId)} / ${short(selectedTrigger.signalId)}`}
             </dd>
           </div>
           <div>
-            <dt>出生授权</dt>
-            <dd>{artifact === undefined ? "—" : `${String(artifact.facts.length)} 个事实键`}</dd>
+            <dt>出生 trigger / 授权</dt>
+            <dd>
+              {artifact === undefined
+                ? "—"
+                : `${String(artifact.triggers.length)} 个 trigger / ${String(artifact.facts.length)} 个事实键`}
+            </dd>
           </div>
         </dl>
         <div className="submit-actions">
@@ -834,23 +883,17 @@ function ArtifactFacts({ artifact }: { readonly artifact: CompiledPlanArtifact }
         </dd>
       </div>
       <div>
-        <dt>出生 trigger hook / stage</dt>
-        <dd>
-          {short(artifact.trigger.hookId)} / {short(artifact.trigger.stageId)}
-        </dd>
+        <dt>出生 trigger</dt>
+        <dd>{String(artifact.triggers.length)} 个（按 stage/signal 选择）</dd>
       </div>
-      <div>
-        <dt>出生 source / signal</dt>
-        <dd>
-          {artifact.trigger.source} / {artifact.trigger.signalName}
-        </dd>
-      </div>
-      <div>
-        <dt>sourceId / signalId</dt>
-        <dd>
-          {short(artifact.trigger.sourceId)} / {short(artifact.trigger.signalId)}
-        </dd>
-      </div>
+      {artifact.triggers.map((trigger) => (
+        <div key={trigger.hookId}>
+          <dt>{trigger.stageIdentifier} / {trigger.signalName}</dt>
+          <dd>
+            hook {short(trigger.hookId)} · stage {short(trigger.stageId)}
+          </dd>
+        </div>
+      ))}
     </dl>
   );
 }
