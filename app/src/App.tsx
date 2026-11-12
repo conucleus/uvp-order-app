@@ -548,14 +548,6 @@ function ChainWorkbench({ config }: { readonly config: ChainConfig }) {
             <dd>{artifact === undefined ? "—" : short(artifact.registerArgs.capabilitiesRoot)}</dd>
           </div>
           <div>
-            <dt>dockRoutesRoot / dockInterfaceRoot</dt>
-            <dd>
-              {artifact === undefined
-                ? "—"
-                : `${short(artifact.registerArgs.dockRoutesRoot)} / ${short(artifact.registerArgs.dockInterfaceRoot)}`}
-            </dd>
-          </div>
-          <div>
             <dt>deadline</dt>
             <dd>链上时间 + 1 小时</dd>
           </div>

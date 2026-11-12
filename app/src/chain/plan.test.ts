@@ -1,5 +1,5 @@
 // artifact 入口的不变量：手填 bundle 的坏形状/坏 planId/坏出生 trigger 必须具名
-// 拒绝（不落到通用异常）；多 trigger 按 artifact 顺序枚举、dock 入口不进出生；
+// 拒绝（不落到通用异常）；多 trigger 按 artifact 顺序枚举；
 // 出生准备使用显式选择的 trigger，并按 artifact 声明的事实键授权、去重，capability
 // 计划带 stage attribution（否则链上 InvalidSignalCapability）。
 
@@ -36,18 +36,6 @@ const SECOND_TRIGGER = {
   signalName: "renew.renew",
   sourceId: H(52),
   signalId: H(53)
-};
-
-const DOCK_TRIGGER = {
-  hookId: H(60),
-  stageIdentifier: "dockin",
-  stageId: H(61),
-  hookName: "arrive",
-  orderTriggerKind: "dock",
-  source: "dock",
-  signalName: "dockin.arrive",
-  sourceId: H(62),
-  signalId: H(63)
 };
 
 function baseArtifact(): Record<string, unknown> {
@@ -122,8 +110,6 @@ function baseArtifact(): Record<string, unknown> {
       artifactHash: H(10),
       hooksHash: H(11),
       capabilitiesRoot: H(12),
-      dockRoutesRoot: H(13),
-      dockInterfaceRoot: H(14),
       executorCandidatesRoot: H(15),
       hooks: [
         {
@@ -172,29 +158,9 @@ function addTriggerEntries(raw: Record<string, unknown>): Record<string, unknown
           signalKey: H(54)
         }
       ]
-    },
-    {
-      hookId: DOCK_TRIGGER.hookId,
-      stageId: DOCK_TRIGGER.stageId,
-      stageIdentifier: DOCK_TRIGGER.stageIdentifier,
-      hookName: DOCK_TRIGGER.hookName,
-      kind: "receive",
-      orderTriggerKind: "dock",
-      emitReady: true,
-      instructions: [],
-      dependencies: [
-        {
-          kind: "positive",
-          source: DOCK_TRIGGER.source,
-          signalName: DOCK_TRIGGER.signalName,
-          sourceId: DOCK_TRIGGER.sourceId,
-          signalId: DOCK_TRIGGER.signalId,
-          signalKey: H(64)
-        }
-      ]
     }
   );
-  (onchain["triggers"] as Record<string, unknown>[]).push(SECOND_TRIGGER, DOCK_TRIGGER);
+  (onchain["triggers"] as Record<string, unknown>[]).push(SECOND_TRIGGER);
   (onchain["signalCapabilities"] as Record<string, unknown>[]).push({
     stageIdentifier: SECOND_TRIGGER.stageIdentifier,
     stageId: SECOND_TRIGGER.stageId,
@@ -218,7 +184,7 @@ function parseOk(raw: Record<string, unknown>): CompiledPlanArtifact {
   return parsed.value;
 }
 
-test("artifact 解析：坏 JSON/坏形状/坏 planId 具名拒绝；多 trigger 保序且排除 dock 入口", () => {
+test("artifact 解析：坏 JSON/坏形状/坏 planId 具名拒绝；多 trigger 保序", () => {
   const empty = parseCompiledPlanArtifact(" ");
   assert.equal(empty.ok, false);
   if (!empty.ok) assert.equal(empty.code, "artifact_empty");
@@ -262,13 +228,6 @@ test("artifact 解析：坏 JSON/坏形状/坏 planId 具名拒绝；多 trigger
   assert.equal(multiTrigger.triggers.length, 2);
   assert.equal(multiTrigger.triggers[0]?.hookId, H(1));
   assert.equal(multiTrigger.triggers[1]?.hookId, SECOND_TRIGGER.hookId);
-  assert.equal(multiTrigger.triggers.some((entry) => entry.hookId === DOCK_TRIGGER.hookId), false);
-
-  const dockOnly = cloneArtifact();
-  (dockOnly["onchain"] as Record<string, unknown>)["triggers"] = [DOCK_TRIGGER];
-  const dockOnlyResult = parseCompiledPlanArtifact(JSON.stringify(dockOnly));
-  assert.equal(dockOnlyResult.ok, false);
-  if (!dockOnlyResult.ok) assert.equal(dockOnlyResult.code, "artifact_missing_trigger");
 
   const noTriggers = cloneArtifact();
   (noTriggers["onchain"] as Record<string, unknown>)["triggers"] = [];

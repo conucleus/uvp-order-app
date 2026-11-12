@@ -509,17 +509,13 @@ function readTriggers(value: unknown): PlanResult<readonly PlanTrigger[]> {
     if (!isRecord(entry)) {
       return fail("artifact_invalid", `artifact.onchain.triggers[${index}] 必须是对象。`);
     }
-    const orderTriggerKind = entry["orderTriggerKind"];
-    if (orderTriggerKind !== "trigger" && orderTriggerKind !== "dock") {
+    if (entry["orderTriggerKind"] !== "trigger") {
       return fail(
         "artifact_invalid",
-        `artifact.onchain.triggers[${index}].orderTriggerKind 只能是 "trigger"/"dock"（诊断值：${String(
-          orderTriggerKind
+        `artifact.onchain.triggers[${index}].orderTriggerKind 只能是 "trigger"（诊断值：${String(
+          entry["orderTriggerKind"]
         )}）。`
       );
-    }
-    if (orderTriggerKind === "dock") {
-      continue;
     }
     const hookId = nonZeroBytes32(entry["hookId"], `triggers[${index}].hookId`);
     if (!hookId.ok) {
@@ -567,7 +563,7 @@ function readTriggers(value: unknown): PlanResult<readonly PlanTrigger[]> {
   if (triggers.length === 0) {
     return fail(
       "artifact_missing_trigger",
-      "artifact.onchain.triggers 里没有 orderTriggerKind=trigger 的出生入口（dock 入口不能在 triggerOrderFromOutsideFor 出生）。"
+      "artifact.onchain.triggers 里没有 orderTriggerKind=trigger 的出生入口。"
     );
   }
   return { ok: true, value: triggers };
