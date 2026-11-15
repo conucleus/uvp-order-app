@@ -548,6 +548,10 @@ function ChainWorkbench({ config }: { readonly config: ChainConfig }) {
             <dd>{artifact === undefined ? "—" : short(artifact.registerArgs.capabilitiesRoot)}</dd>
           </div>
           <div>
+            <dt>executorBindingsRoot</dt>
+            <dd>{artifact === undefined ? "—" : short(artifact.registerArgs.executorBindingsRoot)}</dd>
+          </div>
+          <div>
             <dt>deadline</dt>
             <dd>链上时间 + 1 小时</dd>
           </div>
@@ -575,11 +579,10 @@ function ChainWorkbench({ config }: { readonly config: ChainConfig }) {
       <section className="panel">
         <h2>3 · 出生订单（triggerOrderFromOutsideFor）</h2>
         <p className="fineprint">
-          出生提交人（submitter）与 birthAuthorizer 都是当前钱包，birthAuthorizer 是计划级角色；
-          creator 默认当前钱包、可改。计划可声明多个出生 trigger，本次入口按 stage/signal 显式选择，
-          triggerHookId 随之显式进入出生 typed data。出生时把 artifact 声明的全部事实键授权给当前
-          钱包（role/metadataHash 置零，仅 demo 引导）。payloadHash/idempotencyKey 是本次出生的承诺，
-          缺省随机。
+          出生提交人（submitter）必须是计划的 birthAuthorizer（当前钱包），birthAuthorizer 是计划级
+          角色；creator 默认当前钱包、可改。计划可声明多个出生 trigger，本次入口按 stage/signal 显式
+          选择，triggerHookId 随之显式进入出生 typed data。出生是特殊出生事实，不走 stage executor
+          授权。payloadHash/idempotencyKey 是本次出生的承诺，缺省随机。
         </p>
         <label>
           出生 trigger（stage / signal）
@@ -671,7 +674,7 @@ function ChainWorkbench({ config }: { readonly config: ChainConfig }) {
             </dd>
           </div>
           <div>
-            <dt>出生 trigger / 授权</dt>
+            <dt>出生 trigger / 声明事实键</dt>
             <dd>
               {artifact === undefined
                 ? "—"
@@ -798,17 +801,20 @@ function ChainWorkbench({ config }: { readonly config: ChainConfig }) {
             ))}
           </ul>
         ) : (
-          <p className="fineprint">没有 HookReady / StageMaterialized / StageExecutorActivated 事件。</p>
+          <p className="fineprint">
+            没有 HookReady / StageMaterialized / StageExecutorActivated / StageExecutorPatchApplied 事件。
+          </p>
         )}
       </section>
 
       <section className="panel">
         <h2>6 · 发信号（submitSignal）</h2>
         <p className="fineprint">
-          钱包直接调用 UVPStateMachine.submitSignal；不经 relay/backend。链上要求提交人对该
-          (sourceId, signalId) 有授权，否则回滚具名 UnauthorizedSignalSubmitter。attribution
-          可选 JSON：{` { "stageId": "0x…", "proof": ["0x…"] }`}（proof 语义不解析；
-          留空且 planId 等于已解析 artifact 时按 artifact 能力表自动补 proof）。
+          钱包直接调用 UVPStateMachine.submitSignal（不是 submitSignalFor 代付）；不经 relay/backend。
+          链上按本次 source 阶段解析 effective executor，要求提交人是该 supplier 当前登记的 executor，
+          未指派/未注册/非 executor 分别回滚 StageExecutorNotAssigned / SupplierNotRegistered /
+          UnauthorizedStageExecutor。attribution 可选 JSON：{` { "stageId": "0x…", "proof": ["0x…"] }`}
+          （proof 语义不解析；留空且 planId 等于已解析 artifact 时按 artifact 能力表自动补 proof）。
         </p>
         <div className="grid-2">
           <label>
@@ -875,6 +881,10 @@ function ArtifactFacts({ artifact }: { readonly artifact: CompiledPlanArtifact }
         </dd>
       </div>
       <div>
+        <dt>执行者绑定</dt>
+        <dd>{String(artifact.registerArgs.executorBindings.length)} 条（default/candidate）</dd>
+      </div>
+      <div>
         <dt>出生 trigger</dt>
         <dd>{String(artifact.triggers.length)} 个（按 stage/signal 选择）</dd>
       </div>
@@ -902,6 +912,10 @@ function SignalFields({ event }: { readonly event: SignalSubmittedFact }) {
       <div>
         <dt>submitter</dt>
         <dd>{event.submitter}</dd>
+      </div>
+      <div>
+        <dt>relayer</dt>
+        <dd>{event.relayer}</dd>
       </div>
       <div>
         <dt>payloadHash</dt>
@@ -941,10 +955,17 @@ function OtherFields({ event }: { readonly event: ChainEvent }) {
       return (
         <dl className="facts">
           <div><dt>stageId</dt><dd>{event.targetStageId}</dd></div>
-          <div><dt>executor</dt><dd>{event.executor}</dd></div>
-          <div><dt>role / metadataHash</dt><dd>{short(event.role)} / {short(event.metadataHash)}</dd></div>
+          <div><dt>supplierId</dt><dd>{event.supplierId}</dd></div>
           <div><dt>patchNonce</dt><dd>{String(event.patchNonce)}</dd></div>
-          <div><dt>metadataURI</dt><dd>{event.metadataURI || "（空）"}</dd></div>
+        </dl>
+      );
+    case "stage_executor_patch_applied":
+      return (
+        <dl className="facts">
+          <div><dt>selector / target stage</dt><dd>{short(event.selectorStageId)} / {short(event.targetStageId)}</dd></div>
+          <div><dt>selector</dt><dd>{event.selector}</dd></div>
+          <div><dt>supplier / previousSupplier</dt><dd>{short(event.supplierId)} / {short(event.previousSupplierId)}</dd></div>
+          <div><dt>patchNonce</dt><dd>{String(event.patchNonce)}</dd></div>
         </dl>
       );
     case "signal_submitted":

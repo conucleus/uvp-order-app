@@ -1,9 +1,10 @@
 # UVP Order App（链上直连 demo B）
 
 浏览器里的订单控制台：连接注入式钱包（EIP-1193），粘贴/载入 used-car 编译器产出的
-plan artifact，钱包签 `commitPlan` + `finalizePlan` 注册计划，再签
-`triggerOrderFromOutsideFor` 出生订单（钱包 = publisher = birthAuthorizer），随后读
-链上订单事实/事件、发信号。没有 backend、会话 token、草稿、邀请、配置目录或任务收件箱。
+plan artifact，钱包签 `commitPlan`（携 `executorBindings`/`executorBindingsRoot`）+
+`finalizePlan` 注册计划，再签 `triggerOrderFromOutsideFor` 出生订单（钱包 = publisher
+= birthAuthorizer），随后读链上订单事实/事件、发信号。没有 backend、会话 token、草稿、
+邀请、配置目录或任务收件箱。
 
 ## 责任边界
 
@@ -13,12 +14,15 @@ plan artifact，钱包签 `commitPlan` + `finalizePlan` 注册计划，再签
 - 计划注册的 typed data/calldata 与出生 trigger 的 typed data/calldata 由
   `@uvp-eth/uvp-client/core` 构造；本 app 不复制 ABI/typehash/编码。
 - 签名全部由钱包产生（`eth_signTypedData_v4` / `eth_sendTransaction`）；app 不接触私钥。
-- 出生提交人 = birthAuthorizer = 当前钱包；creator 缺省为当前钱包，可改。
-- 出生时把 artifact 声明的全部事实键授权给当前钱包（role/metadataHash 置零，仅 demo
-  引导；不是协议角色）。信号提交仍以链上授权为准，未授权时显示链上
-  `UnauthorizedSignalSubmitter` 回滚。
+- 出生提交人 = birthAuthorizer = 当前钱包；creator 缺省为当前钱包，可改。出生请求不再
+  携授权数组：出生事实归属由 `birthFactAttribution` 的能力证明表达（demo 按 artifact
+  能力表自动补 proof，显式填写优先）。
 - 链上事实以 `UVPStateMachine` 为准：读取失败、空事件、链上回滚三者分开呈现，app 不
   在本地推进/补偿业务状态，也不预检 hook/阶段是否该放行。
+- 发信权是阶段 effective executor（由计划默认 supplier/active patch/动态阶段逐单指派
+  经 `UVPSupplierRegistry` 解析）；未指派/未注册时分别显示
+  `StageExecutorNotAssigned`/`SupplierNotRegistered`，非当前执行者显示
+  `UnauthorizedStageExecutor`。
 - 注册完成后校验 `planExists(artifact.planId)`；为 false 时按 `plan_id_mismatch` 失败，
   避免用别的 publisher 的 artifact 出生。
 
@@ -47,28 +51,48 @@ used-car 编译器/发布脚本产出的 bundle 顶层四字段：
 ```json
 {
   "definition": { "apiVersion": "…", "kind": "…", "metadata": { }, "spec": { } },
-  "onchain": { "planId": "0x…", "compiledHooks": [], "signalCapabilities": [], "selectorBindings": [] },
-  "registerArgs": { "planHash": "0x…", "hooksHash": "0x…", "capabilitiesRoot": "0x…", "hooks": [], "executorCandidates": [] },
+  "onchain": {
+    "planId": "0x…",
+    "compiledHooks": [],
+    "triggers": [],
+    "signalCapabilities": [],
+    "selectorBindings": []
+  },
+  "registerArgs": {
+    "planHash": "0x…",
+    "hooksHash": "0x…",
+    "capabilitiesRoot": "0x…",
+    "executorBindingsRoot": "0x…",
+    "hooks": [],
+    "executorBindings": []
+  },
   "planId": "0x…"
 }
 ```
 
 浏览器只用 `onchain.compiledHooks`（选 mint 出生 trigger 与 positive 依赖）、
-`onchain.signalCapabilities`/`selectorBindings`（出生 attribution 与事实键授权）和
-`registerArgs`（注册 calldata），以及 `planId`。artifact 必须按当前钱包地址作为
-publisher 编译/发布；否则注册后 `planExists(artifact.planId)` 为 false，会具名失败。
+`onchain.triggers`（显式枚举/选择出生线）、`onchain.signalCapabilities`/
+`selectorBindings`（出生 attribution 与事实键能力）、`registerArgs`
+（commit/finalize calldata，含 `executorBindings`/`executorBindingsRoot`），以及
+`planId`。artifact 必须按当前钱包地址作为 publisher 编译/发布；否则注册后
+`planExists(artifact.planId)` 为 false，会具名失败。
 
 ## 流程
 
 1. 连接钱包；链 ID 与 `VITE_CHAIN_ID` 不一致会拒绝。
-2. 粘贴/载入 artifact → 解析（坏 JSON/坏形状/坏 planId/缺 trigger/多义 trigger 具名失败）。
-3. 注册：钱包签 `commitPlan`（publisher = birthAuthorizer = 当前钱包，deadline = 链上
-   时间 + 1 小时）→ 发送 → 发送 `finalizePlan` → 读 `planExists`。
+2. 粘贴/载入 artifact → 解析（坏 JSON/坏形状/坏 planId/坏 bindings/缺 trigger/
+   多义 trigger 具名失败）。
+3. 注册：钱包签 `commitPlan`（publisher = birthAuthorizer = 当前钱包，
+   `executorBindingsRoot` 取自 registerArgs，deadline = 链上时间 + 1 小时）→ 发送 →
+   发送 `finalizePlan` → 读 `planExists`。
 4. 出生：填 creator/payloadHash/idempotencyKey → 钱包签出生 typed data → 发送
    `triggerOrderFromOutsideFor` → 显示推导 orderId 并自动读取事实。
-5. 读取订单事实/事件（按 planId + orderId 过滤，fromBlock 可配）。
-6. 发信号：钱包直发 `submitSignal`；attribution 留空且 planId 等于已解析 artifact 时，按
-   artifact 能力表自动补 proof（显式填写的 attribution 优先）。
+5. 读取订单事实/事件（按 planId + orderId 过滤，fromBlock 可配；事件解码覆盖
+   `SignalSubmitted` 的 relayer 与 `StageExecutorActivated`/`StageExecutorPatchApplied`
+   的 supplierId/patchNonce）。
+6. 发信号：钱包直发 `submitSignal`（不是 `submitSignalFor` 代付）；attribution 留空且
+   planId 等于已解析 artifact 时，按 artifact 能力表自动补 proof（显式填写的
+   attribution 优先）。
 
 ## 目录
 
@@ -84,8 +108,8 @@ publisher 编译/发布；否则注册后 `planExists(artifact.planId)` 为 fals
 ## 测试
 
 `pnpm --filter @uvp-eth/order-app test` 跑 `src/**/*.test.ts`：发信号输入/钱包错误映射，
-以及 artifact 解析的具名失败、出生 trigger 选择、出生准备（capability attribution 与
-授权去重）。
+以及 artifact 解析的具名失败、出生 trigger 选择、commit/出生 typed data
+（`executorBindingsRoot` 与 birth 字段）、事件解码（relayer、supplierId/patchNonce）。
 
 Playwright e2e 已删除：旧 spec 断言的是已移除的 backend 流程文案（必然红）；有意义的
 e2e 需要 live chain + 已部署 state machine + 已发布 artifact + 注入钱包，属 L6

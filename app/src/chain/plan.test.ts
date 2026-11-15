@@ -1,12 +1,14 @@
-// artifact 入口的不变量：手填 bundle 的坏形状/坏 planId/坏出生 trigger 必须具名
-// 拒绝（不落到通用异常）；多 trigger 按 artifact 顺序枚举；
-// 出生准备使用显式选择的 trigger，并按 artifact 声明的事实键授权、去重，capability
-// 计划带 stage attribution（否则链上 InvalidSignalCapability）。
+// artifact 入口的不变量：手填 bundle 的坏形状/坏 planId/坏 registerArgs.bindings/root
+// 必须具名拒绝（不落到通用异常）；多 trigger 按 artifact 顺序枚举；commitPlan typed
+// data 的 executorBindingsRoot 来自 registerArgs；出生准备使用显式选择的 trigger，
+// capability 计划带 stage attribution（否则链上 InvalidSignalCapability），出生不再
+// 携带 SignalAuthorization 行。
 
 import assert from "node:assert/strict";
 import test from "node:test";
 import { deriveTriggerOrderId } from "@uvp-eth/uvp-client/core";
 import {
+  buildCommitPlanTypedData,
   parseCompiledPlanArtifact,
   prepareOrderBirth,
   type CompiledPlanArtifact
@@ -58,6 +60,7 @@ function baseArtifact(): Record<string, unknown> {
           kind: "receive",
           orderTriggerKind: "trigger",
           emitReady: true,
+          dynamicExecutor: false,
           instructions: [],
           dependencies: [TRIGGER_FACT]
         },
@@ -69,6 +72,7 @@ function baseArtifact(): Record<string, unknown> {
           kind: "receive",
           orderTriggerKind: "none",
           emitReady: true,
+          dynamicExecutor: false,
           instructions: [],
           dependencies: [TRIGGER_FACT]
         }
@@ -100,17 +104,19 @@ function baseArtifact(): Record<string, unknown> {
           capabilityHash: H(7)
         }
       ],
-      selectorBindings: []
+      selectorBindings: [],
+      executorBindings: [{ stageId: H(2), supplierId: H(18), kind: 0 }],
+      executorBindingsRoot: H(15)
     },
     registerArgs: {
-      schemaVersion: "uvp.hook-plan/v2",
+      schemaVersion: "uvp.onchainHookPlan.v8",
       sourcePlanId: H(8),
       zhixuId: "used-car/step-purchase@1.0.0",
       planHash: H(9),
       artifactHash: H(10),
       hooksHash: H(11),
       capabilitiesRoot: H(12),
-      executorCandidatesRoot: H(15),
+      executorBindingsRoot: H(15),
       hooks: [
         {
           hookId: H(1),
@@ -124,7 +130,7 @@ function baseArtifact(): Record<string, unknown> {
       ],
       dependencyIndex: [],
       executorRoutes: [],
-      executorCandidates: [],
+      executorBindings: [{ stageId: H(2), supplierId: H(18), kind: 0 }],
       selectorBindings: [],
       signalCapabilities: []
     },
@@ -147,6 +153,7 @@ function addTriggerEntries(raw: Record<string, unknown>): Record<string, unknown
       kind: "receive",
       orderTriggerKind: "trigger",
       emitReady: true,
+      dynamicExecutor: false,
       instructions: [],
       dependencies: [
         {
@@ -184,7 +191,7 @@ function parseOk(raw: Record<string, unknown>): CompiledPlanArtifact {
   return parsed.value;
 }
 
-test("artifact 解析：坏 JSON/坏形状/坏 planId 具名拒绝；多 trigger 保序", () => {
+test("artifact 解析：坏 JSON/坏形状/坏 planId/坏 bindings 具名拒绝；多 trigger 保序", () => {
   const empty = parseCompiledPlanArtifact(" ");
   assert.equal(empty.ok, false);
   if (!empty.ok) assert.equal(empty.code, "artifact_empty");
@@ -211,6 +218,24 @@ test("artifact 解析：坏 JSON/坏形状/坏 planId 具名拒绝；多 trigger
   const planId = parseCompiledPlanArtifact(JSON.stringify(badPlanId));
   assert.equal(planId.ok, false);
   if (!planId.ok) assert.equal(planId.code, "artifact_plan_id");
+
+  const noBindings = cloneArtifact();
+  delete (noBindings["registerArgs"] as Record<string, unknown>)["executorBindings"];
+  const noBindingsResult = parseCompiledPlanArtifact(JSON.stringify(noBindings));
+  assert.equal(noBindingsResult.ok, false);
+  if (!noBindingsResult.ok) {
+    assert.equal(noBindingsResult.code, "artifact_shape");
+    assert.match(noBindingsResult.message, /executorBindings/u);
+  }
+
+  const badBindingsRoot = cloneArtifact();
+  (badBindingsRoot["registerArgs"] as Record<string, unknown>)["executorBindingsRoot"] = "0x00";
+  const badBindingsRootResult = parseCompiledPlanArtifact(JSON.stringify(badBindingsRoot));
+  assert.equal(badBindingsRootResult.ok, false);
+  if (!badBindingsRootResult.ok) {
+    assert.equal(badBindingsRootResult.code, "artifact_invalid");
+    assert.match(badBindingsRootResult.message, /executorBindingsRoot/u);
+  }
 
   const badRelation = cloneArtifact();
   const onchain = badRelation["onchain"] as Record<string, unknown>;
@@ -242,7 +267,25 @@ test("artifact 解析：坏 JSON/坏形状/坏 planId 具名拒绝；多 trigger
   if (!noTriggerFieldResult.ok) assert.equal(noTriggerFieldResult.code, "artifact_shape");
 });
 
-test("出生准备：capability 计划带 stage attribution；授权按事实键去重", () => {
+test("commitPlan typed data：executorBindingsRoot 来自 registerArgs，publisher=birthAuthorizer=钱包", () => {
+  const artifact = parseOk(cloneArtifact());
+  const typedData = buildCommitPlanTypedData({
+    artifact,
+    publisher: WALLET,
+    chainId: 31_337,
+    stateMachineAddress: STATE_MACHINE,
+    deadline: 1_900_000_000n
+  });
+  if (!typedData.ok) {
+    assert.fail(`expected commit typed data ok, got ${typedData.code}: ${typedData.message}`);
+  }
+  assert.equal(typedData.value.message.executorBindingsRoot, H(15));
+  assert.equal(typedData.value.message.publisher.toLowerCase(), WALLET);
+  assert.equal(typedData.value.message.birthAuthorizer.toLowerCase(), WALLET);
+  assert.equal(typedData.value.message.deadline, "1900000000");
+});
+
+test("出生准备：capability 计划带 stage attribution，typed data 只带 birth 字段", () => {
   const artifact = parseOk(cloneArtifact());
   assert.equal(artifact.facts.length, 1);
   const trigger = artifact.triggers[0];
@@ -263,17 +306,15 @@ test("出生准备：capability 计划带 stage attribution；授权按事实键
     assert.fail(`expected birth preparation ok, got ${prepared.code}: ${prepared.message}`);
   }
 
-  assert.equal(prepared.value.authorizations.length, 1);
-  const authorization = prepared.value.authorizations[0];
-  if (authorization === undefined) assert.fail("expected one authorization");
-  assert.equal(authorization.sourceId, H(3));
-  assert.equal(authorization.signalId, H(4));
-  assert.equal(authorization.submitter, WALLET);
-  assert.equal(authorization.role, `0x${"0".repeat(64)}`);
-  assert.equal(authorization.metadataHash, `0x${"0".repeat(64)}`);
   assert.equal(prepared.value.birthFactAttribution.stageId, H(2));
-  assert.equal(prepared.value.typedData.message.submitter, WALLET);
-  assert.equal(prepared.value.typedData.message.creator, CREATOR);
+  assert.equal(prepared.value.typedData.message.submitter.toLowerCase(), WALLET);
+  assert.equal(prepared.value.typedData.message.creator.toLowerCase(), CREATOR);
+  assert.equal(prepared.value.typedData.message.triggerHookId, trigger.hookId);
+  assert.equal(prepared.value.typedData.message.sourceId, trigger.sourceId);
+  assert.equal(
+    prepared.value.orderId,
+    deriveTriggerOrderId(artifact.planId, trigger.sourceId, trigger.signalId, H(40))
+  );
 
   const multiArtifact = parseOk(addTriggerEntries(cloneArtifact()));
   const triggerA = multiArtifact.triggers[0];
@@ -299,10 +340,5 @@ test("出生准备：capability 计划带 stage attribution；授权按事实键
     assert.equal(chosen.value.typedData.message.triggerStageId, selected.stageId);
     assert.equal(chosen.value.typedData.message.sourceId, selected.sourceId);
     assert.equal(chosen.value.typedData.message.signalId, selected.signalId);
-    assert.equal(
-      chosen.value.orderId,
-      deriveTriggerOrderId(multiArtifact.planId, selected.sourceId, selected.signalId, H(40))
-    );
-    assert.equal(chosen.value.birthFactAttribution.stageId, selected.stageId);
   }
 });

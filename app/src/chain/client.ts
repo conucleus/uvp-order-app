@@ -24,7 +24,7 @@ import {
   type StateMachineRawLog,
   type SubmitStateMachineSignalCall
 } from "@uvp-eth/uvp-client/core";
-import { chainEvents, stateMachineReadAbi } from "./abi";
+import { stateMachineEvents, stagePatchEvents, stateMachineReadAbi } from "./abi";
 import type { ChainConfig } from "./config";
 import {
   decodeChainLogs,
@@ -70,6 +70,8 @@ export interface WalletConnection {
   readonly provider: Eip1193Provider;
   readonly chainId: number;
 }
+
+const ZERO_ADDRESS: Address = "0x0000000000000000000000000000000000000000";
 
 export function createChainReader(config: ChainConfig): ChainReader {
   const client = createPublicClient({ transport: http(config.rpcUrl) });
@@ -138,10 +140,15 @@ export function createChainReader(config: ChainConfig): ChainReader {
     async readEvents(planId, orderId) {
       try {
         const latest = await client.getBlockNumber();
+        const stagePatchModule = await client.readContract({
+          address: config.stateMachine,
+          abi: stateMachineReadAbi,
+          functionName: "stagePatchModule"
+        });
         const logs: Log[] = [];
         const hookLogs: { readonly raw: StateMachineRawLog; readonly blockHash: Hex }[] = [];
         for (const range of logChunkRanges(config.fromBlock, latest, config.chunkSize)) {
-          for (const event of chainEvents) {
+          for (const event of stateMachineEvents) {
             const chunk = await client.getLogs({
               address: config.stateMachine,
               event,
@@ -150,6 +157,18 @@ export function createChainReader(config: ChainConfig): ChainReader {
               toBlock: range.to
             });
             logs.push(...chunk);
+          }
+          if (stagePatchModule !== ZERO_ADDRESS) {
+            for (const event of stagePatchEvents) {
+              const chunk = await client.getLogs({
+                address: stagePatchModule,
+                event,
+                args: { planId, orderId },
+                fromBlock: range.from,
+                toBlock: range.to
+              });
+              logs.push(...chunk);
+            }
           }
           const hookChunk = await readHookReadyLogs(
             client,

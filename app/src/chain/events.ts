@@ -1,6 +1,8 @@
-// 链上事件解码/过滤：SignalSubmitted / StageMaterialized / StageExecutorActivated 用
-// viem + 最小事件 ABI（STATE_MACHINE_ABI 尚未从 uvp-client core 导出，单源缺口）；
-// HookReady 由 uvp-client decodeHookReadyLog 解码后合入。字段原样透传，解码失败显式报错。
+// 链上事件解码/过滤：SignalSubmitted / StageMaterialized / StageExecutorActivated
+// （状态机地址）与 StageExecutorPatchApplied（stage patch 模块地址）用 viem + 最小
+// 事件 ABI（STATE_MACHINE_ABI / STAGE_PATCH_MODULE_ABI 尚未从 uvp-client core 导出，
+// 单源缺口）；HookReady 由 uvp-client decodeHookReadyLog 解码后合入。字段原样透传，
+// 解码失败显式报错。
 
 import { decodeEventLog, type Hex, type Log } from "viem";
 import { chainEvents } from "./abi";
@@ -23,6 +25,7 @@ export interface SignalSubmittedFact extends EventBase {
   readonly payloadHash: Bytes32;
   readonly idempotencyKey: Bytes32;
   readonly submitter: `0x${string}`;
+  readonly relayer: `0x${string}`;
   readonly factStageId: Bytes32;
 }
 
@@ -50,18 +53,28 @@ export interface StageExecutorActivatedFact extends EventBase {
   readonly planId: Bytes32;
   readonly orderId: Bytes32;
   readonly targetStageId: Bytes32;
-  readonly executor: `0x${string}`;
-  readonly role: Bytes32;
-  readonly metadataHash: Bytes32;
+  readonly supplierId: Bytes32;
   readonly patchNonce: bigint;
-  readonly metadataURI: string;
+}
+
+export interface StageExecutorPatchAppliedFact extends EventBase {
+  readonly kind: "stage_executor_patch_applied";
+  readonly planId: Bytes32;
+  readonly orderId: Bytes32;
+  readonly selectorStageId: Bytes32;
+  readonly targetStageId: Bytes32;
+  readonly selector: `0x${string}`;
+  readonly supplierId: Bytes32;
+  readonly previousSupplierId: Bytes32;
+  readonly patchNonce: bigint;
 }
 
 export type ChainEvent =
   | SignalSubmittedFact
   | HookReadyFact
   | StageMaterializedFact
-  | StageExecutorActivatedFact;
+  | StageExecutorActivatedFact
+  | StageExecutorPatchAppliedFact;
 
 export type ViemDecodedFact = Exclude<ChainEvent, HookReadyFact>;
 
@@ -104,6 +117,7 @@ export function decodeChainLogs(logs: readonly Log[]): DecodeResult {
           payloadHash: Bytes32;
           idempotencyKey: Bytes32;
           submitter: `0x${string}`;
+          relayer: `0x${string}`;
           factStageId: Bytes32;
         };
         events.push({ ...base, kind: "signal_submitted", ...args });
@@ -126,13 +140,24 @@ export function decodeChainLogs(logs: readonly Log[]): DecodeResult {
           planId: Bytes32;
           orderId: Bytes32;
           targetStageId: Bytes32;
-          executor: `0x${string}`;
-          role: Bytes32;
-          metadataHash: Bytes32;
+          supplierId: Bytes32;
           patchNonce: bigint;
-          metadataURI: string;
         };
         events.push({ ...base, kind: "stage_executor_activated", ...args });
+        break;
+      }
+      case "StageExecutorPatchApplied": {
+        const args = decoded.args as unknown as {
+          planId: Bytes32;
+          orderId: Bytes32;
+          selectorStageId: Bytes32;
+          targetStageId: Bytes32;
+          selector: `0x${string}`;
+          supplierId: Bytes32;
+          previousSupplierId: Bytes32;
+          patchNonce: bigint;
+        };
+        events.push({ ...base, kind: "stage_executor_patch_applied", ...args });
         break;
       }
       default:
@@ -163,4 +188,3 @@ export function withTimestamps(
     return timestamp === undefined ? event : { ...event, timestamp };
   });
 }
-

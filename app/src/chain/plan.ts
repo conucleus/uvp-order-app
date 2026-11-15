@@ -1,8 +1,9 @@
 // 手填编译产物（used-car 编译器 bundle：definition/onchain/registerArgs/planId）
-// 的浏览器侧入口：解析 artifact（含 onchain.triggers 枚举，多 trigger 合法）、
-// 按 stage/signal 选本次出生 trigger，把 commitPlan/finalizePlan 与
-// triggerOrderFromOutsideFor 的 typed data/calldata 交给 uvp-client core 构造。
-// 浏览器不编译 DSL、不重算协议 hash；失败按具体字段/原因具名。
+// 的浏览器侧入口：解析 artifact（registerArgs 的 hooks 与 executorBindings/root，
+// onchain.triggers 枚举，多 trigger 合法）、按 stage/signal 选本次出生 trigger，
+// 把 commitPlan/finalizePlan 与 triggerOrderFromOutsideFor 的 typed data/calldata
+// 交给 uvp-client core 构造。浏览器不编译 DSL、不重算协议 hash；失败按具体字段/
+// 原因具名。
 
 import type { Address, Hex } from "viem";
 import {
@@ -13,11 +14,7 @@ import {
   buildTriggerOrderFromOutsideTypedData,
   deriveTriggerOrderId,
   planRegistrationArgs,
-  withCapabilityProofs,
-  type PlanRegistrationSource,
-  type PlanTransactionCall,
-  type TriggerOrderFromOutsideForCall,
-  type TriggerOrderFromOutsideTypedData
+  withCapabilityProofs
 } from "@uvp-eth/uvp-client/core";
 import { parseBytes32, type Bytes32 } from "./input";
 
@@ -26,6 +23,10 @@ export type PlanResult<T> = { readonly ok: true; readonly value: T } | PlanFailu
 
 export type PlanCommitTypedData = ReturnType<typeof buildPlanCommitTypedDataFor>;
 type PlanRegistrationArgs = ReturnType<typeof planRegistrationArgs>;
+type PlanRegistrationSource = Parameters<typeof planRegistrationArgs>[0];
+type PlanTransactionCall = ReturnType<typeof buildPlanRegistration>["commitCall"];
+type TriggerOrderFromOutsideTypedData = ReturnType<typeof buildTriggerOrderFromOutsideTypedData>;
+type TriggerOrderFromOutsideForCall = ReturnType<typeof buildTriggerOrderFromOutsideForCall>;
 
 interface PlanDependency {
   readonly kind: string;
@@ -82,14 +83,6 @@ export interface CompiledPlanArtifact {
   readonly registerArgs: PlanRegistrationSource;
 }
 
-export interface FactAuthorization {
-  readonly sourceId: Bytes32;
-  readonly signalId: Bytes32;
-  readonly submitter: Address;
-  readonly role: Bytes32;
-  readonly metadataHash: Bytes32;
-}
-
 export interface FactAttribution {
   readonly sourceId: Bytes32;
   readonly signalId: Bytes32;
@@ -109,7 +102,6 @@ export interface PreparedOrderBirth {
   readonly typedData: TriggerOrderFromOutsideTypedData;
   readonly orderId: Bytes32;
   readonly birthFactAttribution: FactAttribution;
-  readonly authorizations: readonly FactAuthorization[];
   readonly trigger: PlanTrigger;
 }
 
@@ -163,8 +155,18 @@ export function parseCompiledPlanArtifact(text: string): PlanResult<CompiledPlan
   if (!Array.isArray(registerArgs["hooks"]) || registerArgs["hooks"].length === 0) {
     return fail("artifact_shape", "artifact.registerArgs.hooks 必须是非空数组。");
   }
-  if (!Array.isArray(registerArgs["executorCandidates"])) {
-    return fail("artifact_shape", "artifact.registerArgs.executorCandidates 必须是数组。");
+  if (!Array.isArray(registerArgs["executorBindings"])) {
+    return fail("artifact_shape", "artifact.registerArgs.executorBindings 必须是数组。");
+  }
+  if (typeof registerArgs["executorBindingsRoot"] !== "string") {
+    return fail("artifact_shape", "artifact.registerArgs.executorBindingsRoot 必须是 0x + 64 hex。");
+  }
+  const executorBindingsRoot = nonZeroBytes32(
+    registerArgs["executorBindingsRoot"],
+    "artifact.registerArgs.executorBindingsRoot"
+  );
+  if (!executorBindingsRoot.ok) {
+    return executorBindingsRoot;
   }
   const hooks = readHooks(onchain["compiledHooks"]);
   if (!hooks.ok) {
@@ -247,7 +249,6 @@ export function buildCommitPlanCalls(
 
 export function prepareOrderBirth(input: OrderBirthInput): PlanResult<PreparedOrderBirth> {
   const trigger = input.trigger;
-  const authorizations = birthAuthorizations(input.artifact, input.submitter);
   try {
     const orderId = deriveTriggerOrderId(
       input.artifact.planId,
@@ -266,7 +267,6 @@ export function prepareOrderBirth(input: OrderBirthInput): PlanResult<PreparedOr
       signalId: trigger.signalId,
       payloadHash: input.payloadHash,
       idempotencyKey: input.idempotencyKey,
-      authorizations,
       submitter: input.submitter,
       deadline: input.deadline
     });
@@ -283,7 +283,6 @@ export function prepareOrderBirth(input: OrderBirthInput): PlanResult<PreparedOr
           input.payloadHash,
           input.idempotencyKey
         ),
-        authorizations,
         trigger
       }
     };
@@ -313,7 +312,6 @@ export function buildOrderBirthCall(input: {
           signalId: message.signalId,
           payloadHash: message.payloadHash,
           idempotencyKey: message.idempotencyKey,
-          authorizations: input.prepared.authorizations,
           submitter: message.submitter,
           deadline: message.deadline,
           signature: input.signature,
@@ -332,19 +330,6 @@ function registrationFor(artifact: CompiledPlanArtifact): PlanResult<PlanRegistr
   } catch (error) {
     return fail("artifact_invalid", `artifact.registerArgs 无法用于 commitPlan：${errorMessage(error)}`);
   }
-}
-
-function birthAuthorizations(
-  artifact: CompiledPlanArtifact,
-  submitter: Address
-): readonly FactAuthorization[] {
-  return artifact.facts.map((fact) => ({
-    sourceId: fact.sourceId,
-    signalId: fact.signalId,
-    submitter,
-    role: ZERO_BYTES32,
-    metadataHash: ZERO_BYTES32
-  }));
 }
 
 export function signalAttributionFor(
