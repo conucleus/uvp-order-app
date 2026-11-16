@@ -1,5 +1,5 @@
-// 事件解码不变量：SignalSubmitted 带 relayer、StageExecutorActivated 带
-// supplierId/patchNonce、StageExecutorPatchApplied 带 supplierId/previousSupplierId/
+// 事件解码不变量：SignalSubmitted 带 relayer、StageSupplierAssigned 带
+// supplierId/patchNonce、StageSupplierPatchApplied 带 supplierId/previousSupplierId/
 // patchNonce 的日志必须解出这些字段；不匹配的日志具名失败，不静默丢弃。
 
 import assert from "node:assert/strict";
@@ -30,11 +30,11 @@ const SELECTOR = ADDRESS("12");
 const signalSubmitted = parseAbiItem(
   "event SignalSubmitted(bytes32 indexed planId, bytes32 indexed orderId, bytes32 indexed sourceId, bytes32 signalId, bytes32 payloadHash, bytes32 idempotencyKey, address submitter, address relayer, bytes32 factStageId)"
 );
-const stageExecutorActivated = parseAbiItem(
-  "event StageExecutorActivated(bytes32 indexed planId, bytes32 indexed orderId, bytes32 indexed targetStageId, bytes32 supplierId, uint256 patchNonce)"
+const stageSupplierAssigned = parseAbiItem(
+  "event StageSupplierAssigned(bytes32 indexed planId, bytes32 indexed orderId, bytes32 indexed targetStageId, bytes32 supplierId, uint256 patchNonce)"
 );
-const stageExecutorPatchApplied = parseAbiItem(
-  "event StageExecutorPatchApplied(bytes32 indexed planId, bytes32 indexed orderId, bytes32 indexed selectorStageId, bytes32 targetStageId, address selector, bytes32 supplierId, bytes32 previousSupplierId, uint256 patchNonce)"
+const stageSupplierPatchApplied = parseAbiItem(
+  "event StageSupplierPatchApplied(bytes32 indexed planId, bytes32 indexed orderId, bytes32 indexed selectorStageId, bytes32 targetStageId, address selector, bytes32 supplierId, bytes32 previousSupplierId, uint256 patchNonce)"
 );
 
 function eventTopics(encoded: unknown): readonly Hex[] {
@@ -61,7 +61,7 @@ function logOf(topics: readonly Hex[], data: Hex, logIndex: number): Log {
   };
 }
 
-test("事件解码：SignalSubmitted relayer、StageExecutorActivated/PatchApplied supplierId+patchNonce", () => {
+test("事件解码：SignalSubmitted relayer、StageSupplierAssigned/PatchApplied supplierId+patchNonce", () => {
   const signalLog = logOf(
     eventTopics(encodeEventTopics({
       abi: [signalSubmitted],
@@ -78,10 +78,10 @@ test("事件解码：SignalSubmitted relayer、StageExecutorActivated/PatchAppli
     ]),
     0
   );
-  const activatedLog = logOf(
+  const assignedLog = logOf(
     eventTopics(encodeEventTopics({
-      abi: [stageExecutorActivated],
-      eventName: "StageExecutorActivated",
+      abi: [stageSupplierAssigned],
+      eventName: "StageSupplierAssigned",
       args: { planId: PLAN, orderId: ORDER, targetStageId: STAGE }
     })),
     encodeAbiParameters(parseAbiParameters("bytes32,uint256"), [SUPPLIER, 3n]),
@@ -89,8 +89,8 @@ test("事件解码：SignalSubmitted relayer、StageExecutorActivated/PatchAppli
   );
   const patchLog = logOf(
     eventTopics(encodeEventTopics({
-      abi: [stageExecutorPatchApplied],
-      eventName: "StageExecutorPatchApplied",
+      abi: [stageSupplierPatchApplied],
+      eventName: "StageSupplierPatchApplied",
       args: { planId: PLAN, orderId: ORDER, selectorStageId: SELECTOR_STAGE }
     })),
     encodeAbiParameters(parseAbiParameters("bytes32,address,bytes32,bytes32,uint256"), [
@@ -103,7 +103,7 @@ test("事件解码：SignalSubmitted relayer、StageExecutorActivated/PatchAppli
     2
   );
 
-  const decoded = decodeChainLogs([signalLog, activatedLog, patchLog]);
+  const decoded = decodeChainLogs([signalLog, assignedLog, patchLog]);
   if (!decoded.ok) {
     assert.fail(`expected decode ok, got ${decoded.message}`);
   }
@@ -117,14 +117,14 @@ test("事件解码：SignalSubmitted relayer、StageExecutorActivated/PatchAppli
   assert.equal(signal.idempotencyKey, H(0x19));
   assert.equal(signal.factStageId, STAGE);
 
-  const activated = decoded.events[1];
-  if (activated?.kind !== "stage_executor_activated") assert.fail("expected stage_executor_activated");
-  assert.equal(activated.targetStageId, STAGE);
-  assert.equal(activated.supplierId, SUPPLIER);
-  assert.equal(activated.patchNonce, 3n);
+  const assigned = decoded.events[1];
+  if (assigned?.kind !== "stage_supplier_assigned") assert.fail("expected stage_supplier_assigned");
+  assert.equal(assigned.targetStageId, STAGE);
+  assert.equal(assigned.supplierId, SUPPLIER);
+  assert.equal(assigned.patchNonce, 3n);
 
   const patched = decoded.events[2];
-  if (patched?.kind !== "stage_executor_patch_applied") assert.fail("expected stage_executor_patch_applied");
+  if (patched?.kind !== "stage_supplier_patch_applied") assert.fail("expected stage_supplier_patch_applied");
   assert.equal(patched.selectorStageId, SELECTOR_STAGE);
   assert.equal(patched.targetStageId, STAGE);
   assert.equal(patched.selector.toLowerCase(), SELECTOR);

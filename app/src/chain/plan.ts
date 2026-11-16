@@ -1,9 +1,9 @@
 // 手填编译产物（used-car 编译器 bundle：definition/onchain/registerArgs/planId）
-// 的浏览器侧入口：解析 artifact（registerArgs 的 hooks 与 executorBindings/root，
-// onchain.triggers 枚举，多 trigger 合法）、按 stage/signal 选本次出生 trigger，
-// 把 commitPlan/finalizePlan 与 triggerOrderFromOutsideFor 的 typed data/calldata
-// 交给 uvp-client core 构造。浏览器不编译 DSL、不重算协议 hash；失败按具体字段/
-// 原因具名。
+// 的浏览器侧入口：解析 artifact（onchain 的 StageSupplierBinding supplierID UUID/
+// supplierId bytes32、registerArgs 的 hooks 与 supplierBindings/root，onchain.triggers
+// 枚举，多 trigger 合法）、按 stage/signal 选本次出生 trigger，把 commitPlan/
+// finalizePlan 与 triggerOrderFromOutsideFor 的 typed data/calldata 交给
+// uvp-client core 构造。浏览器不编译 DSL、不重算协议 hash；失败按具体字段/原因具名。
 
 import type { Address, Hex } from "viem";
 import {
@@ -60,6 +60,13 @@ export interface DeclaredFact {
   readonly signalName: string;
 }
 
+export interface PlanSupplierBinding {
+  readonly stageId: Bytes32;
+  readonly supplierID: string;
+  readonly supplierId: Bytes32;
+  readonly kind: 0 | 1;
+}
+
 export interface PlanTrigger {
   readonly hookId: Bytes32;
   readonly stageIdentifier: string;
@@ -78,6 +85,7 @@ export interface CompiledPlanArtifact {
   readonly zhixuName?: string | undefined;
   readonly capabilities: readonly PlanCapability[];
   readonly selectorBindings: readonly { readonly selectorStageId: Bytes32; readonly targetStageId: Bytes32 }[];
+  readonly supplierBindings: readonly PlanSupplierBinding[];
   readonly facts: readonly DeclaredFact[];
   readonly triggers: readonly PlanTrigger[];
   readonly registerArgs: PlanRegistrationSource;
@@ -155,18 +163,18 @@ export function parseCompiledPlanArtifact(text: string): PlanResult<CompiledPlan
   if (!Array.isArray(registerArgs["hooks"]) || registerArgs["hooks"].length === 0) {
     return fail("artifact_shape", "artifact.registerArgs.hooks 必须是非空数组。");
   }
-  if (!Array.isArray(registerArgs["executorBindings"])) {
-    return fail("artifact_shape", "artifact.registerArgs.executorBindings 必须是数组。");
+  if (!Array.isArray(registerArgs["supplierBindings"])) {
+    return fail("artifact_shape", "artifact.registerArgs.supplierBindings 必须是数组。");
   }
-  if (typeof registerArgs["executorBindingsRoot"] !== "string") {
-    return fail("artifact_shape", "artifact.registerArgs.executorBindingsRoot 必须是 0x + 64 hex。");
+  if (typeof registerArgs["supplierBindingsRoot"] !== "string") {
+    return fail("artifact_shape", "artifact.registerArgs.supplierBindingsRoot 必须是 0x + 64 hex。");
   }
-  const executorBindingsRoot = nonZeroBytes32(
-    registerArgs["executorBindingsRoot"],
-    "artifact.registerArgs.executorBindingsRoot"
+  const supplierBindingsRoot = nonZeroBytes32(
+    registerArgs["supplierBindingsRoot"],
+    "artifact.registerArgs.supplierBindingsRoot"
   );
-  if (!executorBindingsRoot.ok) {
-    return executorBindingsRoot;
+  if (!supplierBindingsRoot.ok) {
+    return supplierBindingsRoot;
   }
   const hooks = readHooks(onchain["compiledHooks"]);
   if (!hooks.ok) {
@@ -184,6 +192,10 @@ export function parseCompiledPlanArtifact(text: string): PlanResult<CompiledPlan
   if (!selectorBindings.ok) {
     return selectorBindings;
   }
+  const supplierBindings = readSupplierBindings(onchain["supplierBindings"]);
+  if (!supplierBindings.ok) {
+    return supplierBindings;
+  }
   return {
     ok: true,
     value: {
@@ -193,6 +205,7 @@ export function parseCompiledPlanArtifact(text: string): PlanResult<CompiledPlan
       ...(typeof onchain["zhixuName"] === "string" ? { zhixuName: onchain["zhixuName"] } : {}),
       capabilities: capabilities.value,
       selectorBindings: selectorBindings.value,
+      supplierBindings: supplierBindings.value,
       facts: declaredFacts(capabilities.value, hooks.value),
       triggers: triggers.value,
       registerArgs: registerArgs as unknown as PlanRegistrationSource
@@ -637,6 +650,45 @@ function readSelectorBindings(
       return targetStageId;
     }
     bindings.push({ selectorStageId: selectorStageId.value, targetStageId: targetStageId.value });
+  }
+  return { ok: true, value: bindings };
+}
+
+function readSupplierBindings(value: unknown): PlanResult<readonly PlanSupplierBinding[]> {
+  if (!Array.isArray(value)) {
+    return fail("artifact_shape", "artifact.onchain.supplierBindings 必须是数组。");
+  }
+  const bindings: PlanSupplierBinding[] = [];
+  for (let index = 0; index < value.length; index += 1) {
+    const entry = value[index];
+    if (!isRecord(entry)) {
+      return fail("artifact_invalid", `artifact.onchain.supplierBindings[${index}] 必须是对象。`);
+    }
+    const stageId = nonZeroBytes32(entry["stageId"], `supplierBindings[${index}].stageId`);
+    if (!stageId.ok) {
+      return stageId;
+    }
+    const supplierID = nonEmptyString(entry["supplierID"], `supplierBindings[${index}].supplierID`);
+    if (!supplierID.ok) {
+      return supplierID;
+    }
+    const supplierId = nonZeroBytes32(entry["supplierId"], `supplierBindings[${index}].supplierId`);
+    if (!supplierId.ok) {
+      return supplierId;
+    }
+    const kind = entry["kind"];
+    if (kind !== 0 && kind !== 1) {
+      return fail(
+        "artifact_invalid",
+        `supplierBindings[${index}].kind 只能是 0（default）或 1（candidate）。`
+      );
+    }
+    bindings.push({
+      stageId: stageId.value,
+      supplierID: supplierID.value,
+      supplierId: supplierId.value,
+      kind
+    });
   }
   return { ok: true, value: bindings };
 }

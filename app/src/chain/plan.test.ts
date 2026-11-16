@@ -1,8 +1,8 @@
-// artifact 入口的不变量：手填 bundle 的坏形状/坏 planId/坏 registerArgs.bindings/root
-// 必须具名拒绝（不落到通用异常）；多 trigger 按 artifact 顺序枚举；commitPlan typed
-// data 的 executorBindingsRoot 来自 registerArgs；出生准备使用显式选择的 trigger，
-// capability 计划带 stage attribution（否则链上 InvalidSignalCapability），出生不再
-// 携带 SignalAuthorization 行。
+// artifact 入口的不变量：手填 bundle 的坏形状/坏 planId/坏 registerArgs.supplierBindings/
+// root、坏 onchain.supplierBindings 必须具名拒绝（不落到通用异常）；多 trigger 按
+// artifact 顺序枚举；commitPlan typed data 的 supplierBindingsRoot 来自 registerArgs；
+// 出生准备使用显式选择的 trigger，capability 计划带 stage attribution（否则链上
+// InvalidSignalCapability），出生不再携带 SignalAuthorization 行。
 
 import assert from "node:assert/strict";
 import test from "node:test";
@@ -18,6 +18,8 @@ const H = (n: number): `0x${string}` => `0x${n.toString(16).padStart(64, "0")}`;
 const WALLET = `0x${"ab".repeat(20)}` as const;
 const CREATOR = `0x${"cd".repeat(20)}` as const;
 const STATE_MACHINE = `0x${"ef".repeat(20)}` as const;
+const SUPPLIER_UUID = "5f0b1e2a-7c9d-4e1f-9a2b-000000000021";
+const SUPPLIER_ID = `0x${"0".repeat(32)}5f0b1e2a7c9d4e1f9a2b000000000021` as const;
 
 const TRIGGER_FACT = {
   kind: "positive",
@@ -105,8 +107,16 @@ function baseArtifact(): Record<string, unknown> {
         }
       ],
       selectorBindings: [],
-      executorBindings: [{ stageId: H(2), supplierId: H(18), kind: 0 }],
-      executorBindingsRoot: H(15)
+      supplierBindings: [
+        {
+          stageIdentifier: "birth",
+          stageId: H(2),
+          supplierID: SUPPLIER_UUID,
+          supplierId: SUPPLIER_ID,
+          kind: 0
+        }
+      ],
+      supplierBindingsRoot: H(15)
     },
     registerArgs: {
       schemaVersion: "uvp.onchainHookPlan.v8",
@@ -116,7 +126,7 @@ function baseArtifact(): Record<string, unknown> {
       artifactHash: H(10),
       hooksHash: H(11),
       capabilitiesRoot: H(12),
-      executorBindingsRoot: H(15),
+      supplierBindingsRoot: H(15),
       hooks: [
         {
           hookId: H(1),
@@ -129,8 +139,8 @@ function baseArtifact(): Record<string, unknown> {
         }
       ],
       dependencyIndex: [],
-      executorRoutes: [],
-      executorBindings: [{ stageId: H(2), supplierId: H(18), kind: 0 }],
+      supplierRoutes: [],
+      supplierBindings: [{ stageId: H(2), supplierId: SUPPLIER_ID, kind: 0 }],
       selectorBindings: [],
       signalCapabilities: []
     },
@@ -191,7 +201,7 @@ function parseOk(raw: Record<string, unknown>): CompiledPlanArtifact {
   return parsed.value;
 }
 
-test("artifact 解析：坏 JSON/坏形状/坏 planId/坏 bindings 具名拒绝；多 trigger 保序", () => {
+test("artifact 解析：坏 JSON/坏形状/坏 planId/坏 supplierBindings 具名拒绝；多 trigger 保序", () => {
   const empty = parseCompiledPlanArtifact(" ");
   assert.equal(empty.ok, false);
   if (!empty.ok) assert.equal(empty.code, "artifact_empty");
@@ -220,21 +230,43 @@ test("artifact 解析：坏 JSON/坏形状/坏 planId/坏 bindings 具名拒绝�
   if (!planId.ok) assert.equal(planId.code, "artifact_plan_id");
 
   const noBindings = cloneArtifact();
-  delete (noBindings["registerArgs"] as Record<string, unknown>)["executorBindings"];
+  delete (noBindings["registerArgs"] as Record<string, unknown>)["supplierBindings"];
   const noBindingsResult = parseCompiledPlanArtifact(JSON.stringify(noBindings));
   assert.equal(noBindingsResult.ok, false);
   if (!noBindingsResult.ok) {
     assert.equal(noBindingsResult.code, "artifact_shape");
-    assert.match(noBindingsResult.message, /executorBindings/u);
+    assert.match(noBindingsResult.message, /supplierBindings/u);
   }
 
   const badBindingsRoot = cloneArtifact();
-  (badBindingsRoot["registerArgs"] as Record<string, unknown>)["executorBindingsRoot"] = "0x00";
+  (badBindingsRoot["registerArgs"] as Record<string, unknown>)["supplierBindingsRoot"] = "0x00";
   const badBindingsRootResult = parseCompiledPlanArtifact(JSON.stringify(badBindingsRoot));
   assert.equal(badBindingsRootResult.ok, false);
   if (!badBindingsRootResult.ok) {
     assert.equal(badBindingsRootResult.code, "artifact_invalid");
-    assert.match(badBindingsRootResult.message, /executorBindingsRoot/u);
+    assert.match(badBindingsRootResult.message, /supplierBindingsRoot/u);
+  }
+
+  const noOnchainBindings = cloneArtifact();
+  delete (noOnchainBindings["onchain"] as Record<string, unknown>)["supplierBindings"];
+  const noOnchainBindingsResult = parseCompiledPlanArtifact(JSON.stringify(noOnchainBindings));
+  assert.equal(noOnchainBindingsResult.ok, false);
+  if (!noOnchainBindingsResult.ok) {
+    assert.equal(noOnchainBindingsResult.code, "artifact_shape");
+    assert.match(noOnchainBindingsResult.message, /onchain\.supplierBindings/u);
+  }
+
+  const badSupplierBinding = cloneArtifact();
+  const bindingEntries = (badSupplierBinding["onchain"] as Record<string, unknown>)[
+    "supplierBindings"
+  ] as Record<string, unknown>[];
+  if (bindingEntries[0] === undefined) assert.fail("fixture supplier binding missing");
+  bindingEntries[0]["supplierId"] = "0x12";
+  const badSupplierBindingResult = parseCompiledPlanArtifact(JSON.stringify(badSupplierBinding));
+  assert.equal(badSupplierBindingResult.ok, false);
+  if (!badSupplierBindingResult.ok) {
+    assert.equal(badSupplierBindingResult.code, "artifact_invalid");
+    assert.match(badSupplierBindingResult.message, /supplierBindings\[0\]\.supplierId/u);
   }
 
   const badRelation = cloneArtifact();
@@ -253,6 +285,9 @@ test("artifact 解析：坏 JSON/坏形状/坏 planId/坏 bindings 具名拒绝�
   assert.equal(multiTrigger.triggers.length, 2);
   assert.equal(multiTrigger.triggers[0]?.hookId, H(1));
   assert.equal(multiTrigger.triggers[1]?.hookId, SECOND_TRIGGER.hookId);
+  assert.equal(multiTrigger.supplierBindings.length, 1);
+  assert.equal(multiTrigger.supplierBindings[0]?.supplierID, SUPPLIER_UUID);
+  assert.equal(multiTrigger.supplierBindings[0]?.supplierId, SUPPLIER_ID);
 
   const noTriggers = cloneArtifact();
   (noTriggers["onchain"] as Record<string, unknown>)["triggers"] = [];
@@ -267,7 +302,7 @@ test("artifact 解析：坏 JSON/坏形状/坏 planId/坏 bindings 具名拒绝�
   if (!noTriggerFieldResult.ok) assert.equal(noTriggerFieldResult.code, "artifact_shape");
 });
 
-test("commitPlan typed data：executorBindingsRoot 来自 registerArgs，publisher=birthAuthorizer=钱包", () => {
+test("commitPlan typed data：supplierBindingsRoot 来自 registerArgs，publisher=birthAuthorizer=钱包", () => {
   const artifact = parseOk(cloneArtifact());
   const typedData = buildCommitPlanTypedData({
     artifact,
@@ -279,7 +314,7 @@ test("commitPlan typed data：executorBindingsRoot 来自 registerArgs，publish
   if (!typedData.ok) {
     assert.fail(`expected commit typed data ok, got ${typedData.code}: ${typedData.message}`);
   }
-  assert.equal(typedData.value.message.executorBindingsRoot, H(15));
+  assert.equal(typedData.value.message.supplierBindingsRoot, H(15));
   assert.equal(typedData.value.message.publisher.toLowerCase(), WALLET);
   assert.equal(typedData.value.message.birthAuthorizer.toLowerCase(), WALLET);
   assert.equal(typedData.value.message.deadline, "1900000000");

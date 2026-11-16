@@ -1,5 +1,5 @@
-// 链上事件解码/过滤：SignalSubmitted / StageMaterialized / StageExecutorActivated
-// （状态机地址）与 StageExecutorPatchApplied（stage patch 模块地址）用 viem + 最小
+// 链上事件解码/过滤：SignalSubmitted / StageMaterialized / StageSupplierAssigned
+// （状态机地址）与 StageSupplierPatchApplied（stage patch 模块地址）用 viem + 最小
 // 事件 ABI（STATE_MACHINE_ABI / STAGE_PATCH_MODULE_ABI 尚未从 uvp-client core 导出，
 // 单源缺口）；HookReady 由 uvp-client decodeHookReadyLog 解码后合入。字段原样透传，
 // 解码失败显式报错。
@@ -48,8 +48,8 @@ export interface StageMaterializedFact extends EventBase {
   readonly signalId: Bytes32;
 }
 
-export interface StageExecutorActivatedFact extends EventBase {
-  readonly kind: "stage_executor_activated";
+export interface StageSupplierAssignedFact extends EventBase {
+  readonly kind: "stage_supplier_assigned";
   readonly planId: Bytes32;
   readonly orderId: Bytes32;
   readonly targetStageId: Bytes32;
@@ -57,8 +57,8 @@ export interface StageExecutorActivatedFact extends EventBase {
   readonly patchNonce: bigint;
 }
 
-export interface StageExecutorPatchAppliedFact extends EventBase {
-  readonly kind: "stage_executor_patch_applied";
+export interface StageSupplierPatchAppliedFact extends EventBase {
+  readonly kind: "stage_supplier_patch_applied";
   readonly planId: Bytes32;
   readonly orderId: Bytes32;
   readonly selectorStageId: Bytes32;
@@ -73,8 +73,8 @@ export type ChainEvent =
   | SignalSubmittedFact
   | HookReadyFact
   | StageMaterializedFact
-  | StageExecutorActivatedFact
-  | StageExecutorPatchAppliedFact;
+  | StageSupplierAssignedFact
+  | StageSupplierPatchAppliedFact;
 
 export type ViemDecodedFact = Exclude<ChainEvent, HookReadyFact>;
 
@@ -135,7 +135,7 @@ export function decodeChainLogs(logs: readonly Log[]): DecodeResult {
         events.push({ ...base, kind: "stage_materialized", ...args });
         break;
       }
-      case "StageExecutorActivated": {
+      case "StageSupplierAssigned": {
         const args = decoded.args as unknown as {
           planId: Bytes32;
           orderId: Bytes32;
@@ -143,10 +143,10 @@ export function decodeChainLogs(logs: readonly Log[]): DecodeResult {
           supplierId: Bytes32;
           patchNonce: bigint;
         };
-        events.push({ ...base, kind: "stage_executor_activated", ...args });
+        events.push({ ...base, kind: "stage_supplier_assigned", ...args });
         break;
       }
-      case "StageExecutorPatchApplied": {
+      case "StageSupplierPatchApplied": {
         const args = decoded.args as unknown as {
           planId: Bytes32;
           orderId: Bytes32;
@@ -157,7 +157,7 @@ export function decodeChainLogs(logs: readonly Log[]): DecodeResult {
           previousSupplierId: Bytes32;
           patchNonce: bigint;
         };
-        events.push({ ...base, kind: "stage_executor_patch_applied", ...args });
+        events.push({ ...base, kind: "stage_supplier_patch_applied", ...args });
         break;
       }
       default:

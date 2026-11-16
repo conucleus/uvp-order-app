@@ -21,19 +21,19 @@ export const signalSubmittedEvent = parseAbiItem(
 export const stageMaterializedEvent = parseAbiItem(
   "event StageMaterialized(bytes32 indexed planId, bytes32 indexed orderId, bytes32 indexed stageId, bytes32 triggerHookId, bytes32 sourceId, bytes32 signalId)"
 );
-export const stageExecutorActivatedEvent = parseAbiItem(
-  "event StageExecutorActivated(bytes32 indexed planId, bytes32 indexed orderId, bytes32 indexed targetStageId, bytes32 supplierId, uint256 patchNonce)"
+export const stageSupplierAssignedEvent = parseAbiItem(
+  "event StageSupplierAssigned(bytes32 indexed planId, bytes32 indexed orderId, bytes32 indexed targetStageId, bytes32 supplierId, uint256 patchNonce)"
 );
-export const stageExecutorPatchAppliedEvent = parseAbiItem(
-  "event StageExecutorPatchApplied(bytes32 indexed planId, bytes32 indexed orderId, bytes32 indexed selectorStageId, bytes32 targetStageId, address selector, bytes32 supplierId, bytes32 previousSupplierId, uint256 patchNonce)"
+export const stageSupplierPatchAppliedEvent = parseAbiItem(
+  "event StageSupplierPatchApplied(bytes32 indexed planId, bytes32 indexed orderId, bytes32 indexed selectorStageId, bytes32 targetStageId, address selector, bytes32 supplierId, bytes32 previousSupplierId, uint256 patchNonce)"
 );
 
 export const stateMachineEvents = [
   signalSubmittedEvent,
   stageMaterializedEvent,
-  stageExecutorActivatedEvent
+  stageSupplierAssignedEvent
 ] as const;
 
-export const stagePatchEvents = [stageExecutorPatchAppliedEvent] as const;
+export const stagePatchEvents = [stageSupplierPatchAppliedEvent] as const;
 
 export const chainEvents = [...stateMachineEvents, ...stagePatchEvents] as const;

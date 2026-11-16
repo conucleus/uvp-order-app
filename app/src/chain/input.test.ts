@@ -29,7 +29,7 @@ test("钱包拒绝与 revert 具名，不吞成 unknown/成功", () => {
     message: "钱包拒绝了签名/交易"
   });
   assert.equal(
-    mapWalletError(new Error("execution reverted: UnauthorizedStageExecutor")).code,
+    mapWalletError(new Error("execution reverted: UnauthorizedStageSupplierAccount")).code,
     "reverted"
   );
 });

@@ -548,8 +548,8 @@ function ChainWorkbench({ config }: { readonly config: ChainConfig }) {
             <dd>{artifact === undefined ? "—" : short(artifact.registerArgs.capabilitiesRoot)}</dd>
           </div>
           <div>
-            <dt>executorBindingsRoot</dt>
-            <dd>{artifact === undefined ? "—" : short(artifact.registerArgs.executorBindingsRoot)}</dd>
+            <dt>supplierBindingsRoot</dt>
+            <dd>{artifact === undefined ? "—" : short(artifact.registerArgs.supplierBindingsRoot)}</dd>
           </div>
           <div>
             <dt>deadline</dt>
@@ -581,8 +581,8 @@ function ChainWorkbench({ config }: { readonly config: ChainConfig }) {
         <p className="fineprint">
           出生提交人（submitter）必须是计划的 birthAuthorizer（当前钱包），birthAuthorizer 是计划级
           角色；creator 默认当前钱包、可改。计划可声明多个出生 trigger，本次入口按 stage/signal 显式
-          选择，triggerHookId 随之显式进入出生 typed data。出生是特殊出生事实，不走 stage executor
-          授权。payloadHash/idempotencyKey 是本次出生的承诺，缺省随机。
+          选择，triggerHookId 随之显式进入出生 typed data。出生是特殊出生事实，不走 stage supplier
+          发信授权。payloadHash/idempotencyKey 是本次出生的承诺，缺省随机。
         </p>
         <label>
           出生 trigger（stage / signal）
@@ -802,7 +802,7 @@ function ChainWorkbench({ config }: { readonly config: ChainConfig }) {
           </ul>
         ) : (
           <p className="fineprint">
-            没有 HookReady / StageMaterialized / StageExecutorActivated / StageExecutorPatchApplied 事件。
+            没有 HookReady / StageMaterialized / StageSupplierAssigned / StageSupplierPatchApplied 事件。
           </p>
         )}
       </section>
@@ -811,9 +811,10 @@ function ChainWorkbench({ config }: { readonly config: ChainConfig }) {
         <h2>6 · 发信号（submitSignal）</h2>
         <p className="fineprint">
           钱包直接调用 UVPStateMachine.submitSignal（不是 submitSignalFor 代付）；不经 relay/backend。
-          链上按本次 source 阶段解析 effective executor，要求提交人是该 supplier 当前登记的 executor，
-          未指派/未注册/非 executor 分别回滚 StageExecutorNotAssigned / SupplierNotRegistered /
-          UnauthorizedStageExecutor。attribution 可选 JSON：{` { "stageId": "0x…", "proof": ["0x…"] }`}
+          链上按本次 source 阶段解析 assigned supplier（stage → supplierId → supplier account），要求
+          提交人是该 SID 当前绑定的 supplier account 且 SID active；未指派/未激活/非该 account 分别回滚
+          StageSupplierNotAssigned / SupplierNotActive / UnauthorizedStageSupplierAccount。
+          attribution 可选 JSON：{` { "stageId": "0x…", "proof": ["0x…"] }`}
           （proof 语义不解析；留空且 planId 等于已解析 artifact 时按 artifact 能力表自动补 proof）。
         </p>
         <div className="grid-2">
@@ -881,8 +882,8 @@ function ArtifactFacts({ artifact }: { readonly artifact: CompiledPlanArtifact }
         </dd>
       </div>
       <div>
-        <dt>执行者绑定</dt>
-        <dd>{String(artifact.registerArgs.executorBindings.length)} 条（default/candidate）</dd>
+        <dt>supplier 绑定</dt>
+        <dd>{String(artifact.supplierBindings.length)} 条（default/candidate）</dd>
       </div>
       <div>
         <dt>出生 trigger</dt>
@@ -951,7 +952,7 @@ function OtherFields({ event }: { readonly event: ChainEvent }) {
           <div><dt>source / signal</dt><dd>{short(event.sourceId)} / {short(event.signalId)}</dd></div>
         </dl>
       );
-    case "stage_executor_activated":
+    case "stage_supplier_assigned":
       return (
         <dl className="facts">
           <div><dt>stageId</dt><dd>{event.targetStageId}</dd></div>
@@ -959,7 +960,7 @@ function OtherFields({ event }: { readonly event: ChainEvent }) {
           <div><dt>patchNonce</dt><dd>{String(event.patchNonce)}</dd></div>
         </dl>
       );
-    case "stage_executor_patch_applied":
+    case "stage_supplier_patch_applied":
       return (
         <dl className="facts">
           <div><dt>selector / target stage</dt><dd>{short(event.selectorStageId)} / {short(event.targetStageId)}</dd></div>
