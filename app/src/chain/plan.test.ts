@@ -1,22 +1,20 @@
 // artifact 入口的不变量：手填 bundle 的坏形状/坏 planId/坏 registerArgs.supplierBindings/
 // root、坏 onchain.supplierBindings 必须具名拒绝（不落到通用异常）；多 trigger 按
-// artifact 顺序枚举；commitPlan typed data 的 supplierBindingsRoot 来自 registerArgs；
-// 出生准备使用显式选择的 trigger，capability 计划带 stage attribution（否则链上
-// InvalidSignalCapability），出生不再携带 SignalAuthorization 行。
+// artifact 顺序枚举；commitPlan typed data 的 5 字段来自钱包与 registerArgs；
+// 出生 trigger 是 orderId=0 的 submitSignal 直发（空签名），capability 计划带 stage
+// attribution（否则链上 InvalidSignalCapability）。
 
 import assert from "node:assert/strict";
 import test from "node:test";
-import { deriveTriggerOrderId } from "@uvp-eth/uvp-client/core";
 import {
   buildCommitPlanTypedData,
+  buildOrderTriggerCall,
   parseCompiledPlanArtifact,
-  prepareOrderBirth,
   type CompiledPlanArtifact
 } from "./plan";
 
 const H = (n: number): `0x${string}` => `0x${n.toString(16).padStart(64, "0")}`;
 const WALLET = `0x${"ab".repeat(20)}` as const;
-const CREATOR = `0x${"cd".repeat(20)}` as const;
 const STATE_MACHINE = `0x${"ef".repeat(20)}` as const;
 const SUPPLIER_UUID = "5f0b1e2a-7c9d-4e1f-9a2b-000000000021";
 const SUPPLIER_ID = `0x${"0".repeat(32)}5f0b1e2a7c9d4e1f9a2b000000000021` as const;
@@ -302,7 +300,7 @@ test("artifact 解析：坏 JSON/坏形状/坏 planId/坏 supplierBindings 具�
   if (!noTriggerFieldResult.ok) assert.equal(noTriggerFieldResult.code, "artifact_shape");
 });
 
-test("commitPlan typed data：supplierBindingsRoot 来自 registerArgs，publisher=birthAuthorizer=钱包", () => {
+test("commitPlan typed data：5 字段来自钱包与 registerArgs", () => {
   const artifact = parseOk(cloneArtifact());
   const typedData = buildCommitPlanTypedData({
     artifact,
@@ -314,66 +312,63 @@ test("commitPlan typed data：supplierBindingsRoot 来自 registerArgs，publish
   if (!typedData.ok) {
     assert.fail(`expected commit typed data ok, got ${typedData.code}: ${typedData.message}`);
   }
-  assert.equal(typedData.value.message.supplierBindingsRoot, H(15));
   assert.equal(typedData.value.message.publisher.toLowerCase(), WALLET);
-  assert.equal(typedData.value.message.birthAuthorizer.toLowerCase(), WALLET);
+  assert.equal(typedData.value.message.hooksHash, H(11));
+  assert.equal(typedData.value.message.capabilitiesRoot, H(12));
+  assert.equal(typedData.value.message.supplierBindingsRoot, H(15));
   assert.equal(typedData.value.message.deadline, "1900000000");
 });
 
-test("出生准备：capability 计划带 stage attribution，typed data 只带 birth 字段", () => {
+test("出生 trigger：orderId=0、submitter=钱包、空签名，capability 计划带 stage attribution", () => {
   const artifact = parseOk(cloneArtifact());
-  assert.equal(artifact.facts.length, 1);
   const trigger = artifact.triggers[0];
   if (trigger === undefined) assert.fail("fixture trigger missing");
 
-  const prepared = prepareOrderBirth({
+  const call = buildOrderTriggerCall({
     artifact,
     trigger,
-    creator: CREATOR,
     submitter: WALLET,
     chainId: 31_337,
     stateMachineAddress: STATE_MACHINE,
+    rpcUrl: "http://127.0.0.1:8545",
     payloadHash: H(40),
     idempotencyKey: H(41),
     deadline: 1_900_000_000n
   });
-  if (!prepared.ok) {
-    assert.fail(`expected birth preparation ok, got ${prepared.code}: ${prepared.message}`);
+  if (!call.ok) {
+    assert.fail(`expected trigger call ok, got ${call.code}: ${call.message}`);
   }
-
-  assert.equal(prepared.value.birthFactAttribution.stageId, H(2));
-  assert.equal(prepared.value.typedData.message.submitter.toLowerCase(), WALLET);
-  assert.equal(prepared.value.typedData.message.creator.toLowerCase(), CREATOR);
-  assert.equal(prepared.value.typedData.message.triggerHookId, trigger.hookId);
-  assert.equal(prepared.value.typedData.message.sourceId, trigger.sourceId);
-  assert.equal(
-    prepared.value.orderId,
-    deriveTriggerOrderId(artifact.planId, trigger.sourceId, trigger.signalId, H(40))
-  );
+  const [submission, signature] = call.value.args;
+  assert.equal(submission.orderId, H(0));
+  assert.equal(signature, "0x");
+  assert.equal(submission.submitter.toLowerCase(), WALLET);
+  assert.equal(submission.planId, artifact.planId);
+  assert.equal(submission.sourceId, trigger.sourceId);
+  assert.equal(submission.signalId, trigger.signalId);
+  assert.equal(submission.payloadHash, H(40));
+  assert.equal(submission.idempotencyKey, H(41));
+  assert.equal(submission.patchHash, H(0));
+  assert.equal(submission.attribution.stageId, H(2));
 
   const multiArtifact = parseOk(addTriggerEntries(cloneArtifact()));
-  const triggerA = multiArtifact.triggers[0];
-  const triggerB = multiArtifact.triggers[1];
-  if (triggerA === undefined || triggerB === undefined) assert.fail("expected two triggers");
-
-  for (const selected of [triggerA, triggerB]) {
-    const chosen = prepareOrderBirth({
-      artifact: multiArtifact,
-      trigger: selected,
-      creator: CREATOR,
-      submitter: WALLET,
-      chainId: 31_337,
-      stateMachineAddress: STATE_MACHINE,
-      payloadHash: H(40),
-      idempotencyKey: H(41),
-      deadline: 1_900_000_000n
-    });
-    if (!chosen.ok) {
-      assert.fail(`expected birth preparation ok, got ${chosen.code}: ${chosen.message}`);
-    }
-    assert.equal(chosen.value.typedData.message.triggerHookId, selected.hookId);
-    assert.equal(chosen.value.typedData.message.triggerStageId, selected.stageId);
-    assert.equal(chosen.value.typedData.message.sourceId, selected.sourceId);
-    assert.equal(chosen.value.typedData.message.signalId, selected.signalId);
+  const selected = multiArtifact.triggers[1];
+  if (selected === undefined) assert.fail("expected second trigger");
+  const chosen = buildOrderTriggerCall({
+    artifact: multiArtifact,
+    trigger: selected,
+    submitter: WALLET,
+    chainId: 31_337,
+    stateMachineAddress: STATE_MACHINE,
+    rpcUrl: "http://127.0.0.1:8545",
+    payloadHash: H(40),
+    idempotencyKey: H(41),
+    deadline: 1_900_000_000n
+  });
+  if (!chosen.ok) {
+    assert.fail(`expected trigger call ok, got ${chosen.code}: ${chosen.message}`);
   }
+  const [chosenSubmission] = chosen.value.args;
+  assert.equal(chosenSubmission.sourceId, selected.sourceId);
+  assert.equal(chosenSubmission.signalId, selected.signalId);
+  assert.equal(chosenSubmission.attribution.stageId, H(51));
 });

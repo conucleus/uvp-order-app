@@ -1,11 +1,11 @@
 // order-app 链直连 demo B：连接钱包 → 解析手填编译 artifact（definition/onchain/
-// registerArgs/planId）→ 钱包签 commitPlan + finalizePlan 注册计划 → 钱包签
-// triggerOrderFromOutsideFor 出生订单 → 读链上事实/事件 → 发信号。没有 backend、
-// 会话 token、草稿或邀请；浏览器不编译 DSL（compiler 非浏览器安全）。
-// 读取失败与空事实分开：读取失败具名，空事件只表示链上没有这些事实。
+// registerArgs/planId）→ 钱包签 commitPlan + finalizePlan 注册计划 → 钱包直发
+// submitSignal(orderId=0) 出生订单（合约生成 orderId，从回执事件读取）→ 读链上
+// 事实/事件 → 发信号。没有 backend、会话 token、草稿或邀请；浏览器不编译 DSL
+// （compiler 非浏览器安全）。读取失败与空事实分开：读取失败具名，空事件只表示
+// 链上没有这些事实。
 
 import { useMemo, useState, type ChangeEvent } from "react";
-import { isAddress } from "viem";
 import {
   chainConfigProblemText,
   readChainConfig,
@@ -16,6 +16,7 @@ import {
   createChainReader,
   sendWalletCall,
   signTypedDataWithWallet,
+  submitOrderTrigger,
   submitSignal,
   type ChainFailure,
   type OrderFacts,
@@ -26,9 +27,8 @@ import { buildSignalCall, parseBytes32, randomBytes32 } from "./chain/input";
 import {
   buildCommitPlanCalls,
   buildCommitPlanTypedData,
-  buildOrderBirthCall,
+  buildOrderTriggerCall,
   parseCompiledPlanArtifact,
-  prepareOrderBirth,
   signalAttributionFor,
   type CompiledPlanArtifact
 } from "./chain/plan";
@@ -94,7 +94,6 @@ function ChainWorkbench({ config }: { readonly config: ChainConfig }) {
   const [query, setQuery] = useState<QueryState>({ kind: "idle" });
   const [events, setEvents] = useState<EventsState>({ kind: "idle" });
 
-  const [creator, setCreator] = useState("");
   const [selectedTriggerHookId, setSelectedTriggerHookId] = useState("");
   const [birthPayloadHash, setBirthPayloadHash] = useState(() => safeRandomBytes32());
   const [birthIdempotencyKey, setBirthIdempotencyKey] = useState(() => safeRandomBytes32());
@@ -118,9 +117,6 @@ function ChainWorkbench({ config }: { readonly config: ChainConfig }) {
       return;
     }
     setWallet(result.value);
-    if (creator.trim() === "") {
-      setCreator(result.value.address);
-    }
   }
 
   function applyArtifact(text: string, label: string): void {
@@ -276,14 +272,6 @@ function ChainWorkbench({ config }: { readonly config: ChainConfig }) {
       });
       return;
     }
-    const creatorRaw = creator.trim() === "" ? wallet.address : creator.trim();
-    if (!isAddress(creatorRaw, { strict: true })) {
-      setBirthState({
-        kind: "failed",
-        failure: { code: "birth_creator", message: `creator ${creatorRaw} 不是合法 EVM 地址。` }
-      });
-      return;
-    }
     const payload = parseBytes32(birthPayloadHash, "payloadHash");
     if (!payload.ok) {
       setBirthState({
@@ -306,44 +294,28 @@ function ChainWorkbench({ config }: { readonly config: ChainConfig }) {
       setBirthState({ kind: "failed", failure: timestamp.failure });
       return;
     }
-    const prepared = prepareOrderBirth({
+    const call = buildOrderTriggerCall({
       artifact,
       trigger: selectedTrigger,
-      creator: creatorRaw,
       submitter: wallet.address,
       chainId: config.chainId,
       stateMachineAddress: config.stateMachine,
+      rpcUrl: config.rpcUrl,
       payloadHash: payload.value,
       idempotencyKey: idempotency.value,
       deadline: timestamp.value + CALL_DEADLINE_SECONDS
-    });
-    if (!prepared.ok) {
-      setBirthState({ kind: "failed", failure: { code: prepared.code, message: prepared.message } });
-      return;
-    }
-    setBirthState({ kind: "pending", step: "等待钱包签名 triggerOrderFromOutsideFor typed data" });
-    const signature = await signTypedDataWithWallet(wallet, prepared.value.typedData);
-    if (!signature.ok) {
-      setBirthState({ kind: "failed", failure: signature.failure });
-      return;
-    }
-    const call = buildOrderBirthCall({
-      prepared: prepared.value,
-      chainId: config.chainId,
-      stateMachineAddress: config.stateMachine,
-      signature: signature.value
     });
     if (!call.ok) {
       setBirthState({ kind: "failed", failure: { code: call.code, message: call.message } });
       return;
     }
-    setBirthState({ kind: "pending", step: "发送 triggerOrderFromOutsideFor" });
-    const sent = await sendWalletCall(config, wallet, call.value, "triggerOrderFromOutsideFor");
+    setBirthState({ kind: "pending", step: "钱包发送 submitSignal（orderId=0）" });
+    const sent = await submitOrderTrigger(config, wallet, call.value);
     if (!sent.ok) {
       setBirthState({ kind: "failed", failure: sent.failure });
       return;
     }
-    const orderId = prepared.value.orderId;
+    const orderId = sent.value.orderId;
     setBirthState({ kind: "success", txHash: sent.value.txHash, orderId });
     setPlanInput(artifact.planId);
     setOrderInput(orderId);
@@ -405,11 +377,16 @@ function ChainWorkbench({ config }: { readonly config: ChainConfig }) {
   }
 
   async function send(): Promise<void> {
+    if (wallet === undefined) {
+      setSubmit({ kind: "failed", failure: { code: "no_wallet", message: "先连接钱包再发送信号。" } });
+      return;
+    }
     const built = buildSignalCall(
       {
         stateMachine: config.stateMachine,
         chainId: config.chainId,
-        rpcUrl: config.rpcUrl
+        rpcUrl: config.rpcUrl,
+        submitter: wallet.address
       },
       {
         planId: planInput,
@@ -423,10 +400,6 @@ function ChainWorkbench({ config }: { readonly config: ChainConfig }) {
     );
     if (!built.ok) {
       setSubmit({ kind: "failed", failure: { code: "invalid_input", message: built.message } });
-      return;
-    }
-    if (wallet === undefined) {
-      setSubmit({ kind: "failed", failure: { code: "no_wallet", message: "先连接钱包再发送信号。" } });
       return;
     }
     setSubmit({ kind: "pending" });
@@ -468,7 +441,7 @@ function ChainWorkbench({ config }: { readonly config: ChainConfig }) {
       <SystemBanner
         tone="info"
         title="artifact → commitPlan → 出生，钱包直发"
-        text="浏览器不编译 DSL；artifact 由 used-car 编译器/发布脚本产出后手填。注册与出生都只经当前钱包签名直发链上，没有 backend、会话、草稿或邀请。"
+        text="浏览器不编译 DSL；artifact 由 used-car 编译器/发布脚本产出后手填。注册由当前钱包签 commitPlan/finalizePlan，出生由当前钱包直发 submitSignal，没有 backend、会话、草稿或邀请。"
       />
 
       {walletFailure === undefined ? null : (
@@ -479,8 +452,8 @@ function ChainWorkbench({ config }: { readonly config: ChainConfig }) {
         <h2>1 · 计划 artifact（手填编译产物）</h2>
         <p className="fineprint">
           粘贴 used-car 编译器 bundle{` {definition, onchain, registerArgs, planId}`}，或从 JSON
-          文件载入。浏览器只解析 bundle 与选择出生 trigger；commitPlan/finalizePlan 和出生的
-          typed data/calldata 全部由 @uvp-eth/uvp-client/core 构造。
+          文件载入。浏览器只解析 bundle 与选择出生 trigger；commitPlan/finalizePlan 与出生
+          trigger 的 submitSignal calldata 全部由 @uvp-eth/uvp-client/core 构造。
         </p>
         <label>
           artifact JSON
@@ -526,13 +499,13 @@ function ChainWorkbench({ config }: { readonly config: ChainConfig }) {
       <section className="panel">
         <h2>2 · 注册计划（commitPlan → finalizePlan）</h2>
         <p className="fineprint">
-          签名人 = publisher = birthAuthorizer = 当前钱包；deadline = 链上时间 + 1 小时。
-          commitPlan 写入 hooks/roots，finalizePlan 后计划才可出生。注册成功后链上 planId
-          必须等于 artifact.planId，否则说明 artifact 不是按当前钱包发布的。
+          签名人 = publisher = 当前钱包；deadline = 链上时间 + 1 小时。
+          commitPlan 写入 hooks 与 roots（PlanCommit 5 字段），finalizePlan 后计划才可出生。
+          注册成功后链上 planId 必须等于 artifact.planId，否则说明 artifact 不是按当前钱包发布的。
         </p>
         <dl className="facts">
           <div>
-            <dt>publisher / birthAuthorizer</dt>
+            <dt>publisher</dt>
             <dd>{wallet?.address ?? "未连接钱包"}</dd>
           </div>
           <div>
@@ -577,12 +550,13 @@ function ChainWorkbench({ config }: { readonly config: ChainConfig }) {
       </section>
 
       <section className="panel">
-        <h2>3 · 出生订单（triggerOrderFromOutsideFor）</h2>
+        <h2>3 · 出生订单（submitSignal，orderId=0）</h2>
         <p className="fineprint">
-          出生提交人（submitter）必须是计划的 birthAuthorizer（当前钱包），birthAuthorizer 是计划级
-          角色；creator 默认当前钱包、可改。计划可声明多个出生 trigger，本次入口按 stage/signal 显式
-          选择，triggerHookId 随之显式进入出生 typed data。出生是特殊出生事实，不走 stage supplier
-          发信授权。payloadHash/idempotencyKey 是本次出生的承诺，缺省随机。
+          出生提交人（submitter）= 出生 trigger 阶段的 assigned supplier account，即当前钱包直发
+          （空签名，submitter = msg.sender）；orderId 由合约随机生成，从回执的 SignalSubmitted
+          事件读取。计划可声明多个出生 trigger，本次入口按 stage/signal 显式选择。
+          同一 submitter + idempotencyKey 重复提交会被链上 DuplicateTriggerKey 拒绝。
+          payloadHash/idempotencyKey 是本次出生的承诺，缺省随机。
         </p>
         <label>
           出生 trigger（stage / signal）
@@ -602,15 +576,6 @@ function ChainWorkbench({ config }: { readonly config: ChainConfig }) {
           </select>
         </label>
         <div className="grid-2">
-          <label>
-            creator（默认当前钱包）
-            <input
-              value={creator}
-              onChange={(event) => setCreator(event.target.value)}
-              placeholder="0x + 40 hex"
-              spellCheck={false}
-            />
-          </label>
           <label>
             payloadHash
             <input
@@ -632,8 +597,10 @@ function ChainWorkbench({ config }: { readonly config: ChainConfig }) {
         </div>
         <dl className="facts">
           <div>
-            <dt>出生角色 / submitter</dt>
-            <dd>birthAuthorizer（计划级） / {wallet?.address ?? "未连接钱包"}</dd>
+            <dt>出生提交人 / submitter</dt>
+            <dd>
+              {wallet?.address ?? "未连接钱包"}（trigger 阶段 assigned supplier account，直发空签名）
+            </dd>
           </div>
           <div>
             <dt>planId</dt>
@@ -689,7 +656,7 @@ function ChainWorkbench({ config }: { readonly config: ChainConfig }) {
             disabled={birthState.kind === "pending" || artifact === undefined || wallet === undefined}
             onClick={() => void createOrder()}
           >
-            {birthState.kind === "pending" ? birthState.step : "钱包签出生并创建订单"}
+            {birthState.kind === "pending" ? birthState.step : "钱包发送出生 trigger（submitSignal）"}
           </button>
         </div>
         {birthState.kind === "success" ? (
@@ -749,16 +716,10 @@ function ChainWorkbench({ config }: { readonly config: ChainConfig }) {
               <dd>{String(query.facts.orderExists)}</dd>
             </div>
             {query.facts.orderExists ? (
-              <>
-                <div>
-                  <dt>creator</dt>
-                  <dd>{query.facts.creator ?? "未返回"}</dd>
-                </div>
-                <div>
-                  <dt>relayer</dt>
-                  <dd>{query.facts.relayer ?? "未返回"}</dd>
-                </div>
-              </>
+              <div>
+                <dt>relayer</dt>
+                <dd>{query.facts.relayer ?? "未返回"}</dd>
+              </div>
             ) : (
               <div>
                 <dt>说明</dt>
@@ -810,10 +771,12 @@ function ChainWorkbench({ config }: { readonly config: ChainConfig }) {
       <section className="panel">
         <h2>6 · 发信号（submitSignal）</h2>
         <p className="fineprint">
-          钱包直接调用 UVPStateMachine.submitSignal（不是 submitSignalFor 代付）；不经 relay/backend。
-          链上按本次 source 阶段解析 assigned supplier（stage → supplierId → supplier account），要求
-          提交人是该 SID 当前绑定的 supplier account 且 SID active；未指派/未激活/非该 account 分别回滚
-          StageSupplierNotAssigned / SupplierNotActive / UnauthorizedStageSupplierAccount。
+          钱包直接调用 UVPStateMachine.submitSignal（空签名直发，submitter = msg.sender）；不经
+          relay/backend。提交信封携带 patchHash（无文件 patch 时为 0，由 uvp-client 按 filePatch
+          计算），本 app 不复制参数编码。链上按本次 source 阶段解析 assigned supplier
+          （stage → supplierId → supplier account），要求提交人是该 SID 当前绑定的 supplier account
+          且 SID active；未指派/未激活/非该 account 分别回滚 StageSupplierNotAssigned /
+          SupplierNotActive / UnauthorizedStageSupplierAccount。
           attribution 可选 JSON：{` { "stageId": "0x…", "proof": ["0x…"] }`}
           （proof 语义不解析；留空且 planId 等于已解析 artifact 时按 artifact 能力表自动补 proof）。
         </p>

@@ -5,9 +5,10 @@ Chain-direct browser console for UVP Orders (demo B). The runnable package is `a
 Flow: connect an injected EIP-1193 wallet → paste or load a hand-filled compiled
 plan artifact `{definition, onchain, registerArgs, planId}` produced by the
 used-car compiler/publish scripts → the wallet signs `commitPlan` and
-`finalizePlan` → the wallet signs `triggerOrderFromOutsideFor` to birth the order
-(wallet = publisher = birthAuthorizer) → read order facts/events from the state
-machine → submit a signal.
+`finalizePlan` → the wallet directly sends `submitSignal` with `orderId=0` to
+create the order (the state machine generates the order id, read from the
+receipt event) → read order facts/events from the state machine → submit a
+signal.
 
 There is no backend, session token, draft, invite, config directory, or task
 inbox. The compiler is not browser-safe (`zhixu-loader` depends on `node:fs`), so

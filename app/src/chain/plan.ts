@@ -2,19 +2,18 @@
 // 的浏览器侧入口：解析 artifact（onchain 的 StageSupplierBinding supplierID UUID/
 // supplierId bytes32、registerArgs 的 hooks 与 supplierBindings/root，onchain.triggers
 // 枚举，多 trigger 合法）、按 stage/signal 选本次出生 trigger，把 commitPlan/
-// finalizePlan 与 triggerOrderFromOutsideFor 的 typed data/calldata 交给
-// uvp-client core 构造。浏览器不编译 DSL、不重算协议 hash；失败按具体字段/原因具名。
+// finalizePlan 与出生 trigger 的 submitSignal calldata 交给 uvp-client core 构造。
+// 浏览器不编译 DSL、不重算协议 hash；失败按具体字段/原因具名。
 
 import type { Address, Hex } from "viem";
 import {
   ZERO_BYTES32,
   buildPlanCommitTypedDataFor,
   buildPlanRegistration,
-  buildTriggerOrderFromOutsideForCall,
-  buildTriggerOrderFromOutsideTypedData,
-  deriveTriggerOrderId,
+  buildSubmitStateMachineSignalCall,
   planRegistrationArgs,
-  withCapabilityProofs
+  withCapabilityProofs,
+  type SubmitStateMachineSignalCall
 } from "@uvp-eth/uvp-client/core";
 import { parseBytes32, type Bytes32 } from "./input";
 
@@ -25,8 +24,6 @@ export type PlanCommitTypedData = ReturnType<typeof buildPlanCommitTypedDataFor>
 type PlanRegistrationArgs = ReturnType<typeof planRegistrationArgs>;
 type PlanRegistrationSource = Parameters<typeof planRegistrationArgs>[0];
 type PlanTransactionCall = ReturnType<typeof buildPlanRegistration>["commitCall"];
-type TriggerOrderFromOutsideTypedData = ReturnType<typeof buildTriggerOrderFromOutsideTypedData>;
-type TriggerOrderFromOutsideForCall = ReturnType<typeof buildTriggerOrderFromOutsideForCall>;
 
 interface PlanDependency {
   readonly kind: string;
@@ -48,7 +45,7 @@ export interface PlanCapability {
   readonly stageId: Bytes32;
   readonly targetSourceId: Bytes32;
   readonly signalId: Bytes32;
-  readonly relation: 0 | 1;
+  readonly relation: 0;
   readonly source: string;
   readonly signalName: string;
 }
@@ -106,20 +103,13 @@ export interface CommitPlanInput {
   readonly deadline: bigint;
 }
 
-export interface PreparedOrderBirth {
-  readonly typedData: TriggerOrderFromOutsideTypedData;
-  readonly orderId: Bytes32;
-  readonly birthFactAttribution: FactAttribution;
-  readonly trigger: PlanTrigger;
-}
-
-export interface OrderBirthInput {
+export interface OrderTriggerInput {
   readonly artifact: CompiledPlanArtifact;
   readonly trigger: PlanTrigger;
-  readonly creator: Address;
   readonly submitter: Address;
   readonly chainId: number;
   readonly stateMachineAddress: Address;
+  readonly rpcUrl: string;
   readonly payloadHash: Bytes32;
   readonly idempotencyKey: Bytes32;
   readonly deadline: bigint;
@@ -225,7 +215,6 @@ export function buildCommitPlanTypedData(input: CommitPlanInput): PlanResult<Pla
         { stateMachineAddress: input.stateMachineAddress, chainId: input.chainId },
         {
           publisher: input.publisher,
-          birthAuthorizer: input.publisher,
           deadline: input.deadline,
           registration: registration.value
         }
@@ -248,7 +237,6 @@ export function buildCommitPlanCalls(
       { stateMachineAddress: input.stateMachineAddress, chainId: input.chainId },
       {
         publisher: input.publisher,
-        birthAuthorizer: input.publisher,
         deadline: input.deadline,
         registration: registration.value,
         signature: input.signature
@@ -260,80 +248,47 @@ export function buildCommitPlanCalls(
   }
 }
 
-export function prepareOrderBirth(input: OrderBirthInput): PlanResult<PreparedOrderBirth> {
+export function buildOrderTriggerCall(input: OrderTriggerInput): PlanResult<SubmitStateMachineSignalCall> {
   const trigger = input.trigger;
-  try {
-    const orderId = deriveTriggerOrderId(
-      input.artifact.planId,
-      trigger.sourceId,
-      trigger.signalId,
-      input.payloadHash
-    ) as Bytes32;
-    const typedData = buildTriggerOrderFromOutsideTypedData({
-      chainId: input.chainId,
-      verifyingContract: input.stateMachineAddress,
-      planId: input.artifact.planId,
-      creator: input.creator,
-      triggerHookId: trigger.hookId,
-      triggerStageId: trigger.stageId,
-      sourceId: trigger.sourceId,
-      signalId: trigger.signalId,
-      payloadHash: input.payloadHash,
-      idempotencyKey: input.idempotencyKey,
-      submitter: input.submitter,
-      deadline: input.deadline
-    });
-    return {
-      ok: true,
-      value: {
-        typedData,
-        orderId,
-        birthFactAttribution: attributionFor(
-          input.artifact,
-          orderId,
-          trigger.sourceId,
-          trigger.signalId,
-          input.payloadHash,
-          input.idempotencyKey
-        ),
-        trigger
-      }
-    };
-  } catch (error) {
-    return fail("birth_invalid", `出生 typed data 构造失败：${errorMessage(error)}`);
-  }
-}
-
-export function buildOrderBirthCall(input: {
-  readonly prepared: PreparedOrderBirth;
-  readonly chainId: number;
-  readonly stateMachineAddress: Address;
-  readonly signature: Hex;
-}): PlanResult<TriggerOrderFromOutsideForCall> {
-  const message = input.prepared.typedData.message;
+  const attribution = attributionFor(
+    input.artifact,
+    ZERO_BYTES32,
+    trigger.sourceId,
+    trigger.signalId,
+    input.payloadHash,
+    input.idempotencyKey
+  );
   try {
     return {
       ok: true,
-      value: buildTriggerOrderFromOutsideForCall(
-        { stateMachineAddress: input.stateMachineAddress, chainId: input.chainId },
+      value: buildSubmitStateMachineSignalCall(
         {
-          planId: message.planId,
-          creator: message.creator,
-          triggerHookId: message.triggerHookId,
-          triggerStageId: message.triggerStageId,
-          sourceId: message.sourceId,
-          signalId: message.signalId,
-          payloadHash: message.payloadHash,
-          idempotencyKey: message.idempotencyKey,
-          submitter: message.submitter,
-          deadline: message.deadline,
-          signature: input.signature,
-          birthFactAttribution: input.prepared.birthFactAttribution
-        }
+          stateMachineAddress: input.stateMachineAddress,
+          chainId: input.chainId,
+          rpcUrl: input.rpcUrl
+        },
+        {
+          planId: input.artifact.planId,
+          sourceId: trigger.sourceId,
+          signalId: trigger.signalId,
+          payloadHash: input.payloadHash,
+          idempotencyKey: input.idempotencyKey,
+          ...(attribution.stageId === ZERO_BYTES32
+            ? {}
+            : {
+                attribution: {
+                  sourceId: attribution.sourceId,
+                  signalId: attribution.signalId,
+                  stageId: attribution.stageId,
+                  capabilityProof: attribution.capabilityProof
+                }
+              })
+        },
+        input.submitter
       )
     };
   } catch (error) {
-    return fail("birth_invalid", `出生 calldata 构造失败：${errorMessage(error)}`);
+    return fail("trigger_invalid", `出生 trigger calldata 构造失败：${errorMessage(error)}`);
   }
 }
 

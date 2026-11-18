@@ -10,7 +10,6 @@ import { parseAbi, parseAbiItem } from "viem";
 export const stateMachineReadAbi = parseAbi([
   "function planExists(bytes32 planId) view returns (bool)",
   "function orderExists(bytes32 planId, bytes32 orderId) view returns (bool)",
-  "function orderCreator(bytes32 planId, bytes32 orderId) view returns (address)",
   "function orderRelayer(bytes32 planId, bytes32 orderId) view returns (address)",
   "function stagePatchModule() view returns (address)"
 ]);

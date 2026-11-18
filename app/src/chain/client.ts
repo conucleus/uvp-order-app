@@ -1,6 +1,6 @@
 // 链上直连：公共 RPC 只读（order facts/plan 存在性/事实事件/块时间，fromBlock
-// 可配、分块查询、失败具名）；写走 uvp-client core 构造的 call + 钱包 EIP-712
-// 签名 + browser sendProviderTransaction（不 relay、不代付、无 backend）。失败
+// 可配、分块查询、失败具名）；写走 uvp-client core 构造的 call + 钱包签名或空签名
+// 直发 + browser sendProviderTransaction（不 relay、不代付、无 backend）。失败
 // 保留 code/message，不伪造空/成功。
 
 import {
@@ -21,6 +21,7 @@ import {
 import {
   HOOK_READY_TOPIC,
   decodeHookReadyLog,
+  triggeredOrderIdFromLogs,
   type StateMachineRawLog,
   type SubmitStateMachineSignalCall
 } from "@uvp-eth/uvp-client/core";
@@ -48,7 +49,6 @@ export type ChainResult<T> =
 export interface OrderFacts {
   readonly planExists: boolean;
   readonly orderExists: boolean;
-  readonly creator?: Address | undefined;
   readonly relayer?: Address | undefined;
 }
 
@@ -94,21 +94,13 @@ export function createChainReader(config: ChainConfig): ChainReader {
         if (!orderExists) {
           return { ok: true, value: { planExists, orderExists } };
         }
-        const [creator, relayer] = await Promise.all([
-          client.readContract({
-            address: config.stateMachine,
-            abi: stateMachineReadAbi,
-            functionName: "orderCreator",
-            args: [planId, orderId]
-          }),
-          client.readContract({
-            address: config.stateMachine,
-            abi: stateMachineReadAbi,
-            functionName: "orderRelayer",
-            args: [planId, orderId]
-          })
-        ]);
-        return { ok: true, value: { planExists, orderExists, creator, relayer } };
+        const relayer = await client.readContract({
+          address: config.stateMachine,
+          abi: stateMachineReadAbi,
+          functionName: "orderRelayer",
+          args: [planId, orderId]
+        });
+        return { ok: true, value: { planExists, orderExists, relayer } };
       } catch (error) {
         return { ok: false, failure: mapReadError(error, "读取订单事实失败") };
       }
@@ -340,12 +332,17 @@ export async function signTypedDataWithWallet(
   }
 }
 
-export async function sendWalletCall(
+interface SentTransaction {
+  readonly txHash: Hex;
+  readonly logs: readonly StateMachineRawLog[];
+}
+
+async function sendWalletTransaction(
   config: ChainConfig,
   connection: WalletConnection,
   call: WalletCall,
   label: string
-): Promise<ChainResult<{ readonly txHash: Hex }>> {
+): Promise<ChainResult<SentTransaction>> {
   if (call.chainId !== undefined && call.chainId !== config.chainId) {
     return {
       ok: false,
@@ -388,7 +385,7 @@ export async function sendWalletCall(
         failure: { code: "reverted", message: `${label} 已上链但回执状态是 reverted`, txHash: hash }
       };
     }
-    return { ok: true, value: { txHash: hash } };
+    return { ok: true, value: { txHash: hash, logs: rawLogsOf(receipt.logs) } };
   } catch (error) {
     const mapped = mapWalletError(error);
     return {
@@ -396,6 +393,16 @@ export async function sendWalletCall(
       failure: { code: mapped.code, message: `${label} 回执等待失败：${mapped.message}`, txHash: hash }
     };
   }
+}
+
+export async function sendWalletCall(
+  config: ChainConfig,
+  connection: WalletConnection,
+  call: WalletCall,
+  label: string
+): Promise<ChainResult<{ readonly txHash: Hex }>> {
+  const sent = await sendWalletTransaction(config, connection, call, label);
+  return sent.ok ? { ok: true, value: { txHash: sent.value.txHash } } : sent;
 }
 
 export async function submitSignal(
@@ -409,6 +416,57 @@ export async function submitSignal(
     { address: call.address, data: call.data, chainId: call.chainId },
     "submitSignal"
   );
+}
+
+export async function submitOrderTrigger(
+  config: ChainConfig,
+  connection: WalletConnection,
+  call: SubmitStateMachineSignalCall
+): Promise<ChainResult<{ readonly txHash: Hex; readonly orderId: Bytes32 }>> {
+  const sent = await sendWalletTransaction(
+    config,
+    connection,
+    { address: call.address, data: call.data, chainId: call.chainId },
+    "submitSignal"
+  );
+  if (!sent.ok) {
+    return sent;
+  }
+  let orderId: Hex | undefined;
+  try {
+    orderId = triggeredOrderIdFromLogs(sent.value.logs);
+  } catch (error) {
+    return {
+      ok: false,
+      failure: {
+        code: "order_id_decode_failed",
+        message: `出生回执的 SignalSubmitted 解码失败：${error instanceof Error ? error.message : String(error)}`,
+        txHash: sent.value.txHash
+      }
+    };
+  }
+  if (orderId === undefined) {
+    return {
+      ok: false,
+      failure: {
+        code: "order_id_missing",
+        message: "出生交易回执里没有 SignalSubmitted 事件，链上生成的 orderId 未知",
+        txHash: sent.value.txHash
+      }
+    };
+  }
+  return { ok: true, value: { txHash: sent.value.txHash, orderId: orderId as Bytes32 } };
+}
+
+function rawLogsOf(logs: readonly Log[]): readonly StateMachineRawLog[] {
+  return logs.map((log) => ({
+    data: log.data,
+    topics: log.topics,
+    address: log.address,
+    blockNumber: log.blockNumber,
+    transactionHash: log.transactionHash,
+    logIndex: log.logIndex
+  }));
 }
 
 export function logChunkRanges(
