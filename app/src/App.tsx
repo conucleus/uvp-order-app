@@ -709,7 +709,7 @@ function ChainWorkbench({ config }: { readonly config: ChainConfig }) {
         <h2>2 · 注册计划（commitPlan → finalizePlan）</h2>
         <p className="fineprint">
           签名人 = publisher = 当前钱包；deadline = 链上时间 + 1 小时。
-          commitPlan 写入 hooks 与 roots（PlanCommit 5 字段），finalizePlan 后计划才可出生。
+          commitPlan 写入 hooks、roots 与 fileWritersHash（PlanCommit 6 字段），finalizePlan 后计划才可出生。
           注册成功后链上 planId 必须等于 artifact.planId，否则说明 artifact 不是按当前钱包发布的。
         </p>
         <dl className="facts">
@@ -732,6 +732,10 @@ function ChainWorkbench({ config }: { readonly config: ChainConfig }) {
           <div>
             <dt>supplierBindingsRoot</dt>
             <dd>{artifact === undefined ? "—" : short(artifact.registerArgs.supplierBindingsRoot)}</dd>
+          </div>
+          <div>
+            <dt>fileWritersHash</dt>
+            <dd>{artifact === undefined ? "—" : short(artifact.registerArgs.fileWritersHash)}</dd>
           </div>
           <div>
             <dt>deadline</dt>
@@ -1071,7 +1075,7 @@ function ChainWorkbench({ config }: { readonly config: ChainConfig }) {
         <h2>6 · 发信号（submitSignal）</h2>
         <p className="fineprint">
           钱包直接调用 UVPStateMachine.submitSignal（空签名直发，submitter = msg.sender）；不经
-          relay/backend。提交信封携带 patchHash（无文件 patch 时为 0，由 uvp-client 按 filePatch
+          relay/backend。提交信封携带 filesHash（无文件时为 0，由 uvp-client 按 files
           计算），本 app 不复制参数编码。链上按本次 source 阶段解析 assigned supplier
           （stage → supplierId → supplier account），要求提交人是该 SID 当前绑定的 supplier account
           且 SID active；未指派/未激活/非该 account 分别回滚 StageSupplierNotAssigned /

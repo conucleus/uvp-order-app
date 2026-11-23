@@ -1,6 +1,6 @@
 // artifact 入口的不变量：手填 bundle 的坏形状/坏 planId/坏 registerArgs.supplierBindings/
 // root、坏 onchain.supplierBindings 必须具名拒绝（不落到通用异常）；多 trigger 按
-// artifact 顺序枚举；commitPlan typed data 的 5 字段来自钱包与 registerArgs；
+// artifact 顺序枚举；commitPlan typed data 的 6 字段来自钱包与 registerArgs；
 // 出生 trigger 是 orderId=0 的 submitSignal 直发（空签名），capability 计划带 stage
 // attribution（否则链上 InvalidSignalCapability）。
 
@@ -127,6 +127,8 @@ function baseArtifact(): Record<string, unknown> {
       hooksHash: H(11),
       capabilitiesRoot: H(12),
       supplierBindingsRoot: H(15),
+      fileWritersHash: H(17),
+      fileWriters: [],
       hooks: [
         {
           hookId: H(1),
@@ -302,7 +304,7 @@ test("artifact 解析：坏 JSON/坏形状/坏 planId/坏 supplierBindings 具�
   if (!noTriggerFieldResult.ok) assert.equal(noTriggerFieldResult.code, "artifact_shape");
 });
 
-test("commitPlan typed data：5 字段来自钱包与 registerArgs", () => {
+test("commitPlan typed data：6 字段来自钱包与 registerArgs", () => {
   const artifact = parseOk(cloneArtifact());
   const typedData = buildCommitPlanTypedData({
     artifact,
@@ -318,6 +320,7 @@ test("commitPlan typed data：5 字段来自钱包与 registerArgs", () => {
   assert.equal(typedData.value.message.hooksHash, H(11));
   assert.equal(typedData.value.message.capabilitiesRoot, H(12));
   assert.equal(typedData.value.message.supplierBindingsRoot, H(15));
+  assert.equal(typedData.value.message.fileWritersHash, H(17));
   assert.equal(typedData.value.message.deadline, "1900000000");
 });
 
@@ -349,7 +352,8 @@ test("出生 trigger：orderId=0、submitter=钱包、空签名，capability 计
   assert.equal(submission.signalId, trigger.signalId);
   assert.equal(submission.payloadHash, H(40));
   assert.equal(submission.idempotencyKey, H(41));
-  assert.equal(submission.patchHash, H(0));
+  assert.equal(submission.targetStageId, H(0));
+  assert.deepEqual(submission.files, []);
   assert.equal(submission.attribution.stageId, H(2));
 
   const multiArtifact = parseOk(addTriggerEntries(cloneArtifact()));

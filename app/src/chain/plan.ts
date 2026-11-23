@@ -157,6 +157,12 @@ export function parseCompiledPlanArtifact(text: string): PlanResult<CompiledPlan
   if (!Array.isArray(registerArgs["supplierBindings"])) {
     return fail("artifact_shape", "artifact.registerArgs.supplierBindings 必须是数组。");
   }
+  if (!Array.isArray(registerArgs["fileWriters"])) {
+    return fail("artifact_shape", "artifact.registerArgs.fileWriters 必须是数组。");
+  }
+  if (typeof registerArgs["fileWritersHash"] !== "string") {
+    return fail("artifact_shape", "artifact.registerArgs.fileWritersHash 必须是 0x + 64 hex。");
+  }
   if (typeof registerArgs["supplierBindingsRoot"] !== "string") {
     return fail("artifact_shape", "artifact.registerArgs.supplierBindingsRoot 必须是 0x + 64 hex。");
   }

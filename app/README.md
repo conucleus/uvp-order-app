@@ -86,18 +86,18 @@ used-car 编译器/发布脚本产出的 bundle 顶层四字段：
 1. 连接钱包；链 ID 与 `VITE_CHAIN_ID` 不一致会拒绝。
 2. 粘贴/载入 artifact → 解析（坏 JSON/坏形状/坏 planId/坏 bindings/缺 trigger/
    多义 trigger 具名失败）。
-3. 注册：钱包签 `commitPlan`（publisher = 当前钱包，5 字段：
-   `hooksHash`/`capabilitiesRoot`/`supplierBindingsRoot`/`deadline` 取自 registerArgs
-   与链上时间；deadline = 链上时间 + 1 小时）→ 发送 → 发送 `finalizePlan` → 读
-   `planExists`。
+3. 注册：钱包签 `commitPlan`（publisher = 当前钱包，6 字段：
+   `hooksHash`/`capabilitiesRoot`/`supplierBindingsRoot`/`fileWritersHash`/`deadline`
+   取自 registerArgs 与链上时间；deadline = 链上时间 + 1 小时）→ 发送 → 发送
+   `finalizePlan` → 读 `planExists`。
 4. 出生：选 trigger、填 payloadHash/idempotencyKey → 钱包直发 `submitSignal`
    （`orderId=0`，空签名，submitter = 钱包）→ 从回执 `SignalSubmitted` 事件读取
    合约生成的 orderId 并自动读取事实。
 5. 读取订单事实/事件（按 planId + orderId 过滤，fromBlock 可配；事件解码覆盖
    `SignalSubmitted` 的 relayer 与 `StageSupplierAssigned`/`StageSupplierPatchApplied`
    的 supplierId/patchNonce）。
-6. 发信号：钱包直发 `submitSignal`（空签名，submitter = msg.sender）；patchHash 由
-   uvp-client 按 filePatch 计算（无文件 patch 时为 0）；attribution 留空且 planId
+6. 发信号：钱包直发 `submitSignal`（空签名，submitter = msg.sender）；filesHash 由
+   uvp-client 按 files 计算（空列表也有固定编码哈希）；attribution 留空且 planId
    等于已解析 artifact 时，按 artifact 能力表自动补 proof（显式填写的 attribution
    优先）。
 
@@ -116,7 +116,7 @@ used-car 编译器/发布脚本产出的 bundle 顶层四字段：
 ## 测试
 
 `pnpm --filter @uvp-eth/order-app test` 跑 `src/**/*.test.ts`：发信号输入/钱包错误映射，
-以及 artifact 解析的具名失败、出生 trigger 选择、commit typed data（5 字段映射）与出生
+以及 artifact 解析的具名失败、出生 trigger 选择、commit typed data（6 字段映射）与出生
 trigger 的 `submitSignal` calldata（orderId=0/空签名/attribution）、事件解码（relayer、
 supplierId/patchNonce）。
 

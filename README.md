@@ -14,7 +14,9 @@ There is no backend, session token, draft, invite, config directory, or task
 inbox. The compiler is not browser-safe (`zhixu-loader` depends on `node:fs`), so
 the browser never compiles DSL: the artifact is compiled outside and pasted/loaded.
 Typed-data and calldata come from `@uvp-eth/uvp-client/core`; chain facts stay on
-`UVPStateMachine`.
+`UVPStateMachine`. Signal authority is resolved on chain through the single
+`UVPIdentityRegistry` supplier capability namespace; this app holds no registry
+state and no second identity registry.
 
 ```bash
 pnpm --filter @uvp-eth/order-app dev

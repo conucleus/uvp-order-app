@@ -1,7 +1,7 @@
 // 发信号输入校验 + uvp-client core 构造 calldata：bytes32/attribution JSON/
 // idempotencyKey；不做网络。attribution 只解析 stageId + proof[]（proof 语义不解析），
 // 其余字段由表单的 sourceId/signalId 填充；submitSignal 的 ABI/参数编码、
-// patchHash 计算与空签名直发（submitter = 钱包）不在本文件复制。
+// filesHash 计算与空签名直发（submitter = 钱包）不在本文件复制。
 
 import type { Address } from "viem";
 import {
