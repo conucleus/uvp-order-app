@@ -9,6 +9,7 @@ import type { Address, Hex } from "viem";
 import {
   ZERO_BYTES32,
   buildPlanCommitTypedDataFor,
+  buildPlanFinalizeCall,
   buildPlanRegistration,
   buildSubmitStateMachineSignalCall,
   planRegistrationArgs,
@@ -245,6 +246,24 @@ export function buildCommitPlanCalls(
     return { ok: true, value: { commit: built.commitCall, finalize: built.finalizeCall } };
   } catch (error) {
     return fail("artifact_invalid", `commitPlan/finalizePlan calldata 构造失败：${errorMessage(error)}`);
+  }
+}
+
+export function buildFinalizePlanCall(input: {
+  readonly planId: Bytes32;
+  readonly chainId: number;
+  readonly stateMachineAddress: Address;
+}): PlanResult<PlanTransactionCall> {
+  try {
+    return {
+      ok: true,
+      value: buildPlanFinalizeCall(
+        { stateMachineAddress: input.stateMachineAddress, chainId: input.chainId },
+        input.planId
+      )
+    };
+  } catch (error) {
+    return fail("artifact_invalid", `finalizePlan calldata 构造失败：${errorMessage(error)}`);
   }
 }
 

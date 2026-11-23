@@ -123,3 +123,5 @@ supplierId/patchNonce）。
 Playwright e2e 已删除：旧 spec 断言的是已移除的 backend 流程文案（必然红）；有意义的
 e2e 需要 live chain + 已部署 state machine + 已发布 artifact + 注入钱包，属 L6
 integration/live-chain 面，不是本 L5 app 的测试层；静态文案快照属于回声测试，不补。
+`test:e2e` / `test:e2e:configured` 保留为显式失败入口（非 0 退出）：脚本缺失时
+`pnpm --filter` 会 0 退出，L6 车道不能据此假绿。

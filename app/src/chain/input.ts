@@ -8,6 +8,11 @@ import {
   buildSubmitStateMachineSignalCall,
   type SubmitStateMachineSignalCall
 } from "@uvp-eth/uvp-client/core";
+import {
+  decodeContractError,
+  formatDecodedContractError,
+  type DecodedContractError
+} from "./errors";
 
 export type Bytes32 = `0x${string}`;
 
@@ -205,6 +210,7 @@ export function buildSignalCall(
 export function mapWalletError(error: unknown): {
   readonly code: "user_rejected" | "reverted" | "network" | "unknown";
   readonly message: string;
+  readonly revert?: DecodedContractError | undefined;
 } {
   const record =
     typeof error === "object" && error !== null
@@ -220,6 +226,14 @@ export function mapWalletError(error: unknown): {
   const name = record?.name;
   if (code === 4001 || name === "UserRejectedRequestError") {
     return { code: "user_rejected", message: "钱包拒绝了签名/交易" };
+  }
+  const decoded = decodeContractError(error);
+  if (decoded !== undefined) {
+    return {
+      code: "reverted",
+      message: `链上拒绝：${formatDecodedContractError(decoded)}`,
+      revert: decoded
+    };
   }
   const detail = readErrorDetail(error);
   if (/revert|reverted|execution reverted/iu.test(detail)) {

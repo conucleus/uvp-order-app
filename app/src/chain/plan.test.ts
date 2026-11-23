@@ -6,8 +6,10 @@
 
 import assert from "node:assert/strict";
 import test from "node:test";
+import { decodeFunctionData, parseAbi } from "viem";
 import {
   buildCommitPlanTypedData,
+  buildFinalizePlanCall,
   buildOrderTriggerCall,
   parseCompiledPlanArtifact,
   type CompiledPlanArtifact
@@ -117,7 +119,7 @@ function baseArtifact(): Record<string, unknown> {
       supplierBindingsRoot: H(15)
     },
     registerArgs: {
-      schemaVersion: "uvp.onchainHookPlan.v8",
+      schemaVersion: "uvp.onchainHookPlan.v1",
       sourcePlanId: H(8),
       zhixuId: "used-car/step-purchase@1.0.0",
       planHash: H(9),
@@ -371,4 +373,24 @@ test("出生 trigger：orderId=0、submitter=钱包、空签名，capability 计
   assert.equal(chosenSubmission.sourceId, selected.sourceId);
   assert.equal(chosenSubmission.signalId, selected.signalId);
   assert.equal(chosenSubmission.attribution.stageId, H(51));
+});
+
+test("finalize-only 恢复使用 commitPlan 回执的 planId，而不是重新构造 commit", () => {
+  const committedPlanId = H(0x77);
+  const call = buildFinalizePlanCall({
+    planId: committedPlanId,
+    chainId: 31_337,
+    stateMachineAddress: STATE_MACHINE
+  });
+  if (!call.ok) {
+    assert.fail(`expected finalize call ok, got ${call.code}: ${call.message}`);
+  }
+  assert.equal(call.value.address.toLowerCase(), STATE_MACHINE);
+  assert.equal(call.value.chainId, 31_337);
+  const decoded = decodeFunctionData({
+    abi: parseAbi(["function finalizePlan(bytes32 planId)"]),
+    data: call.value.data
+  });
+  assert.equal(decoded.functionName, "finalizePlan");
+  assert.deepEqual(decoded.args, [committedPlanId]);
 });

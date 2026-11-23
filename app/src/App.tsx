@@ -16,6 +16,7 @@ import {
   createChainReader,
   sendWalletCall,
   signTypedDataWithWallet,
+  submitCommitPlan,
   submitOrderTrigger,
   submitSignal,
   type ChainFailure,
@@ -27,11 +28,21 @@ import { buildSignalCall, parseBytes32, randomBytes32 } from "./chain/input";
 import {
   buildCommitPlanCalls,
   buildCommitPlanTypedData,
+  buildFinalizePlanCall,
   buildOrderTriggerCall,
   parseCompiledPlanArtifact,
   signalAttributionFor,
   type CompiledPlanArtifact
 } from "./chain/plan";
+import {
+  birthIdempotencyScope,
+  clearPendingPlanFinalize,
+  readBirthIdempotencyRecord,
+  readPendingPlanFinalize,
+  writeBirthIdempotencyRecord,
+  writePendingPlanFinalize,
+  type PendingPlanFinalize
+} from "./app/localRecovery";
 
 const ARTIFACT_SIZE_LIMIT = 5_000_000;
 const CALL_DEADLINE_SECONDS = 3_600n;
@@ -52,6 +63,7 @@ type SubmitState =
   | { readonly kind: "idle" }
   | { readonly kind: "pending" }
   | { readonly kind: "success"; readonly txHash: string }
+  | { readonly kind: "unknown"; readonly txHash: string; readonly failure: ChainFailure }
   | { readonly kind: "failed"; readonly failure: ChainFailure };
 
 type ArtifactState =
@@ -62,13 +74,32 @@ type ArtifactState =
 type RegisterState =
   | { readonly kind: "idle" }
   | { readonly kind: "pending"; readonly step: string }
-  | { readonly kind: "success"; readonly commitTx: string; readonly finalizeTx: string }
+  | {
+      readonly kind: "success";
+      readonly commitTx: string;
+      readonly finalizeTx?: string | undefined;
+      readonly planId: string;
+    }
+  | {
+      readonly kind: "finalize_pending";
+      readonly pending: PendingPlanFinalize;
+      readonly failure?: ChainFailure | undefined;
+    }
+  | {
+      readonly kind: "unknown";
+      readonly txHash: string;
+      readonly step: string;
+      readonly failure: ChainFailure;
+      readonly pending?: PendingPlanFinalize | undefined;
+    }
   | { readonly kind: "failed"; readonly failure: ChainFailure };
 
 type BirthState =
   | { readonly kind: "idle" }
   | { readonly kind: "pending"; readonly step: string }
   | { readonly kind: "success"; readonly txHash: string; readonly orderId: string }
+  | { readonly kind: "duplicate"; readonly orderId: string }
+  | { readonly kind: "unknown"; readonly txHash: string; readonly failure: ChainFailure }
   | { readonly kind: "failed"; readonly failure: ChainFailure };
 
 export default function App() {
@@ -96,10 +127,17 @@ function ChainWorkbench({ config }: { readonly config: ChainConfig }) {
 
   const [selectedTriggerHookId, setSelectedTriggerHookId] = useState("");
   const [birthPayloadHash, setBirthPayloadHash] = useState(() => safeRandomBytes32());
-  const [birthIdempotencyKey, setBirthIdempotencyKey] = useState(() => safeRandomBytes32());
+  const [birthKey, setBirthKey] = useState<{ readonly scope: string; readonly key: string }>(() => {
+    const stored = readBirthIdempotencyRecord();
+    return stored ?? { scope: "", key: safeRandomBytes32() };
+  });
+  const birthIdempotencyKey = birthKey.key;
   const [signalIdempotencyKey, setSignalIdempotencyKey] = useState(() => safeRandomBytes32());
   const [registerState, setRegisterState] = useState<RegisterState>({ kind: "idle" });
   const [birthState, setBirthState] = useState<BirthState>({ kind: "idle" });
+  const [pendingFinalize, setPendingFinalize] = useState<PendingPlanFinalize | undefined>(
+    () => readPendingPlanFinalize()
+  );
 
   const [sourceId, setSourceId] = useState("");
   const [signalId, setSignalId] = useState("");
@@ -119,6 +157,64 @@ function ChainWorkbench({ config }: { readonly config: ChainConfig }) {
     setWallet(result.value);
   }
 
+  function rememberPendingFinalize(pending: PendingPlanFinalize): void {
+    setPendingFinalize(pending);
+    writePendingPlanFinalize(pending);
+  }
+
+  function forgetPendingFinalize(): void {
+    setPendingFinalize(undefined);
+    clearPendingPlanFinalize();
+  }
+
+  function currentBirthScope(): string | undefined {
+    if (artifact === undefined) {
+      return undefined;
+    }
+    return birthIdempotencyScope({
+      chainId: config.chainId,
+      stateMachine: config.stateMachine,
+      planId: artifact.planId
+    });
+  }
+
+  function updateBirthIdempotencyKey(value: string): void {
+    const scope = currentBirthScope();
+    setBirthKey({ scope: scope ?? "", key: value });
+    const parsed = parseBytes32(value, "idempotencyKey");
+    if (parsed.ok && scope !== undefined) {
+      writeBirthIdempotencyRecord({ scope, key: parsed.value });
+    }
+  }
+
+  function resetBirthIdempotencyKey(): void {
+    const next = safeRandomBytes32();
+    const scope = currentBirthScope() ?? "";
+    setBirthPayloadHash(safeRandomBytes32());
+    setBirthKey({ scope, key: next });
+    const parsed = parseBytes32(next, "idempotencyKey");
+    if (parsed.ok && scope !== "") {
+      writeBirthIdempotencyRecord({ scope, key: parsed.value });
+    }
+  }
+
+  function adoptBirthScope(planId: string): void {
+    const scope = birthIdempotencyScope({
+      chainId: config.chainId,
+      stateMachine: config.stateMachine,
+      planId
+    });
+    if (birthKey.scope === scope) {
+      return;
+    }
+    const key = birthKey.scope === "" && birthKey.key !== "" ? birthKey.key : safeRandomBytes32();
+    setBirthKey({ scope, key });
+    const parsed = parseBytes32(key, "idempotencyKey");
+    if (parsed.ok) {
+      writeBirthIdempotencyRecord({ scope, key: parsed.value });
+    }
+  }
+
   function applyArtifact(text: string, label: string): void {
     const parsed = parseCompiledPlanArtifact(text);
     if (!parsed.ok) {
@@ -131,6 +227,7 @@ function ChainWorkbench({ config }: { readonly config: ChainConfig }) {
     setPlanInput(parsed.value.planId);
     setRegisterState({ kind: "idle" });
     setBirthState({ kind: "idle" });
+    adoptBirthScope(parsed.value.planId);
   }
 
   async function loadArtifactFile(event: ChangeEvent<HTMLInputElement>): Promise<void> {
@@ -211,40 +308,138 @@ function ChainWorkbench({ config }: { readonly config: ChainConfig }) {
       return;
     }
     setRegisterState({ kind: "pending", step: "发送 commitPlan" });
-    const commit = await sendWalletCall(config, wallet, calls.value.commit, "commitPlan");
+    const commit = await submitCommitPlan(config, wallet, calls.value.commit);
     if (!commit.ok) {
+      if (commit.failure.outcomeUnknown === true && commit.failure.txHash !== undefined) {
+        setRegisterState({
+          kind: "unknown",
+          txHash: commit.failure.txHash,
+          step: "commitPlan",
+          failure: commit.failure
+        });
+        return;
+      }
       setRegisterState({ kind: "failed", failure: commit.failure });
       return;
     }
-    setRegisterState({ kind: "pending", step: "发送 finalizePlan" });
-    const finalize = await sendWalletCall(config, wallet, calls.value.finalize, "finalizePlan");
+    const pending: PendingPlanFinalize = {
+      planId: commit.value.planId,
+      commitTx: commit.value.txHash,
+      publisher: wallet.address
+    };
+    rememberPendingFinalize(pending);
+    await finalizeCommittedPlan(pending);
+  }
+
+  async function finalizeCommittedPlan(pending: PendingPlanFinalize): Promise<void> {
+    if (wallet === undefined) {
+      setRegisterState({
+        kind: "finalize_pending",
+        pending,
+        failure: { code: "no_wallet", message: "先连接钱包再重试 finalizePlan。" }
+      });
+      return;
+    }
+    setRegisterState({ kind: "pending", step: "检查已 commitPlan 的 planId" });
+    const already = await reader.readPlanExists(pending.planId);
+    if (!already.ok) {
+      setRegisterState({ kind: "finalize_pending", pending, failure: already.failure });
+      return;
+    }
+    if (already.value) {
+      completeRegistration(pending);
+      return;
+    }
+    const finalizeCall = buildFinalizePlanCall({
+      planId: pending.planId,
+      chainId: config.chainId,
+      stateMachineAddress: config.stateMachine
+    });
+    if (!finalizeCall.ok) {
+      setRegisterState({
+        kind: "finalize_pending",
+        pending,
+        failure: { code: finalizeCall.code, message: finalizeCall.message }
+      });
+      return;
+    }
+    setRegisterState({ kind: "pending", step: "发送 finalizePlan（仅重试 finalize）" });
+    const finalize = await sendWalletCall(config, wallet, finalizeCall.value, "finalizePlan");
     if (!finalize.ok) {
-      setRegisterState({ kind: "failed", failure: finalize.failure });
+      if (finalize.failure.outcomeUnknown === true && finalize.failure.txHash !== undefined) {
+        setRegisterState({
+          kind: "unknown",
+          txHash: finalize.failure.txHash,
+          step: "finalizePlan",
+          failure: finalize.failure,
+          pending
+        });
+        return;
+      }
+      if (finalize.failure.revert?.errorName === "PlanAlreadyFinalized") {
+        const recheck = await reader.readPlanExists(pending.planId);
+        if (recheck.ok && recheck.value) {
+          completeRegistration(pending);
+          return;
+        }
+      }
+      setRegisterState({ kind: "finalize_pending", pending, failure: finalize.failure });
       return;
     }
-    setRegisterState({ kind: "pending", step: "校验 planExists(artifact.planId)" });
-    const plan = await reader.readPlanExists(artifact.planId);
-    if (!plan.ok) {
-      setRegisterState({ kind: "failed", failure: plan.failure });
+    setRegisterState({ kind: "pending", step: "校验 planExists(已 commit 的 planId)" });
+    const verify = await reader.readPlanExists(pending.planId);
+    if (!verify.ok) {
+      setRegisterState({ kind: "finalize_pending", pending, failure: verify.failure });
       return;
     }
-    if (!plan.value) {
+    if (!verify.value) {
+      setRegisterState({
+        kind: "finalize_pending",
+        pending,
+        failure: {
+          code: "plan_not_finalized",
+          message:
+            "finalizePlan 回执成功，但 planExists(已 commit 的 planId) 仍为 false；" +
+            "重试前先核对链上状态，不要重复发送 commitPlan。"
+        }
+      });
+      return;
+    }
+    completeRegistration(pending, finalize.value.txHash);
+  }
+
+  function completeRegistration(pending: PendingPlanFinalize, finalizeTx?: string): void {
+    forgetPendingFinalize();
+    setPlanInput(pending.planId);
+    if (artifact !== undefined && artifact.planId.toLowerCase() !== pending.planId.toLowerCase()) {
       setRegisterState({
         kind: "failed",
         failure: {
           code: "plan_id_mismatch",
           message:
-            `commitPlan+finalizePlan 已上链，但 planExists(${artifact.planId}) 为 false：` +
-            "artifact.planId 不是当前 publisher（钱包）注册出的 plan，请改用按此钱包编译/发布的 artifact。"
+            `commitPlan 链上生成的 planId=${pending.planId} 与 artifact.planId=${artifact.planId} 不一致：` +
+            "artifact 不是按当前 publisher（钱包）编译/发布的，不能用它继续出生或发信号；请改用匹配此钱包的 artifact。"
         }
       });
       return;
     }
     setRegisterState({
       kind: "success",
-      commitTx: commit.value.txHash,
-      finalizeTx: finalize.value.txHash
+      planId: pending.planId,
+      commitTx: pending.commitTx,
+      ...(finalizeTx === undefined ? {} : { finalizeTx })
     });
+  }
+
+  async function resumeFinalize(): Promise<void> {
+    if (pendingFinalize === undefined) {
+      setRegisterState({
+        kind: "failed",
+        failure: { code: "pending_finalize_missing", message: "没有可恢复的 finalizePlan 记录。" }
+      });
+      return;
+    }
+    await finalizeCommittedPlan(pendingFinalize);
   }
 
   async function createOrder(): Promise<void> {
@@ -312,6 +507,18 @@ function ChainWorkbench({ config }: { readonly config: ChainConfig }) {
     setBirthState({ kind: "pending", step: "钱包发送 submitSignal（orderId=0）" });
     const sent = await submitOrderTrigger(config, wallet, call.value);
     if (!sent.ok) {
+      const duplicateOrderId = duplicateTriggerOrderId(sent.failure);
+      if (duplicateOrderId !== undefined) {
+        setBirthState({ kind: "duplicate", orderId: duplicateOrderId });
+        setPlanInput(artifact.planId);
+        setOrderInput(duplicateOrderId);
+        await load(artifact.planId, duplicateOrderId);
+        return;
+      }
+      if (sent.failure.outcomeUnknown === true && sent.failure.txHash !== undefined) {
+        setBirthState({ kind: "unknown", txHash: sent.failure.txHash, failure: sent.failure });
+        return;
+      }
       setBirthState({ kind: "failed", failure: sent.failure });
       return;
     }
@@ -319,8 +526,6 @@ function ChainWorkbench({ config }: { readonly config: ChainConfig }) {
     setBirthState({ kind: "success", txHash: sent.value.txHash, orderId });
     setPlanInput(artifact.planId);
     setOrderInput(orderId);
-    setBirthPayloadHash(safeRandomBytes32());
-    setBirthIdempotencyKey(safeRandomBytes32());
     await load(artifact.planId, orderId);
   }
 
@@ -405,6 +610,10 @@ function ChainWorkbench({ config }: { readonly config: ChainConfig }) {
     setSubmit({ kind: "pending" });
     const result = await submitSignal(config, wallet, built.value);
     if (!result.ok) {
+      if (result.failure.outcomeUnknown === true && result.failure.txHash !== undefined) {
+        setSubmit({ kind: "unknown", txHash: result.failure.txHash, failure: result.failure });
+        return;
+      }
       setSubmit({ kind: "failed", failure: result.failure });
       return;
     }
@@ -533,7 +742,12 @@ function ChainWorkbench({ config }: { readonly config: ChainConfig }) {
           <button
             className="primary-button"
             type="button"
-            disabled={registerState.kind === "pending" || artifact === undefined || wallet === undefined}
+            disabled={
+              registerState.kind === "pending" ||
+              pendingFinalize !== undefined ||
+              artifact === undefined ||
+              wallet === undefined
+            }
             onClick={() => void registerPlan()}
           >
             {registerState.kind === "pending" ? registerState.step : "钱包签名并注册计划"}
@@ -541,11 +755,70 @@ function ChainWorkbench({ config }: { readonly config: ChainConfig }) {
         </div>
         {registerState.kind === "success" ? (
           <p className="status-ok">
-            已注册：commitPlan {registerState.commitTx} · finalizePlan {registerState.finalizeTx} · planExists=true
+            已注册：commitPlan {registerState.commitTx} · finalizePlan{" "}
+            {registerState.finalizeTx ?? "（此前已确认）"} · planId {registerState.planId} · planExists=true
           </p>
+        ) : null}
+        {registerState.kind === "finalize_pending" ? (
+          <section className="system-banner system-banner-warn" role="status">
+            <strong>commitPlan 已上链，finalizePlan 尚未完成</strong>
+            <span>
+              只需重试 finalizePlan，不会重新发送 commitPlan。planId {registerState.pending.planId} · publisher{" "}
+              {registerState.pending.publisher} · commitTx {registerState.pending.commitTx}
+            </span>
+            {registerState.failure === undefined ? null : (
+              <span>
+                {registerState.failure.code}：{registerState.failure.message}
+              </span>
+            )}
+            <div className="submit-actions">
+              <button
+                className="primary-button"
+                type="button"
+                disabled={wallet === undefined}
+                onClick={() => void finalizeCommittedPlan(registerState.pending)}
+              >
+                仅重试 finalizePlan
+              </button>
+              <button type="button" onClick={forgetPendingFinalize}>
+                忽略恢复记录
+              </button>
+            </div>
+          </section>
+        ) : null}
+        {registerState.kind === "unknown" ? (
+          <UnknownBlock
+            title={`${registerState.step} 结果未知（UNKNOWN）`}
+            failure={registerState.failure}
+          />
         ) : null}
         {registerState.kind === "failed" ? (
           <FailureBlock title="注册计划失败" failure={registerState.failure} />
+        ) : null}
+        {pendingFinalize !== undefined &&
+        registerState.kind !== "pending" &&
+        registerState.kind !== "finalize_pending" ? (
+          <section className="system-banner system-banner-warn" role="status">
+            <strong>发现待恢复的 commitPlan 记录</strong>
+            <span>
+              planId {pendingFinalize.planId} · publisher {pendingFinalize.publisher} · commitTx{" "}
+              {pendingFinalize.commitTx}
+              （记录来自上一次 commitPlan 成功、finalizePlan 未确认的运行）。
+            </span>
+            <div className="submit-actions">
+              <button
+                className="primary-button"
+                type="button"
+                disabled={wallet === undefined}
+                onClick={() => void resumeFinalize()}
+              >
+                仅重试 finalizePlan
+              </button>
+              <button type="button" onClick={forgetPendingFinalize}>
+                忽略恢复记录
+              </button>
+            </div>
+          </section>
         ) : null}
       </section>
 
@@ -555,8 +828,9 @@ function ChainWorkbench({ config }: { readonly config: ChainConfig }) {
           出生提交人（submitter）= 出生 trigger 阶段的 assigned supplier account，即当前钱包直发
           （空签名，submitter = msg.sender）；orderId 由合约随机生成，从回执的 SignalSubmitted
           事件读取。计划可声明多个出生 trigger，本次入口按 stage/signal 显式选择。
-          同一 submitter + idempotencyKey 重复提交会被链上 DuplicateTriggerKey 拒绝。
-          payloadHash/idempotencyKey 是本次出生的承诺，缺省随机。
+          同一 submitter + idempotencyKey 重复提交会被链上 DuplicateTriggerKey 拒绝；app 会解码该错误并显示
+          链上已有订单的 orderId，而不是把重试当失败或换键重复出生。
+          payloadHash/idempotencyKey 是本次出生的承诺，缺省随机；idempotencyKey 会跨重试、失败与刷新保留。
         </p>
         <label>
           出生 trigger（stage / signal）
@@ -589,7 +863,7 @@ function ChainWorkbench({ config }: { readonly config: ChainConfig }) {
             idempotencyKey
             <input
               value={birthIdempotencyKey}
-              onChange={(event) => setBirthIdempotencyKey(event.target.value)}
+              onChange={(event) => updateBirthIdempotencyKey(event.target.value)}
               placeholder="0x + 64 hex"
               spellCheck={false}
             />
@@ -658,11 +932,29 @@ function ChainWorkbench({ config }: { readonly config: ChainConfig }) {
           >
             {birthState.kind === "pending" ? birthState.step : "钱包发送出生 trigger（submitSignal）"}
           </button>
+          <button
+            type="button"
+            disabled={birthState.kind === "pending"}
+            onClick={resetBirthIdempotencyKey}
+          >
+            换新出生承诺（payloadHash + idempotencyKey）
+          </button>
         </div>
         {birthState.kind === "success" ? (
           <p className="status-ok">
-            已出生：orderId {birthState.orderId} · tx {birthState.txHash}（已自动读取事实）
+            已出生：orderId {birthState.orderId} · tx {birthState.txHash}（已自动读取事实）。
+            当前 idempotencyKey 已保留：再次点击会由链上 DuplicateTriggerKey 返回同一订单，不会重复出生；
+            要创建新订单先换新 key。
           </p>
+        ) : null}
+        {birthState.kind === "duplicate" ? (
+          <p className="status-ok">
+            链上已有该 (submitter, idempotencyKey) 的订单：orderId {birthState.orderId}。
+            本次没有创建新订单，已自动读取该订单事实。
+          </p>
+        ) : null}
+        {birthState.kind === "unknown" ? (
+          <UnknownBlock title="出生结果未知（UNKNOWN）" failure={birthState.failure} />
         ) : null}
         {birthState.kind === "failed" ? (
           <FailureBlock title="出生失败" failure={birthState.failure} />
@@ -735,12 +1027,18 @@ function ChainWorkbench({ config }: { readonly config: ChainConfig }) {
         <p className="fineprint">
           SignalSubmitted 事件不含 fee/金额字段；这里的字段全部来自链上事件，不补造配置或阶段名。
         </p>
+        {events.kind === "idle" ? (
+          <p className="fineprint">尚未读取事件：填写 planId/orderId 后点击“读取链上事实”。</p>
+        ) : null}
         {events.kind === "loading" ? <p className="fineprint">正在读取事件…</p> : null}
         {events.kind === "failed" ? (
           <FailureBlock title="事件读取失败" failure={events.failure} />
         ) : null}
         {events.kind === "ready" && events.events.length === 0 ? (
-          <p className="fineprint">读取成功：链上没有匹配的事实事件（空不是失败）。</p>
+          <p className="fineprint">
+            读取成功：当前扫描窗口（fromBlock {String(config.fromBlock)} → latest）内没有匹配的事实事件。
+            这不代表链上从未发生过；窗口起点由 VITE_UVP_FROM_BLOCK 控制，调低后可重试。
+          </p>
         ) : null}
         {signals.length > 0 ? (
           <ul className="event-list">
@@ -761,11 +1059,12 @@ function ChainWorkbench({ config }: { readonly config: ChainConfig }) {
               </li>
             ))}
           </ul>
-        ) : (
+        ) : events.kind === "ready" && events.events.length > 0 ? (
           <p className="fineprint">
-            没有 HookReady / StageMaterialized / StageSupplierAssigned / StageSupplierPatchApplied 事件。
+            本次窗口只匹配到 SignalSubmitted，没有 HookReady / StageMaterialized / StageSupplierAssigned /
+            StageSupplierPatchApplied 事件。
           </p>
-        )}
+        ) : null}
       </section>
 
       <section className="panel">
@@ -820,6 +1119,9 @@ function ChainWorkbench({ config }: { readonly config: ChainConfig }) {
         </div>
         {submit.kind === "success" ? (
           <p className="status-ok">已上链：{submit.txHash}</p>
+        ) : null}
+        {submit.kind === "unknown" ? (
+          <UnknownBlock title="发送结果未知（UNKNOWN）" failure={submit.failure} />
         ) : null}
         {submit.kind === "failed" ? <FailureBlock title="发送失败" failure={submit.failure} /> : null}
       </section>
@@ -960,6 +1262,32 @@ function FailureBlock({ title, failure }: { readonly title: string; readonly fai
       {failure.txHash === undefined ? null : <span className="fineprint">txHash：{failure.txHash}</span>}
     </section>
   );
+}
+
+function UnknownBlock({ title, failure }: { readonly title: string; readonly failure: ChainFailure }) {
+  return (
+    <section className="system-banner system-banner-warn" role="status">
+      <strong>{title}</strong>
+      <span>{failure.message}</span>
+      {failure.txHash === undefined ? null : <span className="fineprint">txHash：{failure.txHash}</span>}
+      <span className="fineprint">
+        交易已经交给钱包/节点，但没有拿到确认回执；不要按“发送失败”重试。请先在链上按 txHash 核实，
+        确认未上链后再重试（出生/发信号会复用当前 idempotencyKey）。
+      </span>
+    </section>
+  );
+}
+
+function duplicateTriggerOrderId(failure: ChainFailure): string | undefined {
+  if (failure.revert?.errorName !== "DuplicateTriggerKey") {
+    return undefined;
+  }
+  const raw = failure.revert.args?.[2];
+  if (typeof raw !== "string") {
+    return undefined;
+  }
+  const parsed = parseBytes32(raw, "existingOrderId");
+  return parsed.ok ? parsed.value : undefined;
 }
 
 function SystemBanner({ tone, title, text }: { readonly tone: "info" | "warn" | "error"; readonly title: string; readonly text: string }) {

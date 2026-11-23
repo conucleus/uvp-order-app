@@ -21,12 +21,14 @@ import {
 import {
   HOOK_READY_TOPIC,
   decodeHookReadyLog,
+  decodeStateMachineEvents,
   triggeredOrderIdFromLogs,
   type StateMachineRawLog,
   type SubmitStateMachineSignalCall
 } from "@uvp-eth/uvp-client/core";
 import { stateMachineEvents, stagePatchEvents, stateMachineReadAbi } from "./abi";
 import type { ChainConfig } from "./config";
+import type { DecodedContractError } from "./errors";
 import {
   decodeChainLogs,
   filterChainEvents,
@@ -40,6 +42,8 @@ export interface ChainFailure {
   readonly code: string;
   readonly message: string;
   readonly txHash?: Hex | undefined;
+  readonly outcomeUnknown?: boolean | undefined;
+  readonly revert?: DecodedContractError | undefined;
 }
 
 export type ChainResult<T> =
@@ -72,6 +76,7 @@ export interface WalletConnection {
 }
 
 const ZERO_ADDRESS: Address = "0x0000000000000000000000000000000000000000";
+const RECEIPT_TIMEOUT_MS = 120_000;
 
 export function createChainReader(config: ChainConfig): ChainReader {
   const client = createPublicClient({ transport: http(config.rpcUrl) });
@@ -362,7 +367,14 @@ async function sendWalletTransaction(
     });
   } catch (error) {
     const mapped = mapWalletError(error);
-    return { ok: false, failure: { code: mapped.code, message: `${label} 预检失败：${mapped.message}` } };
+    return {
+      ok: false,
+      failure: {
+        code: mapped.code,
+        message: `${label} 预检失败：${mapped.message}`,
+        ...(mapped.revert === undefined ? {} : { revert: mapped.revert })
+      }
+    };
   }
 
   let hash: Hex;
@@ -374,11 +386,18 @@ async function sendWalletTransaction(
     });
   } catch (error) {
     const mapped = mapWalletError(error);
-    return { ok: false, failure: { code: mapped.code, message: mapped.message } };
+    return {
+      ok: false,
+      failure: {
+        code: mapped.code,
+        message: mapped.message,
+        ...(mapped.revert === undefined ? {} : { revert: mapped.revert })
+      }
+    };
   }
 
   try {
-    const receipt = await publicClient.waitForTransactionReceipt({ hash });
+    const receipt = await publicClient.waitForTransactionReceipt({ hash, timeout: RECEIPT_TIMEOUT_MS });
     if (receipt.status !== "success") {
       return {
         ok: false,
@@ -387,12 +406,20 @@ async function sendWalletTransaction(
     }
     return { ok: true, value: { txHash: hash, logs: rawLogsOf(receipt.logs) } };
   } catch (error) {
-    const mapped = mapWalletError(error);
-    return {
-      ok: false,
-      failure: { code: mapped.code, message: `${label} 回执等待失败：${mapped.message}`, txHash: hash }
-    };
+    return { ok: false, failure: receiptUnknownFailure(hash, label, error) };
   }
+}
+
+export function receiptUnknownFailure(txHash: Hex, label: string, error: unknown): ChainFailure {
+  const detail = error instanceof Error ? error.message : String(error);
+  return {
+    code: "receipt_unknown",
+    message:
+      `${label} 已广播（txHash ${txHash}），但回执等待失败，结果未知（UNKNOWN）：${detail}。` +
+      "请在链上按 txHash 核实，不要直接重复发送。",
+    txHash,
+    outcomeUnknown: true
+  };
 }
 
 export async function sendWalletCall(
@@ -403,6 +430,52 @@ export async function sendWalletCall(
 ): Promise<ChainResult<{ readonly txHash: Hex }>> {
   const sent = await sendWalletTransaction(config, connection, call, label);
   return sent.ok ? { ok: true, value: { txHash: sent.value.txHash } } : sent;
+}
+
+export async function submitCommitPlan(
+  config: ChainConfig,
+  connection: WalletConnection,
+  call: WalletCall
+): Promise<ChainResult<{ readonly txHash: Hex; readonly planId: Bytes32 }>> {
+  const sent = await sendWalletTransaction(config, connection, call, "commitPlan");
+  if (!sent.ok) {
+    return sent;
+  }
+  let planId: Bytes32 | undefined;
+  try {
+    planId = planCommittedIdFromLogs(sent.value.logs);
+  } catch (error) {
+    return {
+      ok: false,
+      failure: {
+        code: "plan_id_decode_failed",
+        message: `commitPlan 回执的 PlanCommitted 解码失败：${
+          error instanceof Error ? error.message : String(error)
+        }`,
+        txHash: sent.value.txHash
+      }
+    };
+  }
+  if (planId === undefined) {
+    return {
+      ok: false,
+      failure: {
+        code: "plan_id_missing",
+        message: "commitPlan 交易回执里没有 PlanCommitted 事件，链上生成的 planId 未知",
+        txHash: sent.value.txHash
+      }
+    };
+  }
+  return { ok: true, value: { txHash: sent.value.txHash, planId } };
+}
+
+export function planCommittedIdFromLogs(logs: readonly StateMachineRawLog[]): Bytes32 | undefined {
+  for (const event of decodeStateMachineEvents(logs)) {
+    if (event.eventName === "PlanCommitted") {
+      return event.args.planId as Bytes32;
+    }
+  }
+  return undefined;
 }
 
 export async function submitSignal(
@@ -492,6 +565,7 @@ export function mapReadError(error: unknown, prefix: string): ChainFailure {
   const mapped = mapWalletError(error);
   return {
     code: mapped.code === "unknown" ? "read_failed" : mapped.code,
-    message: `${prefix}：${mapped.message}`
+    message: `${prefix}：${mapped.message}`,
+    ...(mapped.revert === undefined ? {} : { revert: mapped.revert })
   };
 }
