@@ -78,6 +78,10 @@ export interface PlanTrigger {
 
 export interface CompiledPlanArtifact {
   readonly planId: Bytes32;
+  /** Compiler content plan id (registerArgs.sourcePlanId), not the publisher-keyed on-chain id. */
+  readonly sourcePlanId: Bytes32;
+  /** Content plan id declared by the onchain-plan artifact when the producer includes it. */
+  readonly onchainPlanId?: Bytes32 | undefined;
   readonly hookCount: number;
   readonly zhixuId?: string | undefined;
   readonly zhixuName?: string | undefined;
@@ -151,6 +155,26 @@ export function parseCompiledPlanArtifact(text: string): PlanResult<CompiledPlan
   }
   const onchain = raw["onchain"];
   const registerArgs = raw["registerArgs"];
+  const onchainPlanId = onchain["planId"] === undefined
+    ? { ok: true as const, value: undefined }
+    : nonZeroBytes32(onchain["planId"], "artifact.onchain.planId");
+  if (!onchainPlanId.ok) {
+    return onchainPlanId;
+  }
+  const sourcePlanId = nonZeroBytes32(
+    registerArgs["sourcePlanId"],
+    "artifact.registerArgs.sourcePlanId"
+  );
+  if (!sourcePlanId.ok) {
+    return sourcePlanId;
+  }
+  const declaredPlanHash = nonZeroBytes32(
+    registerArgs["planHash"],
+    "artifact.registerArgs.planHash"
+  );
+  if (!declaredPlanHash.ok) {
+    return declaredPlanHash;
+  }
   if (!Array.isArray(registerArgs["hooks"]) || registerArgs["hooks"].length === 0) {
     return fail("artifact_shape", "artifact.registerArgs.hooks 必须是非空数组。");
   }
@@ -197,6 +221,8 @@ export function parseCompiledPlanArtifact(text: string): PlanResult<CompiledPlan
     ok: true,
     value: {
       planId: planId.value,
+      sourcePlanId: sourcePlanId.value,
+      ...(onchainPlanId.value === undefined ? {} : { onchainPlanId: onchainPlanId.value }),
       hookCount: registerArgs["hooks"].length,
       ...(typeof onchain["zhixuId"] === "string" ? { zhixuId: onchain["zhixuId"] } : {}),
       ...(typeof onchain["zhixuName"] === "string" ? { zhixuName: onchain["zhixuName"] } : {}),
@@ -208,6 +234,117 @@ export function parseCompiledPlanArtifact(text: string): PlanResult<CompiledPlan
       registerArgs: registerArgs as unknown as PlanRegistrationSource
     }
   };
+}
+
+export interface PlanRegistrationHashes {
+  readonly planHash: Bytes32;
+  readonly hooksHash: Bytes32;
+  readonly capabilitiesRoot: Bytes32;
+  readonly supplierBindingsRoot: Bytes32;
+  readonly fileWritersHash: Bytes32;
+}
+
+export interface PlanRegistrationResolution {
+  readonly artifactPlanId: Bytes32;
+  readonly sourcePlanId: Bytes32;
+  readonly onchainPlanId?: Bytes32 | undefined;
+  readonly declaredRuntimePlanHash: Bytes32;
+  readonly derivedRuntimePlanHash: Bytes32;
+  readonly derivedRegistrationPlanId: Bytes32;
+}
+
+/** Parsed registerArgs hashes fed to the state machine's planRuntimeHash/planIdFor reads. */
+export function planRegistrationHashesOf(
+  artifact: CompiledPlanArtifact
+): PlanResult<PlanRegistrationHashes> {
+  const args = artifact.registerArgs as unknown as Record<string, unknown>;
+  const planHash = nonZeroBytes32(args["planHash"], "artifact.registerArgs.planHash");
+  if (!planHash.ok) {
+    return planHash;
+  }
+  const hooksHash = nonZeroBytes32(args["hooksHash"], "artifact.registerArgs.hooksHash");
+  if (!hooksHash.ok) {
+    return hooksHash;
+  }
+  const capabilitiesRoot = bytes32(args["capabilitiesRoot"], "artifact.registerArgs.capabilitiesRoot");
+  if (!capabilitiesRoot.ok) {
+    return capabilitiesRoot;
+  }
+  const supplierBindingsRoot = nonZeroBytes32(
+    args["supplierBindingsRoot"],
+    "artifact.registerArgs.supplierBindingsRoot"
+  );
+  if (!supplierBindingsRoot.ok) {
+    return supplierBindingsRoot;
+  }
+  const fileWritersHash = bytes32(
+    args["fileWritersHash"],
+    "artifact.registerArgs.fileWritersHash"
+  );
+  if (!fileWritersHash.ok) {
+    return fileWritersHash;
+  }
+  return {
+    ok: true,
+    value: {
+      planHash: planHash.value,
+      hooksHash: hooksHash.value,
+      capabilitiesRoot: capabilitiesRoot.value,
+      supplierBindingsRoot: supplierBindingsRoot.value,
+      fileWritersHash: fileWritersHash.value
+    }
+  };
+}
+
+/**
+ * Resolves the publisher-keyed on-chain planId BEFORE signing commitPlan. The
+ * state machine derives it from the commit hashes; the artifact may label the
+ * top-level planId with either the compiler content id or the registration id,
+ * so both are accepted, but the derived hash/id must match and a stale onchain
+ * content id is rejected instead of finalizing an orphan plan.
+ */
+export function resolveRegistrationPlanId(
+  resolution: PlanRegistrationResolution
+): PlanResult<Bytes32> {
+  if (
+    resolution.derivedRuntimePlanHash.toLowerCase() !==
+    resolution.declaredRuntimePlanHash.toLowerCase()
+  ) {
+    return fail(
+      "plan_hash_mismatch",
+      `链上 planRuntimeHash=${resolution.derivedRuntimePlanHash} 与 artifact.registerArgs.planHash=` +
+        `${resolution.declaredRuntimePlanHash} 不一致：registerArgs 的 hashes 不是这组 hooks/roots/fileWriters，` +
+        "不签名 commitPlan。"
+    );
+  }
+  const registrationPlanId = resolution.derivedRegistrationPlanId.toLowerCase();
+  const sourcePlanId = resolution.sourcePlanId.toLowerCase();
+  const onchainPlanId = resolution.onchainPlanId?.toLowerCase();
+  if (
+    onchainPlanId !== undefined &&
+    onchainPlanId !== sourcePlanId &&
+    onchainPlanId !== registrationPlanId
+  ) {
+    return fail(
+      "plan_content_id_mismatch",
+      `artifact.onchain.planId=${onchainPlanId} 既不是 content planId (registerArgs.sourcePlanId=` +
+        `${sourcePlanId})，也不是当前 publisher 的注册 planId=${registrationPlanId}：artifact 身份不一致，` +
+        "不签名 commitPlan。"
+    );
+  }
+  const artifactPlanId = resolution.artifactPlanId.toLowerCase();
+  if (
+    artifactPlanId !== registrationPlanId &&
+    artifactPlanId !== sourcePlanId &&
+    artifactPlanId !== onchainPlanId
+  ) {
+    return fail(
+      "plan_id_mismatch",
+      `artifact.planId=${artifactPlanId} 既不是 content planId=${sourcePlanId}，也不是链上派生的注册 ` +
+        `planId=${registrationPlanId}：签名前拒绝，避免 commit+finalize 后才发现并留下孤儿 finalized plan。`
+    );
+  }
+  return { ok: true, value: resolution.derivedRegistrationPlanId };
 }
 
 export function buildCommitPlanTypedData(input: CommitPlanInput): PlanResult<PlanCommitTypedData> {
@@ -671,6 +808,17 @@ function readSupplierBindings(value: unknown): PlanResult<readonly PlanSupplierB
     });
   }
   return { ok: true, value: bindings };
+}
+
+function bytes32(value: unknown, field: string): PlanResult<Bytes32> {
+  if (typeof value !== "string") {
+    return fail("artifact_invalid", `${field} 必须是 0x + 64 hex。`);
+  }
+  const parsed = parseBytes32(value, field);
+  if (!parsed.ok) {
+    return fail("artifact_invalid", parsed.message);
+  }
+  return { ok: true, value: parsed.value };
 }
 
 function nonZeroBytes32(value: unknown, field: string): PlanResult<Bytes32> {

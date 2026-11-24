@@ -6,6 +6,7 @@
 // 链上没有这些事实。
 
 import { useMemo, useState, type ChangeEvent } from "react";
+import type { Address } from "viem";
 import {
   chainConfigProblemText,
   readChainConfig,
@@ -24,22 +25,24 @@ import {
   type WalletConnection
 } from "./chain/client";
 import type { ChainEvent, SignalSubmittedFact } from "./chain/events";
-import { buildSignalCall, parseBytes32, randomBytes32 } from "./chain/input";
+import { buildSignalCall, parseBytes32, randomBytes32, type Bytes32 } from "./chain/input";
 import {
   buildCommitPlanCalls,
   buildCommitPlanTypedData,
   buildFinalizePlanCall,
   buildOrderTriggerCall,
   parseCompiledPlanArtifact,
+  planRegistrationHashesOf,
+  resolveRegistrationPlanId,
   signalAttributionFor,
   type CompiledPlanArtifact
 } from "./chain/plan";
 import {
   birthIdempotencyScope,
   clearPendingPlanFinalize,
-  readBirthIdempotencyRecord,
+  readBirthIdempotencyKey,
   readPendingPlanFinalize,
-  writeBirthIdempotencyRecord,
+  writeBirthIdempotencyKey,
   writePendingPlanFinalize,
   type PendingPlanFinalize
 } from "./app/localRecovery";
@@ -76,7 +79,7 @@ type RegisterState =
   | { readonly kind: "pending"; readonly step: string }
   | {
       readonly kind: "success";
-      readonly commitTx: string;
+      readonly commitTx?: string | undefined;
       readonly finalizeTx?: string | undefined;
       readonly planId: string;
     }
@@ -127,14 +130,15 @@ function ChainWorkbench({ config }: { readonly config: ChainConfig }) {
 
   const [selectedTriggerHookId, setSelectedTriggerHookId] = useState("");
   const [birthPayloadHash, setBirthPayloadHash] = useState(() => safeRandomBytes32());
-  const [birthKey, setBirthKey] = useState<{ readonly scope: string; readonly key: string }>(() => {
-    const stored = readBirthIdempotencyRecord();
-    return stored ?? { scope: "", key: safeRandomBytes32() };
-  });
+  const [birthKey, setBirthKey] = useState<{ readonly scope: string; readonly key: string }>(() => ({
+    scope: "",
+    key: safeRandomBytes32()
+  }));
   const birthIdempotencyKey = birthKey.key;
   const [signalIdempotencyKey, setSignalIdempotencyKey] = useState(() => safeRandomBytes32());
   const [registerState, setRegisterState] = useState<RegisterState>({ kind: "idle" });
   const [birthState, setBirthState] = useState<BirthState>({ kind: "idle" });
+  const [unknownBirthScopes, setUnknownBirthScopes] = useState<ReadonlySet<string>>(() => new Set());
   const [pendingFinalize, setPendingFinalize] = useState<PendingPlanFinalize | undefined>(
     () => readPendingPlanFinalize()
   );
@@ -183,22 +187,50 @@ function ChainWorkbench({ config }: { readonly config: ChainConfig }) {
     setBirthKey({ scope: scope ?? "", key: value });
     const parsed = parseBytes32(value, "idempotencyKey");
     if (parsed.ok && scope !== undefined) {
-      writeBirthIdempotencyRecord({ scope, key: parsed.value });
+      writeBirthIdempotencyKey(scope, parsed.value);
     }
   }
 
+  function markBirthUnknown(scope: string | undefined): void {
+    if (scope === undefined || scope === "") {
+      return;
+    }
+    setUnknownBirthScopes((current) => new Set(current).add(scope));
+  }
+
+  function clearBirthUnknown(scope: string | undefined): void {
+    if (scope === undefined || scope === "") {
+      return;
+    }
+    setUnknownBirthScopes((current) => {
+      if (!current.has(scope)) {
+        return current;
+      }
+      const next = new Set(current);
+      next.delete(scope);
+      return next;
+    });
+  }
+
+  function birthUnknownForScope(scope: string | undefined): boolean {
+    return scope !== undefined && scope !== "" && unknownBirthScopes.has(scope);
+  }
+
   function resetBirthIdempotencyKey(): void {
+    if (birthState.kind === "unknown" || birthUnknownForScope(currentBirthScope())) {
+      return;
+    }
     const next = safeRandomBytes32();
     const scope = currentBirthScope() ?? "";
     setBirthPayloadHash(safeRandomBytes32());
     setBirthKey({ scope, key: next });
     const parsed = parseBytes32(next, "idempotencyKey");
     if (parsed.ok && scope !== "") {
-      writeBirthIdempotencyRecord({ scope, key: parsed.value });
+      writeBirthIdempotencyKey(scope, parsed.value);
     }
   }
 
-  function adoptBirthScope(planId: string): void {
+  function adoptBirthScope(planId: string, preserveCurrentKey = false): void {
     const scope = birthIdempotencyScope({
       chainId: config.chainId,
       stateMachine: config.stateMachine,
@@ -207,11 +239,16 @@ function ChainWorkbench({ config }: { readonly config: ChainConfig }) {
     if (birthKey.scope === scope) {
       return;
     }
-    const key = birthKey.scope === "" && birthKey.key !== "" ? birthKey.key : safeRandomBytes32();
+    const stored = readBirthIdempotencyKey(scope);
+    const key = stored ?? (
+      preserveCurrentKey || (birthKey.scope === "" && birthKey.key !== "")
+        ? birthKey.key
+        : safeRandomBytes32()
+    );
     setBirthKey({ scope, key });
     const parsed = parseBytes32(key, "idempotencyKey");
     if (parsed.ok) {
-      writeBirthIdempotencyRecord({ scope, key: parsed.value });
+      writeBirthIdempotencyKey(scope, parsed.value);
     }
   }
 
@@ -263,6 +300,40 @@ function ChainWorkbench({ config }: { readonly config: ChainConfig }) {
     applyArtifact(text, file.name);
   }
 
+  type ArtifactIdentityResolution =
+    | { readonly ok: true; readonly artifact: CompiledPlanArtifact; readonly planId: Bytes32 }
+    | { readonly ok: false; readonly failure: ChainFailure };
+
+  async function resolveArtifactIdentity(
+    current: CompiledPlanArtifact,
+    publisher: Address
+  ): Promise<ArtifactIdentityResolution> {
+    const hashes = planRegistrationHashesOf(current);
+    if (!hashes.ok) {
+      return { ok: false, failure: { code: hashes.code, message: hashes.message } };
+    }
+    const derived = await reader.derivePlanRegistration(publisher, hashes.value);
+    if (!derived.ok) {
+      return { ok: false, failure: derived.failure };
+    }
+    const resolved = resolveRegistrationPlanId({
+      artifactPlanId: current.planId,
+      sourcePlanId: current.sourcePlanId,
+      ...(current.onchainPlanId === undefined ? {} : { onchainPlanId: current.onchainPlanId }),
+      declaredRuntimePlanHash: hashes.value.planHash,
+      derivedRuntimePlanHash: derived.value.runtimePlanHash,
+      derivedRegistrationPlanId: derived.value.planId
+    });
+    if (!resolved.ok) {
+      return { ok: false, failure: { code: resolved.code, message: resolved.message } };
+    }
+    return {
+      ok: true,
+      artifact: current.planId === resolved.value ? current : { ...current, planId: resolved.value },
+      planId: resolved.value
+    };
+  }
+
   async function registerPlan(): Promise<void> {
     if (artifact === undefined) {
       setRegisterState({
@@ -278,6 +349,18 @@ function ChainWorkbench({ config }: { readonly config: ChainConfig }) {
       });
       return;
     }
+    setRegisterState({ kind: "pending", step: "校验 artifact plan 身份（链上派生 planId）" });
+    const resolved = await resolveArtifactIdentity(artifact, wallet.address);
+    if (!resolved.ok) {
+      setRegisterState({ kind: "failed", failure: resolved.failure });
+      return;
+    }
+    const resolvedArtifact = resolved.artifact;
+    if (resolvedArtifact !== artifact) {
+      setArtifactState({ kind: "ready", artifact: resolvedArtifact });
+      setPlanInput(resolved.planId);
+    }
+    adoptBirthScope(resolved.planId, true);
     setRegisterState({ kind: "pending", step: "读取链上时间" });
     const timestamp = await reader.latestTimestamp();
     if (!timestamp.ok) {
@@ -285,7 +368,7 @@ function ChainWorkbench({ config }: { readonly config: ChainConfig }) {
       return;
     }
     const input = {
-      artifact,
+      artifact: resolvedArtifact,
       publisher: wallet.address,
       chainId: config.chainId,
       stateMachineAddress: config.stateMachine,
@@ -311,12 +394,28 @@ function ChainWorkbench({ config }: { readonly config: ChainConfig }) {
     const commit = await submitCommitPlan(config, wallet, calls.value.commit);
     if (!commit.ok) {
       if (commit.failure.outcomeUnknown === true && commit.failure.txHash !== undefined) {
+        const pending: PendingPlanFinalize = {
+          planId: resolved.planId,
+          commitTx: commit.failure.txHash,
+          publisher: wallet.address
+        };
+        rememberPendingFinalize(pending);
         setRegisterState({
           kind: "unknown",
           txHash: commit.failure.txHash,
           step: "commitPlan",
-          failure: commit.failure
+          failure: commit.failure,
+          pending
         });
+        return;
+      }
+      if (commit.failure.revert?.errorName === "PlanAlreadyRegistered") {
+        const pending: PendingPlanFinalize = {
+          planId: resolved.planId,
+          publisher: wallet.address
+        };
+        rememberPendingFinalize(pending);
+        await finalizeCommittedPlan(pending, resolved.planId);
         return;
       }
       setRegisterState({ kind: "failed", failure: commit.failure });
@@ -328,27 +427,91 @@ function ChainWorkbench({ config }: { readonly config: ChainConfig }) {
       publisher: wallet.address
     };
     rememberPendingFinalize(pending);
-    await finalizeCommittedPlan(pending);
+    await finalizeCommittedPlan(pending, resolved.planId);
   }
 
-  async function finalizeCommittedPlan(pending: PendingPlanFinalize): Promise<void> {
+  async function finalizeCommittedPlan(
+    initial: PendingPlanFinalize,
+    expectedPlanId?: string
+  ): Promise<void> {
     if (wallet === undefined) {
       setRegisterState({
         kind: "finalize_pending",
-        pending,
+        pending: initial,
         failure: { code: "no_wallet", message: "先连接钱包再重试 finalizePlan。" }
       });
       return;
     }
-    setRegisterState({ kind: "pending", step: "检查已 commitPlan 的 planId" });
-    const already = await reader.readPlanExists(pending.planId);
-    if (!already.ok) {
-      setRegisterState({ kind: "finalize_pending", pending, failure: already.failure });
+    let pending = initial;
+    setRegisterState({ kind: "pending", step: "检查已 commitPlan 的 planId 状态" });
+    const status = await reader.readPlanStatus(pending.planId);
+    if (!status.ok) {
+      setRegisterState({ kind: "finalize_pending", pending, failure: status.failure });
       return;
     }
-    if (already.value) {
-      completeRegistration(pending);
+    if (status.value.finalized) {
+      completeRegistration(pending, undefined, expectedPlanId);
       return;
+    }
+    if (!status.value.committed) {
+      if (pending.commitTx === undefined) {
+        setRegisterState({
+          kind: "finalize_pending",
+          pending,
+          failure: {
+            code: "commit_not_found",
+            message:
+              `链上 planHash(${pending.planId}) 为空：没有找到该 plan 的 commitPlan 事实，也没有可核实的 ` +
+              "commitTx。先按原 txHash/区块浏览器确认 commitPlan 是否已上链，再恢复 finalize；不要重新签名 commitPlan。"
+          }
+        });
+        return;
+      }
+      setRegisterState({ kind: "pending", step: `按 commitTx 回读 commitPlan 回执（${pending.commitTx}）` });
+      const receipt = await reader.readCommitReceipt(pending.commitTx);
+      if (!receipt.ok) {
+        setRegisterState({ kind: "finalize_pending", pending, failure: receipt.failure });
+        return;
+      }
+      if (receipt.value.status === "missing") {
+        setRegisterState({
+          kind: "finalize_pending",
+          pending,
+          failure: {
+            code: "commit_not_confirmed",
+            message:
+              `commitTx ${pending.commitTx} 在 RPC 上还没有回执：commitPlan 结果仍未知。` +
+              "稍后重试本恢复（不会重新签名或重新发送 commitPlan）；如长时间无回执，按 txHash 在链上核实。"
+          }
+        });
+        return;
+      }
+      if (receipt.value.status === "reverted") {
+        setRegisterState({
+          kind: "finalize_pending",
+          pending,
+          failure: {
+            code: "commit_reverted",
+            message:
+              `commitTx ${pending.commitTx} 已上链但回执是 reverted：该计划没有 commit 成功，` +
+              "不能 finalize。重新注册前先确认失败原因。"
+          }
+        });
+        return;
+      }
+      if (receipt.value.planId === undefined) {
+        setRegisterState({
+          kind: "finalize_pending",
+          pending,
+          failure: {
+            code: "plan_id_missing",
+            message: `commitTx ${pending.commitTx} 回执成功，但没有 PlanCommitted 事件：链上 planId 无法确认。`
+          }
+        });
+        return;
+      }
+      pending = { ...pending, planId: receipt.value.planId };
+      rememberPendingFinalize(pending);
     }
     const finalizeCall = buildFinalizePlanCall({
       planId: pending.planId,
@@ -379,7 +542,7 @@ function ChainWorkbench({ config }: { readonly config: ChainConfig }) {
       if (finalize.failure.revert?.errorName === "PlanAlreadyFinalized") {
         const recheck = await reader.readPlanExists(pending.planId);
         if (recheck.ok && recheck.value) {
-          completeRegistration(pending);
+          completeRegistration(pending, undefined, expectedPlanId);
           return;
         }
       }
@@ -405,20 +568,27 @@ function ChainWorkbench({ config }: { readonly config: ChainConfig }) {
       });
       return;
     }
-    completeRegistration(pending, finalize.value.txHash);
+    completeRegistration(pending, finalize.value.txHash, expectedPlanId);
   }
 
-  function completeRegistration(pending: PendingPlanFinalize, finalizeTx?: string): void {
+  function completeRegistration(
+    pending: PendingPlanFinalize,
+    finalizeTx?: string,
+    expectedPlanId?: string
+  ): void {
     forgetPendingFinalize();
     setPlanInput(pending.planId);
-    if (artifact !== undefined && artifact.planId.toLowerCase() !== pending.planId.toLowerCase()) {
+    if (
+      expectedPlanId !== undefined &&
+      expectedPlanId.toLowerCase() !== pending.planId.toLowerCase()
+    ) {
       setRegisterState({
         kind: "failed",
         failure: {
           code: "plan_id_mismatch",
           message:
-            `commitPlan 链上生成的 planId=${pending.planId} 与 artifact.planId=${artifact.planId} 不一致：` +
-            "artifact 不是按当前 publisher（钱包）编译/发布的，不能用它继续出生或发信号；请改用匹配此钱包的 artifact。"
+            `commitPlan 链上生成的 planId=${pending.planId} 与按当前 publisher（钱包）派生的注册 ` +
+            `planId=${expectedPlanId} 不一致：不能用当前 artifact 继续出生或发信号；请改用匹配此钱包的 artifact。`
         }
       });
       return;
@@ -439,7 +609,14 @@ function ChainWorkbench({ config }: { readonly config: ChainConfig }) {
       });
       return;
     }
-    await finalizeCommittedPlan(pendingFinalize);
+    let expectedPlanId: string | undefined;
+    if (artifact !== undefined && wallet !== undefined) {
+      const resolved = await resolveArtifactIdentity(artifact, wallet.address);
+      if (resolved.ok) {
+        expectedPlanId = resolved.planId;
+      }
+    }
+    await finalizeCommittedPlan(pendingFinalize, expectedPlanId);
   }
 
   async function createOrder(): Promise<void> {
@@ -457,6 +634,23 @@ function ChainWorkbench({ config }: { readonly config: ChainConfig }) {
       });
       return;
     }
+    setBirthState({ kind: "pending", step: "校验 artifact plan 身份（链上派生 planId）" });
+    const resolved = await resolveArtifactIdentity(artifact, wallet.address);
+    if (!resolved.ok) {
+      setBirthState({ kind: "failed", failure: resolved.failure });
+      return;
+    }
+    const resolvedArtifact = resolved.artifact;
+    if (resolvedArtifact !== artifact) {
+      setArtifactState({ kind: "ready", artifact: resolvedArtifact });
+      setPlanInput(resolved.planId);
+    }
+    adoptBirthScope(resolved.planId, true);
+    const birthScope = birthIdempotencyScope({
+      chainId: config.chainId,
+      stateMachine: config.stateMachine,
+      planId: resolved.planId
+    });
     if (selectedTrigger === undefined) {
       setBirthState({
         kind: "failed",
@@ -490,7 +684,7 @@ function ChainWorkbench({ config }: { readonly config: ChainConfig }) {
       return;
     }
     const call = buildOrderTriggerCall({
-      artifact,
+      artifact: resolvedArtifact,
       trigger: selectedTrigger,
       submitter: wallet.address,
       chainId: config.chainId,
@@ -509,24 +703,28 @@ function ChainWorkbench({ config }: { readonly config: ChainConfig }) {
     if (!sent.ok) {
       const duplicateOrderId = duplicateTriggerOrderId(sent.failure);
       if (duplicateOrderId !== undefined) {
+        clearBirthUnknown(birthScope);
         setBirthState({ kind: "duplicate", orderId: duplicateOrderId });
-        setPlanInput(artifact.planId);
+        setPlanInput(resolvedArtifact.planId);
         setOrderInput(duplicateOrderId);
-        await load(artifact.planId, duplicateOrderId);
+        await load(resolvedArtifact.planId, duplicateOrderId);
         return;
       }
       if (sent.failure.outcomeUnknown === true && sent.failure.txHash !== undefined) {
+        markBirthUnknown(birthScope);
         setBirthState({ kind: "unknown", txHash: sent.failure.txHash, failure: sent.failure });
         return;
       }
+      clearBirthUnknown(birthScope);
       setBirthState({ kind: "failed", failure: sent.failure });
       return;
     }
     const orderId = sent.value.orderId;
+    clearBirthUnknown(birthScope);
     setBirthState({ kind: "success", txHash: sent.value.txHash, orderId });
-    setPlanInput(artifact.planId);
+    setPlanInput(resolvedArtifact.planId);
     setOrderInput(orderId);
-    await load(artifact.planId, orderId);
+    await load(resolvedArtifact.planId, orderId);
   }
 
   async function load(planArg?: string, orderArg?: string): Promise<void> {
@@ -759,7 +957,7 @@ function ChainWorkbench({ config }: { readonly config: ChainConfig }) {
         </div>
         {registerState.kind === "success" ? (
           <p className="status-ok">
-            已注册：commitPlan {registerState.commitTx} · finalizePlan{" "}
+            已注册：commitPlan {registerState.commitTx ?? "未知（PlanAlreadyRegistered 恢复）"} · finalizePlan{" "}
             {registerState.finalizeTx ?? "（此前已确认）"} · planId {registerState.planId} · planExists=true
           </p>
         ) : null}
@@ -768,7 +966,8 @@ function ChainWorkbench({ config }: { readonly config: ChainConfig }) {
             <strong>commitPlan 已上链，finalizePlan 尚未完成</strong>
             <span>
               只需重试 finalizePlan，不会重新发送 commitPlan。planId {registerState.pending.planId} · publisher{" "}
-              {registerState.pending.publisher} · commitTx {registerState.pending.commitTx}
+              {registerState.pending.publisher} · commitTx{" "}
+              {registerState.pending.commitTx ?? "未知（PlanAlreadyRegistered 恢复，按 planId 查链上状态）"}
             </span>
             {registerState.failure === undefined ? null : (
               <span>
@@ -782,7 +981,7 @@ function ChainWorkbench({ config }: { readonly config: ChainConfig }) {
                 disabled={wallet === undefined}
                 onClick={() => void finalizeCommittedPlan(registerState.pending)}
               >
-                仅重试 finalizePlan
+                按记录恢复（查回执 / 仅重试 finalizePlan）
               </button>
               <button type="button" onClick={forgetPendingFinalize}>
                 忽略恢复记录
@@ -806,8 +1005,8 @@ function ChainWorkbench({ config }: { readonly config: ChainConfig }) {
             <strong>发现待恢复的 commitPlan 记录</strong>
             <span>
               planId {pendingFinalize.planId} · publisher {pendingFinalize.publisher} · commitTx{" "}
-              {pendingFinalize.commitTx}
-              （记录来自上一次 commitPlan 成功、finalizePlan 未确认的运行）。
+              {pendingFinalize.commitTx ?? "未知"}
+              （记录来自 commitPlan 结果未知或 finalizePlan 未确认的运行；恢复只查回执/只发 finalizePlan）。
             </span>
             <div className="submit-actions">
               <button
@@ -816,7 +1015,7 @@ function ChainWorkbench({ config }: { readonly config: ChainConfig }) {
                 disabled={wallet === undefined}
                 onClick={() => void resumeFinalize()}
               >
-                仅重试 finalizePlan
+                按记录恢复（查回执 / 仅重试 finalizePlan）
               </button>
               <button type="button" onClick={forgetPendingFinalize}>
                 忽略恢复记录
@@ -938,7 +1137,11 @@ function ChainWorkbench({ config }: { readonly config: ChainConfig }) {
           </button>
           <button
             type="button"
-            disabled={birthState.kind === "pending"}
+            disabled={
+              birthState.kind === "pending" ||
+              birthState.kind === "unknown" ||
+              birthUnknownForScope(currentBirthScope())
+            }
             onClick={resetBirthIdempotencyKey}
           >
             换新出生承诺（payloadHash + idempotencyKey）
@@ -955,6 +1158,18 @@ function ChainWorkbench({ config }: { readonly config: ChainConfig }) {
           <p className="status-ok">
             链上已有该 (submitter, idempotencyKey) 的订单：orderId {birthState.orderId}。
             本次没有创建新订单，已自动读取该订单事实。
+          </p>
+        ) : null}
+        {birthState.kind === "unknown" ? (
+          <p className="hint" role="status">
+            出生结果未知：idempotencyKey 已锁定，不能在此状态下换新承诺。先按 txHash 核实；重试同一 key 不会重复建单
+            （链上 DuplicateTriggerKey 会返回原订单）。
+          </p>
+        ) : null}
+        {birthState.kind !== "unknown" && birthUnknownForScope(currentBirthScope()) ? (
+          <p className="hint" role="status">
+            该计划在本会话里还有一次出生结果未知：idempotencyKey 已锁定，不能换新承诺。
+            先按上次 txHash 核实；重试同一 key 撞 DuplicateTriggerKey 会返回原订单。
           </p>
         ) : null}
         {birthState.kind === "unknown" ? (

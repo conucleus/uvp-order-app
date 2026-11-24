@@ -11,6 +11,9 @@ export const stateMachineReadAbi = parseAbi([
   "function planExists(bytes32 planId) view returns (bool)",
   "function orderExists(bytes32 planId, bytes32 orderId) view returns (bool)",
   "function orderRelayer(bytes32 planId, bytes32 orderId) view returns (address)",
+  "function planHash(bytes32 planId) view returns (bytes32)",
+  "function planRuntimeHash(bytes32 hooksHash, bytes32 capabilitiesRoot, bytes32 supplierBindingsRoot, bytes32 fileWritersHash) pure returns (bytes32)",
+  "function planIdFor(address publisher, bytes32 runtimePlanHash) pure returns (bytes32)",
   "function stagePatchModule() view returns (address)"
 ]);
 

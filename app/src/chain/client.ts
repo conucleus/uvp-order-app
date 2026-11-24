@@ -4,6 +4,7 @@
 // 保留 code/message，不伪造空/成功。
 
 import {
+  TransactionReceiptNotFoundError,
   createPublicClient,
   http,
   isAddress,
@@ -56,9 +57,37 @@ export interface OrderFacts {
   readonly relayer?: Address | undefined;
 }
 
+export interface PlanStatus {
+  readonly committed: boolean;
+  readonly finalized: boolean;
+}
+
+export interface CommitReceiptRead {
+  readonly status: "success" | "reverted" | "missing";
+  readonly planId?: Bytes32 | undefined;
+}
+
+export interface PlanRegistrationHashes {
+  readonly hooksHash: Bytes32;
+  readonly capabilitiesRoot: Bytes32;
+  readonly supplierBindingsRoot: Bytes32;
+  readonly fileWritersHash: Bytes32;
+}
+
+export interface PlanRegistrationIdentity {
+  readonly runtimePlanHash: Bytes32;
+  readonly planId: Bytes32;
+}
+
 export interface ChainReader {
   readOrder(planId: Bytes32, orderId: Bytes32): Promise<ChainResult<OrderFacts>>;
   readPlanExists(planId: Bytes32): Promise<ChainResult<boolean>>;
+  readPlanStatus(planId: Bytes32): Promise<ChainResult<PlanStatus>>;
+  readCommitReceipt(txHash: Bytes32): Promise<ChainResult<CommitReceiptRead>>;
+  derivePlanRegistration(
+    publisher: Address,
+    hashes: PlanRegistrationHashes
+  ): Promise<ChainResult<PlanRegistrationIdentity>>;
   readEvents(planId: Bytes32, orderId: Bytes32): Promise<ChainResult<readonly ChainEvent[]>>;
   latestTimestamp(): Promise<ChainResult<bigint>>;
 }
@@ -76,14 +105,41 @@ export interface WalletConnection {
 }
 
 const ZERO_ADDRESS: Address = "0x0000000000000000000000000000000000000000";
+const ZERO_BYTES32: Bytes32 = `0x${"0".repeat(64)}`;
 const RECEIPT_TIMEOUT_MS = 120_000;
 
 export function createChainReader(config: ChainConfig): ChainReader {
   const client = createPublicClient({ transport: http(config.rpcUrl) });
+  let rpcChainCheck: Promise<void> | undefined;
+
+  async function ensureRpcChain(): Promise<void> {
+    if (rpcChainCheck === undefined) {
+      rpcChainCheck = client.getChainId().then((actual) => {
+        if (actual !== config.chainId) {
+          throw new RpcChainMismatchError(config.chainId, actual);
+        }
+      });
+    }
+    try {
+      await rpcChainCheck;
+    } catch (error) {
+      rpcChainCheck = undefined;
+      throw error;
+    }
+  }
+
+  async function guarded<T>(prefix: string, read: () => Promise<T>): Promise<ChainResult<T>> {
+    try {
+      await ensureRpcChain();
+      return { ok: true, value: await read() };
+    } catch (error) {
+      return { ok: false, failure: mapReadError(error, prefix) };
+    }
+  }
 
   return {
-    async readOrder(planId, orderId) {
-      try {
+    readOrder(planId, orderId) {
+      return guarded("读取订单事实失败", async () => {
         const planExists = await client.readContract({
           address: config.stateMachine,
           abi: stateMachineReadAbi,
@@ -97,7 +153,7 @@ export function createChainReader(config: ChainConfig): ChainReader {
           args: [planId, orderId]
         });
         if (!orderExists) {
-          return { ok: true, value: { planExists, orderExists } };
+          return { planExists, orderExists };
         }
         const relayer = await client.readContract({
           address: config.stateMachine,
@@ -105,37 +161,92 @@ export function createChainReader(config: ChainConfig): ChainReader {
           functionName: "orderRelayer",
           args: [planId, orderId]
         });
-        return { ok: true, value: { planExists, orderExists, relayer } };
-      } catch (error) {
-        return { ok: false, failure: mapReadError(error, "读取订单事实失败") };
-      }
+        return { planExists, orderExists, relayer };
+      });
     },
 
-    async readPlanExists(planId) {
-      try {
-        const planExists = await client.readContract({
+    readPlanExists(planId) {
+      return guarded("读取计划存在性失败", () => client.readContract({
+        address: config.stateMachine,
+        abi: stateMachineReadAbi,
+        functionName: "planExists",
+        args: [planId]
+      }));
+    },
+
+    readPlanStatus(planId) {
+      return guarded("读取计划 committed/finalized 状态失败", async () => {
+        const planHash = await client.readContract({
+          address: config.stateMachine,
+          abi: stateMachineReadAbi,
+          functionName: "planHash",
+          args: [planId]
+        });
+        const finalized = await client.readContract({
           address: config.stateMachine,
           abi: stateMachineReadAbi,
           functionName: "planExists",
           args: [planId]
         });
-        return { ok: true, value: planExists };
-      } catch (error) {
-        return { ok: false, failure: mapReadError(error, "读取计划存在性失败") };
-      }
+        return { committed: planHash !== ZERO_BYTES32, finalized };
+      });
     },
 
-    async latestTimestamp() {
-      try {
+    readCommitReceipt(txHash) {
+      return guarded("读取 commitPlan 交易回执失败", async () => {
+        let receipt;
+        try {
+          receipt = await client.getTransactionReceipt({ hash: txHash as Hex });
+        } catch (error) {
+          if (error instanceof TransactionReceiptNotFoundError) {
+            return { status: "missing" };
+          }
+          throw error;
+        }
+        if (receipt === null) {
+          return { status: "missing" };
+        }
+        if (receipt.status !== "success") {
+          return { status: "reverted" };
+        }
+        const logs = rawLogsOf(receipt.logs);
+        let planId: Bytes32 | undefined;
+        try {
+          planId = planCommittedIdFromLogs(logs);
+        } catch {
+          planId = undefined;
+        }
+        return { status: "success", ...(planId === undefined ? {} : { planId }) };
+      });
+    },
+
+    derivePlanRegistration(publisher, hashes) {
+      return guarded("从链上派生注册 planId 失败", async () => {
+        const runtimePlanHash = await client.readContract({
+          address: config.stateMachine,
+          abi: stateMachineReadAbi,
+          functionName: "planRuntimeHash",
+          args: [hashes.hooksHash, hashes.capabilitiesRoot, hashes.supplierBindingsRoot, hashes.fileWritersHash]
+        });
+        const planId = await client.readContract({
+          address: config.stateMachine,
+          abi: stateMachineReadAbi,
+          functionName: "planIdFor",
+          args: [publisher, runtimePlanHash]
+        });
+        return { runtimePlanHash, planId };
+      });
+    },
+
+    latestTimestamp() {
+      return guarded("读取链上时间失败", async () => {
         const block = await client.getBlock();
-        return { ok: true, value: block.timestamp };
-      } catch (error) {
-        return { ok: false, failure: mapReadError(error, "读取链上时间失败") };
-      }
+        return block.timestamp;
+      });
     },
 
-    async readEvents(planId, orderId) {
-      try {
+    readEvents(planId, orderId) {
+      return guarded("读取链上事件失败", async () => {
         const latest = await client.getBlockNumber();
         const stagePatchModule = await client.readContract({
           address: config.stateMachine,
@@ -180,20 +291,17 @@ export function createChainReader(config: ChainConfig): ChainReader {
 
         const decoded = decodeChainLogs(logs);
         if (!decoded.ok) {
-          return { ok: false, failure: { code: "decode_failed", message: decoded.message } };
+          throw new ChainReadFailure("decode_failed", decoded.message);
         }
         const decodedEvents = filterChainEvents(decoded.events, planId, orderId);
         const hookEvents: HookReadyFact[] = [];
         for (const log of hookLogs) {
           const decodedHook = decodeHookReadyLog(log.raw);
           if (decodedHook === undefined) {
-            return {
-              ok: false,
-              failure: {
-                code: "decode_failed",
-                message: `HookReady 日志 topic 不匹配（block ${String(log.raw.blockNumber)}）`
-              }
-            };
+            throw new ChainReadFailure(
+              "decode_failed",
+              `HookReady 日志 topic 不匹配（block ${String(log.raw.blockNumber)}）`
+            );
           }
           hookEvents.push({
             kind: "hook_ready",
@@ -228,12 +336,32 @@ export function createChainReader(config: ChainConfig): ChainReader {
             }
           })
         );
-        return { ok: true, value: withTimestamps(merged, timestamps) };
-      } catch (error) {
-        return { ok: false, failure: mapReadError(error, "读取链上事件失败") };
-      }
+        return withTimestamps(merged, timestamps);
+      });
     }
   };
+}
+
+class RpcChainMismatchError extends Error {
+  override readonly name = "RpcChainMismatchError";
+  readonly expected: number;
+  readonly actual: number;
+
+  constructor(expected: number, actual: number) {
+    super(`RPC chain id ${actual} 与配置 ${expected} 不一致：读取的不能当作本链事实；请检查 VITE_RPC_URL`);
+    this.expected = expected;
+    this.actual = actual;
+  }
+}
+
+class ChainReadFailure extends Error {
+  override readonly name = "ChainReadFailure";
+  readonly code: string;
+
+  constructor(code: string, message: string) {
+    super(message);
+    this.code = code;
+  }
 }
 
 
@@ -342,12 +470,47 @@ interface SentTransaction {
   readonly logs: readonly StateMachineRawLog[];
 }
 
+async function readWalletChainId(provider: Eip1193Provider): Promise<ChainResult<number>> {
+  try {
+    const raw = await provider.request({ method: "eth_chainId" });
+    if (typeof raw !== "string" || !/^0x[0-9a-f]+$/iu.test(raw)) {
+      return {
+        ok: false,
+        failure: { code: "chain_unknown", message: "钱包没有返回合法链 ID，不能确认发送目标链；未发送" }
+      };
+    }
+    return { ok: true, value: Number(BigInt(raw)) };
+  } catch (error) {
+    const mapped = mapWalletError(error);
+    return {
+      ok: false,
+      failure: { code: mapped.code, message: `读取钱包链 ID 失败：${mapped.message}；未发送` }
+    };
+  }
+}
+
 async function sendWalletTransaction(
   config: ChainConfig,
   connection: WalletConnection,
   call: WalletCall,
   label: string
 ): Promise<ChainResult<SentTransaction>> {
+  const walletChain = await readWalletChainId(connection.provider);
+  if (!walletChain.ok) {
+    return walletChain;
+  }
+  if (walletChain.value !== config.chainId) {
+    return {
+      ok: false,
+      failure: {
+        code: "wrong_chain",
+        message:
+          `钱包链 ID ${walletChain.value} 与配置 ${config.chainId} 不一致：` +
+          `${label} 未发送（连接后钱包可能已切链；先切换网络再重试）`
+      }
+    };
+  }
+
   if (call.chainId !== undefined && call.chainId !== config.chainId) {
     return {
       ok: false,
@@ -357,15 +520,35 @@ async function sendWalletTransaction(
       }
     };
   }
+
   const publicClient = createPublicClient({ transport: http(config.rpcUrl) });
 
   try {
+    const rpcChainId = await publicClient.getChainId();
+    if (rpcChainId !== config.chainId) {
+      throw new RpcChainMismatchError(config.chainId, rpcChainId);
+    }
+    const code = await publicClient.getCode({ address: call.address });
+    if (code === undefined || code === "0x") {
+      return {
+        ok: false,
+        failure: {
+          code: "contract_missing",
+          message:
+            `RPC 链 ${config.chainId} 的 ${call.address} 上没有合约代码：` +
+            `${label} 未发送（无代码地址上的交易不会产生业务事实）`
+        }
+      };
+    }
     await publicClient.call({
       account: connection.address,
       to: call.address,
       data: call.data
     });
   } catch (error) {
+    if (error instanceof RpcChainMismatchError) {
+      return { ok: false, failure: mapReadError(error, `${label} 预检失败`) };
+    }
     const mapped = mapWalletError(error);
     return {
       ok: false,
@@ -483,12 +666,71 @@ export async function submitSignal(
   connection: WalletConnection,
   call: SubmitStateMachineSignalCall
 ): Promise<ChainResult<{ readonly txHash: Hex }>> {
-  return sendWalletCall(
+  const sent = await sendWalletTransaction(
     config,
     connection,
     { address: call.address, data: call.data, chainId: call.chainId },
     "submitSignal"
   );
+  if (!sent.ok) {
+    return sent;
+  }
+  const submission = call.args[0];
+  const matched = signalSubmittedInLogs(sent.value.logs, {
+    planId: submission.planId,
+    orderId: submission.orderId,
+    sourceId: submission.sourceId,
+    signalId: submission.signalId
+  });
+  if (!matched) {
+    return {
+      ok: false,
+      failure: {
+        code: "signal_event_missing",
+        message:
+          "submitSignal 回执成功，但回执日志里没有与本次 planId/orderId/sourceId/signalId " +
+          "匹配的 SignalSubmitted 事件：不能确认信号已写入链上事实。请按 txHash 核实，不要直接重复发送。",
+        txHash: sent.value.txHash
+      }
+    };
+  }
+  return { ok: true, value: { txHash: sent.value.txHash } };
+}
+
+export function signalSubmittedInLogs(
+  logs: readonly StateMachineRawLog[],
+  expected: {
+    readonly planId: string;
+    readonly orderId: string;
+    readonly sourceId: string;
+    readonly signalId: string;
+  }
+): boolean {
+  const same = (left: unknown, right: string): boolean =>
+    typeof left === "string" && left.toLowerCase() === right.toLowerCase();
+  let events: ReturnType<typeof decodeStateMachineEvents>;
+  try {
+    events = decodeStateMachineEvents(logs);
+  } catch {
+    return false;
+  }
+  return events.some((event) => {
+    if (event.eventName !== "SignalSubmitted") {
+      return false;
+    }
+    const args = event.args as {
+      readonly planId?: unknown;
+      readonly orderId?: unknown;
+      readonly sourceId?: unknown;
+      readonly signalId?: unknown;
+    };
+    return (
+      same(args.planId, expected.planId) &&
+      (expected.orderId.toLowerCase() === ZERO_BYTES32 || same(args.orderId, expected.orderId)) &&
+      same(args.sourceId, expected.sourceId) &&
+      same(args.signalId, expected.signalId)
+    );
+  });
 }
 
 export async function submitOrderTrigger(
@@ -562,6 +804,15 @@ export function logChunkRanges(
 }
 
 export function mapReadError(error: unknown, prefix: string): ChainFailure {
+  if (error instanceof RpcChainMismatchError) {
+    return {
+      code: "wrong_chain",
+      message: `${prefix}：${error.message}；读取被拒绝，不会把其它链的返回当作本链事实`
+    };
+  }
+  if (error instanceof ChainReadFailure) {
+    return { code: error.code, message: `${prefix}：${error.message}` };
+  }
   const mapped = mapWalletError(error);
   return {
     code: mapped.code === "unknown" ? "read_failed" : mapped.code,
