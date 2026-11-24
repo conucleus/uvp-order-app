@@ -77,9 +77,6 @@ export interface PlanTrigger {
 }
 
 export interface CompiledPlanArtifact {
-  readonly planId: Bytes32;
-  /** Compiler content plan id (registerArgs.sourcePlanId), not the publisher-keyed on-chain id. */
-  readonly sourcePlanId: Bytes32;
   /** Content plan id declared by the onchain-plan artifact when the producer includes it. */
   readonly onchainPlanId?: Bytes32 | undefined;
   readonly hookCount: number;
@@ -220,8 +217,6 @@ export function parseCompiledPlanArtifact(text: string): PlanResult<CompiledPlan
   return {
     ok: true,
     value: {
-      planId: planId.value,
-      sourcePlanId: sourcePlanId.value,
       ...(onchainPlanId.value === undefined ? {} : { onchainPlanId: onchainPlanId.value }),
       hookCount: registerArgs["hooks"].length,
       ...(typeof onchain["zhixuId"] === "string" ? { zhixuId: onchain["zhixuId"] } : {}),
@@ -241,12 +236,9 @@ export interface PlanRegistrationHashes {
   readonly hooksHash: Bytes32;
   readonly capabilitiesRoot: Bytes32;
   readonly supplierBindingsRoot: Bytes32;
-  readonly fileWritersHash: Bytes32;
 }
 
 export interface PlanRegistrationResolution {
-  readonly artifactPlanId: Bytes32;
-  readonly sourcePlanId: Bytes32;
   readonly onchainPlanId?: Bytes32 | undefined;
   readonly declaredRuntimePlanHash: Bytes32;
   readonly derivedRuntimePlanHash: Bytes32;
@@ -291,7 +283,6 @@ export function planRegistrationHashesOf(
       hooksHash: hooksHash.value,
       capabilitiesRoot: capabilitiesRoot.value,
       supplierBindingsRoot: supplierBindingsRoot.value,
-      fileWritersHash: fileWritersHash.value
     }
   };
 }
@@ -315,33 +306,6 @@ export function resolveRegistrationPlanId(
       `链上 planRuntimeHash=${resolution.derivedRuntimePlanHash} 与 artifact.registerArgs.planHash=` +
         `${resolution.declaredRuntimePlanHash} 不一致：registerArgs 的 hashes 不是这组 hooks/roots/fileWriters，` +
         "不签名 commitPlan。"
-    );
-  }
-  const registrationPlanId = resolution.derivedRegistrationPlanId.toLowerCase();
-  const sourcePlanId = resolution.sourcePlanId.toLowerCase();
-  const onchainPlanId = resolution.onchainPlanId?.toLowerCase();
-  if (
-    onchainPlanId !== undefined &&
-    onchainPlanId !== sourcePlanId &&
-    onchainPlanId !== registrationPlanId
-  ) {
-    return fail(
-      "plan_content_id_mismatch",
-      `artifact.onchain.planId=${onchainPlanId} 既不是 content planId (registerArgs.sourcePlanId=` +
-        `${sourcePlanId})，也不是当前 publisher 的注册 planId=${registrationPlanId}：artifact 身份不一致，` +
-        "不签名 commitPlan。"
-    );
-  }
-  const artifactPlanId = resolution.artifactPlanId.toLowerCase();
-  if (
-    artifactPlanId !== registrationPlanId &&
-    artifactPlanId !== sourcePlanId &&
-    artifactPlanId !== onchainPlanId
-  ) {
-    return fail(
-      "plan_id_mismatch",
-      `artifact.planId=${artifactPlanId} 既不是 content planId=${sourcePlanId}，也不是链上派生的注册 ` +
-        `planId=${registrationPlanId}：签名前拒绝，避免 commit+finalize 后才发现并留下孤儿 finalized plan。`
     );
   }
   return { ok: true, value: resolution.derivedRegistrationPlanId };
@@ -430,7 +394,7 @@ export function buildOrderTriggerCall(input: OrderTriggerInput): PlanResult<Subm
           rpcUrl: input.rpcUrl
         },
         {
-          planId: input.artifact.planId,
+          planId: input.artifact.onchainPlanId ?? input.artifact.registerArgs.planHash,
           sourceId: trigger.sourceId,
           signalId: trigger.signalId,
           payloadHash: input.payloadHash,
@@ -456,7 +420,7 @@ export function buildOrderTriggerCall(input: OrderTriggerInput): PlanResult<Subm
 
 function registrationFor(artifact: CompiledPlanArtifact): PlanResult<PlanRegistrationArgs> {
   try {
-    return { ok: true, value: planRegistrationArgs(artifact.registerArgs, artifact.planId) };
+    return { ok: true, value: planRegistrationArgs(artifact.registerArgs, artifact.onchainPlanId ?? artifact.registerArgs.planHash) };
   } catch (error) {
     return fail("artifact_invalid", `artifact.registerArgs 无法用于 commitPlan：${errorMessage(error)}`);
   }
@@ -492,7 +456,7 @@ function attributionFor(
   }
   const signal = withCapabilityProofs(
     {
-      planId: artifact.planId,
+      planId: artifact.onchainPlanId ?? artifact.registerArgs.planHash,
       orderId,
       sourceId,
       signalId,

@@ -320,7 +320,6 @@ test("commitPlan typed data：6 字段来自钱包与 registerArgs", () => {
   assert.equal(typedData.value.message.hooksHash, H(11));
   assert.equal(typedData.value.message.capabilitiesRoot, H(12));
   assert.equal(typedData.value.message.supplierBindingsRoot, H(15));
-  assert.equal(typedData.value.message.fileWritersHash, H(17));
   assert.equal(typedData.value.message.deadline, "1900000000");
 });
 
@@ -347,7 +346,7 @@ test("出生 trigger：orderId=0、submitter=钱包、空签名，capability 计
   assert.equal(submission.orderId, H(0));
   assert.equal(signature, "0x");
   assert.equal(submission.submitter.toLowerCase(), WALLET);
-  assert.equal(submission.planId, artifact.planId);
+  assert.equal(submission.planId, H(9));
   assert.equal(submission.sourceId, trigger.sourceId);
   assert.equal(submission.signalId, trigger.signalId);
   assert.equal(submission.payloadHash, H(40));

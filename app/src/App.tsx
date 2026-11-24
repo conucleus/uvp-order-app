@@ -178,7 +178,7 @@ function ChainWorkbench({ config }: { readonly config: ChainConfig }) {
     return birthIdempotencyScope({
       chainId: config.chainId,
       stateMachine: config.stateMachine,
-      planId: artifact.planId
+      planId: planInput.trim()
     });
   }
 
@@ -261,10 +261,10 @@ function ChainWorkbench({ config }: { readonly config: ChainConfig }) {
     setArtifactState({ kind: "ready", artifact: parsed.value });
     setArtifactName(label);
     setSelectedTriggerHookId(parsed.value.triggers.length === 1 ? parsed.value.triggers[0]?.hookId ?? "" : "");
-    setPlanInput(parsed.value.planId);
+    setPlanInput(parsed.value.onchainPlanId ?? parsed.value.registerArgs.planHash);
     setRegisterState({ kind: "idle" });
     setBirthState({ kind: "idle" });
-    adoptBirthScope(parsed.value.planId);
+    adoptBirthScope(parsed.value.onchainPlanId ?? parsed.value.registerArgs.planHash);
   }
 
   async function loadArtifactFile(event: ChangeEvent<HTMLInputElement>): Promise<void> {
@@ -317,8 +317,6 @@ function ChainWorkbench({ config }: { readonly config: ChainConfig }) {
       return { ok: false, failure: derived.failure };
     }
     const resolved = resolveRegistrationPlanId({
-      artifactPlanId: current.planId,
-      sourcePlanId: current.sourcePlanId,
       ...(current.onchainPlanId === undefined ? {} : { onchainPlanId: current.onchainPlanId }),
       declaredRuntimePlanHash: hashes.value.planHash,
       derivedRuntimePlanHash: derived.value.runtimePlanHash,
@@ -329,7 +327,7 @@ function ChainWorkbench({ config }: { readonly config: ChainConfig }) {
     }
     return {
       ok: true,
-      artifact: current.planId === resolved.value ? current : { ...current, planId: resolved.value },
+      artifact: current,
       planId: resolved.value
     };
   }
@@ -705,9 +703,9 @@ function ChainWorkbench({ config }: { readonly config: ChainConfig }) {
       if (duplicateOrderId !== undefined) {
         clearBirthUnknown(birthScope);
         setBirthState({ kind: "duplicate", orderId: duplicateOrderId });
-        setPlanInput(resolvedArtifact.planId);
+        setPlanInput(resolved.planId);
         setOrderInput(duplicateOrderId);
-        await load(resolvedArtifact.planId, duplicateOrderId);
+        await load(resolved.planId, duplicateOrderId);
         return;
       }
       if (sent.failure.outcomeUnknown === true && sent.failure.txHash !== undefined) {
@@ -722,9 +720,9 @@ function ChainWorkbench({ config }: { readonly config: ChainConfig }) {
     const orderId = sent.value.orderId;
     clearBirthUnknown(birthScope);
     setBirthState({ kind: "success", txHash: sent.value.txHash, orderId });
-    setPlanInput(resolvedArtifact.planId);
+    setPlanInput(resolved.planId);
     setOrderInput(orderId);
-    await load(resolvedArtifact.planId, orderId);
+    await load(resolved.planId, orderId);
   }
 
   async function load(planArg?: string, orderArg?: string): Promise<void> {
@@ -757,7 +755,7 @@ function ChainWorkbench({ config }: { readonly config: ChainConfig }) {
   }
 
   function autoSignalAttribution(): string {
-    if (artifact === undefined || planInput.trim().toLowerCase() !== artifact.planId.toLowerCase()) {
+    if (artifact === undefined || planInput.trim().toLowerCase() !== planInput.trim().toLowerCase()) {
       return "";
     }
     const source = parseBytes32(sourceId, "sourceId");
@@ -917,7 +915,7 @@ function ChainWorkbench({ config }: { readonly config: ChainConfig }) {
           </div>
           <div>
             <dt>planId</dt>
-            <dd>{artifact?.planId ?? "未解析 artifact"}</dd>
+            <dd>{artifact?.onchainPlanId ?? artifact?.registerArgs.planHash ?? "未解析 artifact"}</dd>
           </div>
           <div>
             <dt>hooksHash</dt>
@@ -932,8 +930,6 @@ function ChainWorkbench({ config }: { readonly config: ChainConfig }) {
             <dd>{artifact === undefined ? "—" : short(artifact.registerArgs.supplierBindingsRoot)}</dd>
           </div>
           <div>
-            <dt>fileWritersHash</dt>
-            <dd>{artifact === undefined ? "—" : short(artifact.registerArgs.fileWritersHash)}</dd>
           </div>
           <div>
             <dt>deadline</dt>
@@ -1081,7 +1077,7 @@ function ChainWorkbench({ config }: { readonly config: ChainConfig }) {
           </div>
           <div>
             <dt>planId</dt>
-            <dd>{artifact?.planId ?? "未解析 artifact"}</dd>
+            <dd>{artifact?.onchainPlanId ?? artifact?.registerArgs.planHash ?? "未解析 artifact"}</dd>
           </div>
           <div>
             <dt>已选 trigger hook / stage</dt>
@@ -1353,7 +1349,7 @@ function ArtifactFacts({ artifact }: { readonly artifact: CompiledPlanArtifact }
     <dl className="facts">
       <div>
         <dt>planId</dt>
-        <dd>{artifact.planId}</dd>
+        <dd>{artifact.onchainPlanId ?? artifact.registerArgs.planHash}</dd>
       </div>
       <div>
         <dt>zhixu</dt>

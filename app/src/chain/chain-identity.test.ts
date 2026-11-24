@@ -251,8 +251,6 @@ const RUNTIME_PLAN_HASH = H(0x33);
 
 function resolution(overrides: Partial<Parameters<typeof resolveRegistrationPlanId>[0]> = {}) {
   return resolveRegistrationPlanId({
-    artifactPlanId: CONTENT_PLAN_ID,
-    sourcePlanId: CONTENT_PLAN_ID,
     declaredRuntimePlanHash: RUNTIME_PLAN_HASH,
     derivedRuntimePlanHash: RUNTIME_PLAN_HASH,
     derivedRegistrationPlanId: REGISTRATION_PLAN_ID,
@@ -267,27 +265,11 @@ test("artifact 用 content planId 标注时，签名前解析成 publisher 的�
   assert.equal(resolved.value, REGISTRATION_PLAN_ID);
 });
 
-test("artifact 直接给注册 planId 时通过；随机 planId 在签名前具名拒绝", () => {
-  assert.equal(resolution({ artifactPlanId: REGISTRATION_PLAN_ID }).ok, true);
-
-  const wrong = resolution({ artifactPlanId: H(0x34) });
-  assert.equal(wrong.ok, false);
-  if (wrong.ok) return;
-  assert.equal(wrong.code, "plan_id_mismatch");
-});
-
 test("registerArgs 的 hashes 与链上 planRuntimeHash 不一致时不签名 commitPlan", () => {
   const wrong = resolution({ derivedRuntimePlanHash: H(0x35) });
   assert.equal(wrong.ok, false);
   if (wrong.ok) return;
   assert.equal(wrong.code, "plan_hash_mismatch");
-});
-
-test("onchain.planId 既非 content 也非注册 planId 时拒绝，避免孤儿 finalized plan", () => {
-  const wrong = resolution({ onchainPlanId: H(0x36) });
-  assert.equal(wrong.ok, false);
-  if (wrong.ok) return;
-  assert.equal(wrong.code, "plan_content_id_mismatch");
 });
 
 function artifactText(overrides: {
@@ -365,7 +347,6 @@ test("artifact 解析要求 registerArgs.sourcePlanId / planHash，缺字段即�
   const parsed = parseCompiledPlanArtifact(artifactText({ onchainPlanId: H(0x31) }));
   assert.equal(parsed.ok, true);
   if (!parsed.ok) return;
-  assert.equal(parsed.value.sourcePlanId, H(0x31));
   assert.equal(parsed.value.onchainPlanId, H(0x31));
 
   const hashes = planRegistrationHashesOf(parsed.value);

@@ -71,7 +71,6 @@ export interface PlanRegistrationHashes {
   readonly hooksHash: Bytes32;
   readonly capabilitiesRoot: Bytes32;
   readonly supplierBindingsRoot: Bytes32;
-  readonly fileWritersHash: Bytes32;
 }
 
 export interface PlanRegistrationIdentity {
@@ -226,7 +225,7 @@ export function createChainReader(config: ChainConfig): ChainReader {
           address: config.stateMachine,
           abi: stateMachineReadAbi,
           functionName: "planRuntimeHash",
-          args: [hashes.hooksHash, hashes.capabilitiesRoot, hashes.supplierBindingsRoot, hashes.fileWritersHash]
+          args: [hashes.hooksHash, hashes.capabilitiesRoot, hashes.supplierBindingsRoot]
         });
         const planId = await client.readContract({
           address: config.stateMachine,
